@@ -1,0 +1,17 @@
+# Taskmaster
+.taskmaster/state.json
+.taskmaster/tasks/*.json
+
+# macOS
+.DS_Store
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.bak

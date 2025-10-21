@@ -1,174 +1,119 @@
-# Taskmaster-Integrated PRD System
+# PRD-Taskmaster: AI-Generated Product Requirements Documents
 
-**Version:** 1.0
-**Created:** Following LEARN → PRACTICE → MASTER methodology
-**Score:** 93.25/100 (Impact-weighted evaluation)
+> **Comprehensive PRD generation optimized for AI-assisted development workflows**
 
----
+[![Claude Code Skill](https://img.shields.io/badge/Claude_Code-Skill-8A2BE2)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)]()
+[![Status: Beta](https://img.shields.io/badge/Status-Beta-orange)]()
 
-## Overview
+## What is This?
 
-Complete PRD generation system optimized for taskmaster AI task breakdown. Creates comprehensive, engineer-focused product requirements documents with automated validation and full taskmaster integration.
+A Claude Code skill that generates **detailed, engineer-focused Product Requirements Documents (PRDs)** designed to work seamlessly with AI task breakdown tools like Taskmaster.
 
-**Key Features:**
-- ✅ Comprehensive PRD generation (12+ detailed questions)
-- ✅ Automatic `.taskmaster/` directory setup
-- ✅ Automated quality validation (9 required checks + 4 taskmaster checks)
-- ✅ Task breakdown hints with complexity estimates
-- ✅ Dependency mapping for task sequencing
-- ✅ Engineer-focused technical depth
+Think of it as your AI product manager that asks the right questions, writes comprehensive specs, and sets you up for successful implementation.
 
----
+## Why You Might Want This
 
-## Skill Structure
+### The Problem
+
+You have an idea for a feature or product, but:
+- Writing comprehensive PRDs takes hours
+- You're not sure what details to include
+- You want to use AI task breakdown tools (like Taskmaster) but they need detailed requirements
+- Vague specs lead to vague tasks, which lead to poor implementations
+
+### The Solution
+
+This skill:
+1. **Asks 12+ detailed questions** to extract everything from your brain
+2. **Generates a comprehensive PRD** with all the sections engineers need
+3. **Sets up taskmaster integration** with proper directory structure
+4. **Validates quality** with automated checks (13 different validations)
+5. **Suggests task breakdowns** with complexity estimates and dependencies
+
+**Result:** You go from "I have an idea" to "I have a complete, validated PRD ready for AI task generation" in minutes.
+
+## Quick Start
+
+### Installation
+
+1. **Install as a Claude Code skill:**
+   ```bash
+   # Clone to your Claude Code skills directory
+   cd ~/.claude/skills
+   git clone https://github.com/anombyte93/prd-taskmaster.git
+   ```
+
+2. **Verify installation:**
+   ```bash
+   # Open Claude Code and type:
+   # "I want a PRD for adding dark mode"
+   ```
+
+### Basic Usage
+
+Just tell Claude you want a PRD:
 
 ```
-prd-taskmaster/
-├── SKILL.md                    # Main skill file (480 lines)
-├── templates/
-│   ├── taskmaster-prd-comprehensive.md    # Full PRD template with all sections
-│   └── taskmaster-prd-minimal.md          # Quick PRD for simple features
-├── scripts/
-│   └── setup-taskmaster.sh     # Bash script to create .taskmaster/ structure
-├── reference/
-│   ├── taskmaster-integration-guide.md    # How to optimize for taskmaster
-│   └── validation-checklist.md            # Quality validation criteria
-└── README.md                   # This file
+"I want a PRD for [your feature/product]"
 ```
 
----
+**Examples:**
+- "I want a PRD for adding two-factor authentication"
+- "Create product requirements for a user dashboard"
+- "Write a PRD for integrating with Stripe payments"
 
-## Why This Skill Was Built
+The skill will:
+1. Ask you questions (be as detailed as you can!)
+2. Analyze your codebase (if applicable)
+3. Generate a comprehensive PRD
+4. Set up taskmaster integration
+5. Validate everything
+6. Show you what to do next
 
-### Problem Solved
+## What You Get
 
-**User Need:**
-> "I can't create PRDs myself. I want the best possible PRD for optimal outcomes. Planning is 95% of the work with vibe coding."
+### 📄 Comprehensive PRD
 
-**Taskmaster Requirement:**
-- Taskmaster AI needs comprehensive PRDs to generate good tasks
-- Vague PRD → Vague tasks → Poor implementation
-- Detailed PRD → Specific tasks → Successful outcomes
+A complete product requirements document with:
 
-### Design Decisions
+- **Executive Summary** - Quick overview
+- **Problem Statement** - User pain points & business impact
+- **Goals & Metrics** - SMART success criteria
+- **User Stories** - With acceptance criteria
+- **Functional Requirements** - Detailed, testable specs
+- **Technical Considerations** - Architecture, data models, APIs
+- **Task Breakdown Hints** - For AI task generation
+- **Dependencies** - What depends on what
+- **Out of Scope** - What you're NOT building
 
-**Following Systematic Methodology:**
+### 🗂️ Taskmaster Integration
 
-1. **LEARN Phase (Research)**
-   - Researched taskmaster requirements
-   - Studied 2025 PRD best practices
-   - Analyzed Claude Skills patterns
-   - **Sources:** 10+ authoritative sources
+Automatically sets up:
 
-2. **PRACTICE Phase (Design & Evaluation)**
-   - Designed 3 variations (Minimal, Adaptive, Full Integration)
-   - Created 15 test scenarios (positive/negative/edge cases)
-   - Evaluated with evidence-based scoring
-   - **Winner:** Variation C (Full Integration) - 93.25/100
+```
+.taskmaster/
+├── docs/
+│   ├── prd.md              # Your generated PRD
+│   └── architecture.md     # Placeholder for architecture docs
+├── tasks/
+│   └── .gitkeep
+├── notes/
+│   └── .gitkeep
+└── .gitignore              # Updated to exclude taskmaster artifacts
+```
 
-3. **MASTER Phase (Quality Gates)**
-   - Pre-deployment validation (all checks passed)
-   - Impact-weighted evaluation (Quality 64%, Activation 18%, Clarity 13%, Efficiency 5%)
-   - Ready for production
+### ✅ Quality Validation
 
----
+13 automated checks ensure:
+- All required sections are present
+- Requirements are testable (not vague)
+- Success metrics are SMART
+- Technical considerations address architecture
+- Task breakdown hints are included
+- Dependencies are mapped
 
-## Evaluation Scores
-
-### Impact-Weighted Scoring
-
-Based on failure mode analysis:
-
-| Dimension | Weight | Score | Weighted | Rationale |
-|-----------|--------|-------|----------|-----------|
-| **Quality** | 64% | 100% | 64.0 | Vague PRD → Project fails (CRITICAL) |
-| **Activation** | 18% | 100% | 18.0 | Doesn't activate → User rephrases (MEDIUM) |
-| **Clarity** | 13% | 85% | 11.05 | Confusing workflow → User annoyed (LOW) |
-| **Efficiency** | 5% | 85% | 4.25 | Uses more context → Slightly slower (MINIMAL) |
-| **TOTAL** | 100% | - | **97.3** | **EXCELLENT** |
-
-### Why These Weights?
-
-**Quality (64%)** - Highest priority because:
-- Vague PRD causes project failure (impact: 95/100)
-- Missing details blocks engineers (impact: 90/100)
-- Insufficient depth prevents taskmaster from generating good tasks (impact: 80/100)
-
-**Activation (18%)** - Important but recoverable:
-- False negatives: User rephrases (impact: 30/100)
-- False positives: User cancels (impact: 20/100)
-
-**Clarity (13%)** - Nice to have:
-- Too many questions: User annoyed but continues (impact: 15/100)
-- Unclear workflow: User confused but completes (impact: 20/100)
-
-**Efficiency (5%)** - Minimal impact:
-- Uses more context: Slightly slower but works (impact: 10/100)
-- Larger files: Takes longer to load (impact: 5/100)
-
-**Conclusion:** This weighting reflects actual consequences, not arbitrary defaults.
-
----
-
-## How to Use This Skill
-
-### Activation
-
-The skill activates when you say:
-- "I want a PRD"
-- "Create a PRD for [feature]"
-- "Write product requirements for [project]"
-- "Generate requirements for taskmaster"
-
-### Workflow
-
-1. **Discovery** (12+ questions)
-   - What problem are you solving?
-   - Who's the target user?
-   - What are success metrics?
-   - Technical constraints?
-   - Taskmaster experience level?
-
-2. **Environment Check**
-   - Checks for existing `.taskmaster/` directory
-   - Asks before overwriting existing `prd.md`
-   - Notes if taskmaster CLI installed
-
-3. **Codebase Analysis** (if applicable)
-   - Scans existing architecture
-   - References specific files
-   - Ensures integration consistency
-
-4. **PRD Generation**
-   - Uses comprehensive template
-   - Includes all essential sections
-   - Adds task breakdown hints
-   - Provides complexity estimates
-
-5. **Directory Setup**
-   - Creates `.taskmaster/docs/prd.md`
-   - Sets up folder structure
-   - Updates `.gitignore`
-
-6. **Validation**
-   - 9 required element checks
-   - 4 taskmaster optimization checks
-   - Quality warnings for improvements
-   - Scores PRD quality
-
-7. **Task Hints**
-   - Suggests task breakdown
-   - Estimates complexity
-   - Maps dependencies
-   - Identifies critical path
-
-8. **Presentation**
-   - Shows summary
-   - Highlights key requirements
-   - Notes open questions
-   - Suggests next steps
-
-### Example Output
+### 📊 Example Output
 
 ```
 📄 PRD Created: .taskmaster/docs/prd.md
@@ -205,200 +150,256 @@ The skill activates when you say:
   4. Generate tasks: taskmaster generate
 ```
 
----
+## Who Is This For?
 
-## Validation Quality
+### Perfect For You If:
 
-### Automated Checks
+- ✅ You use AI-assisted development workflows (Claude, Cursor, etc.)
+- ✅ You want to use Taskmaster or similar task breakdown tools
+- ✅ You're building features/products and need comprehensive specs
+- ✅ You prefer detailed planning before coding
+- ✅ You're tired of writing PRDs manually
 
-**Required Elements (9 checks):**
-1. Executive summary exists
-2. Problem statement includes user impact
-3. Problem statement includes business impact
-4. Goals have SMART metrics
-5. User stories have acceptance criteria
-6. Functional requirements are testable
-7. Non-functional requirements have targets
-8. Technical considerations address architecture
-9. Out of scope explicitly defined
+### Maybe Not For You If:
 
-**Taskmaster Optimization (4 checks):**
-1. Requirements have task breakdown hints
-2. Complexity estimates provided
-3. Dependencies identified
-4. Acceptance criteria are concrete
+- ❌ You prefer writing PRDs entirely yourself
+- ❌ You don't use AI development tools
+- ❌ You prefer minimal documentation
+- ❌ You work in a strict corporate environment with specific PRD templates
 
-**Quality Warnings:**
-- Vague language detection ("fast", "good", "secure" without specifics)
-- Missing detail warnings (no code examples, no error responses)
-- Insufficient detail warnings (no indexes, no test strategy)
+## Features
 
-### Validation Output
+### 🤖 Intelligent Discovery
+
+Asks smart questions:
+- What problem are you solving?
+- Who's the user?
+- What's the tech stack?
+- What are success metrics?
+- Timeline expectations?
+
+### 🔍 Codebase-Aware
+
+If you're working in an existing codebase:
+- Scans related code
+- References specific files
+- Ensures consistency with existing patterns
+- Identifies integration points
+
+### 📐 Multiple Templates
+
+Choose based on project size:
+- **Comprehensive** (default) - Full 12-section PRD
+- **Minimal** - Quick template for simple features
+
+### 🎯 Taskmaster-Optimized
+
+Everything taskmaster needs:
+- Task breakdown hints
+- Complexity estimates
+- Dependency mapping
+- Acceptance criteria
+- Implementation notes
+
+### ✨ Smart Validation
+
+Catches common issues:
+- Vague language ("fast", "secure" without specifics)
+- Missing acceptance criteria
+- Non-testable requirements
+- Incomplete technical specs
+
+## How It Works
+
+### The 8-Step Workflow
+
+1. **Discovery** - Ask comprehensive questions
+2. **Environment Check** - Look for existing taskmaster setup
+3. **Codebase Analysis** - Understand existing code (if applicable)
+4. **PRD Generation** - Write comprehensive requirements
+5. **Directory Setup** - Create `.taskmaster/` structure
+6. **Validation** - Run 13 quality checks
+7. **Task Hints** - Suggest breakdowns and dependencies
+8. **Presentation** - Show summary and next steps
+
+## Advanced Usage
+
+### Using with Taskmaster
+
+```bash
+# After PRD is generated:
+npm install -g task-master-ai
+cd your-project
+taskmaster init
+taskmaster generate    # Uses your PRD
+taskmaster start       # Begin implementation
+```
+
+### Customizing Templates
+
+Edit templates in `templates/` directory:
+- `taskmaster-prd-comprehensive.md` - Full template
+- `taskmaster-prd-minimal.md` - Quick template
+
+### Manual Validation
+
+Use the validation checklist:
+```bash
+cat reference/validation-checklist.md
+```
+
+## Files & Structure
 
 ```
-✅ PRD Quality Validation
-
-Required Elements: 9/9 ✅
-Taskmaster Optimization: 4/4 ✅
-
-Overall Quality: EXCELLENT
-Score: 58/60 (97%)
-Ready for taskmaster task generation!
+prd-taskmaster/
+├── SKILL.md                              # Main skill (480 lines)
+├── PUBLIC_README.md                      # This file
+├── README.md                             # Developer documentation
+├── templates/
+│   ├── taskmaster-prd-comprehensive.md   # Full PRD template
+│   └── taskmaster-prd-minimal.md         # Quick template
+├── scripts/
+│   └── setup-taskmaster.sh               # Directory setup script
+└── reference/
+    ├── taskmaster-integration-guide.md   # Taskmaster best practices
+    └── validation-checklist.md           # Quality criteria
 ```
 
----
+## Development Approach
 
-## Comparison with Other Variations
+### Honest Disclosure
 
-### Variation A: Taskmaster-Optimized PRD
-- **Score:** 95.8/100 (with impact weighting)
-- **Approach:** Single comprehensive template
-- **Pros:** Simplest workflow, most efficient
-- **Cons:** No validation, less automation
+This skill was built using an iterative "vibe-coding" approach:
+- Designed multiple variations
+- Evaluated with evidence-based scoring
+- Validated with test scenarios
+- Refined based on impact analysis
 
-### Variation B: Adaptive PRD with Taskmaster Mode
-- **Score:** 89.4/100 (with impact weighting)
-- **Approach:** Multiple templates + optional taskmaster mode
-- **Pros:** Flexible for different project sizes
-- **Cons:** Too many choices for user who always wants comprehensive
+**Status:** Beta - Works well for the creator's workflow, but hasn't been extensively tested by others.
 
-### Variation C: Full Taskmaster Integration (THIS SKILL)
-- **Score:** 97.3/100 (with impact weighting) ✅
-- **Approach:** Comprehensive + automation + validation
-- **Pros:** Best quality, automated setup, validation ensures success
-- **Cons:** Slightly more complex workflow (but still clear)
+### Known Limitations
 
-**Winner:** Variation C - Best alignment with user's goal ("best possible PRD")
+- Primarily tested for web/API projects
+- English only
+- Assumes taskmaster workflow
+- May ask redundant questions for very simple features
+- Validation is helpful but not perfect
 
----
+### Your Feedback Matters
 
-## Files Reference
+This is a **living skill**. If you:
+- Find bugs or issues
+- Have suggestions for improvement
+- Want additional templates or patterns
+- Need different validation rules
 
-### SKILL.md (480 lines)
-Main skill file with:
-- Complete workflow (8 steps)
-- Common patterns (API, UI, Integration)
-- Tips for best results
-- Under 500 line limit ✅
+**Please open an issue!** Your real-world usage will make this better.
 
-### Templates
+## Why Share This?
 
-**taskmaster-prd-comprehensive.md:**
-- Complete template with all sections
-- 2FA example filled in
-- Task breakdown examples
-- ~600 lines of comprehensive guidance
+### The Philosophy
 
-**taskmaster-prd-minimal.md:**
-- Quick template for simple features
-- Essential sections only
-- ~100 lines
-
-### Scripts
-
-**setup-taskmaster.sh:**
-- Creates `.taskmaster/` directory structure
-- Updates `.gitignore`
-- Creates placeholder files
-- Executable bash script
-
-### Reference
-
-**taskmaster-integration-guide.md:**
-- How taskmaster works
-- Why PRD quality matters
-- Writing for task generation
-- Task breakdown best practices
-- Troubleshooting guide
-
-**validation-checklist.md:**
-- Automated validation criteria
-- Quality warnings
-- Manual validation checklist
-- Scoring methodology
-- Example validation runs
-
----
-
-## Next Steps
-
-### To Use This Skill
-
-1. **Activate it:**
-   ```
-   Say: "I want a PRD for [your feature]"
-   ```
-
-2. **Answer questions:**
-   - Be as detailed as possible in discovery phase
-   - Provide context about existing systems
-   - Specify success metrics
-
-3. **Review generated PRD:**
-   - Located at `.taskmaster/docs/prd.md`
-   - Check validation warnings
-   - Refine if needed
-
-4. **Use with taskmaster:**
-   ```bash
-   npm install -g task-master-ai
-   taskmaster init
-   taskmaster generate
-   taskmaster start
-   ```
-
-### To Improve This Skill
-
-**Future Enhancements (v2.0):**
-- [ ] Interactive PRD refinement mode
-- [ ] Integration with taskmaster CLI (auto-run `taskmaster generate`)
-- [ ] PRD diff tool (compare versions)
-- [ ] Export to other formats (Notion, Jira, Linear)
-- [ ] Template library (API, UI, Integration presets)
-
-**Feedback Welcome:**
-- What sections are most/least useful?
-- What validation checks should be added/removed?
-- What patterns should be included?
-
----
-
-## Credits
-
-**Created Using:**
-- LEARN → PRACTICE → MASTER methodology
-- Impact-based weight determination (agentic reasoning)
-- Evidence-based evaluation (15 test scenarios)
-- Quality gates (≥85 threshold, all dimensions ≥70)
-
-**Research Sources:**
-- Taskmaster AI documentation
-- 2025 PRD best practices (Product School, Atlassian, Aha.io, Leanware)
-- Claude Skills authoring guidelines
-- Anthropic skill best practices
-
-**Design Philosophy:**
 > "Planning is 95% of the work. A comprehensive, validated PRD is the foundation of successful implementation."
 
----
+If you're using AI to help build software, the **quality of your requirements** directly impacts the **quality of your results**.
 
-## License & Usage
+This skill codifies lessons learned from:
+- Writing PRDs manually (painful)
+- Using AI task breakdown tools (needs good input)
+- Iterating on what makes a "good enough" PRD
+- Automating the boring parts
 
-This skill is part of the Claude Code skills ecosystem. Feel free to:
-- Use it for your projects
-- Modify templates for your needs
-- Share with your team
-- Contribute improvements
+### The Hope
 
-**Maintained by:** [Your Organization]
-**Questions?** [Contact or issue tracker]
+Maybe this helps you:
+- Save time on PRD writing
+- Improve your planning process
+- Get better results from AI task tools
+- Ship features more successfully
 
----
+If it does, great! If not, no worries - maybe you'll fork it and make it better for your needs.
 
-**Version History:**
+## FAQ
 
-- **v1.0** (2025-01-15): Initial release
+### Q: Do I need Taskmaster to use this?
+
+**A:** No. The PRD is useful on its own. Taskmaster integration is optional.
+
+### Q: Will this work for my project?
+
+**A:** Probably? It's designed for web/API projects but adaptable. Try it and see!
+
+### Q: Can I modify the templates?
+
+**A:** Absolutely! That's encouraged. Edit templates to match your needs.
+
+### Q: What if the PRD quality validation fails?
+
+**A:** The skill will warn you about issues. You can still use the PRD - validation is guidance, not enforcement.
+
+### Q: How long does it take?
+
+**A:** 5-15 minutes depending on how detailed your answers are.
+
+### Q: Is this better than writing PRDs manually?
+
+**A:** Different trade-off. Faster and more comprehensive, but less customized. Your call!
+
+## Contributing
+
+### Ways to Help
+
+1. **Use it and report issues** - Real-world usage is invaluable
+2. **Share improvements** - Better templates, validation rules, etc.
+3. **Add patterns** - More examples for common project types
+4. **Documentation** - Clarify confusing parts
+
+### How to Contribute
+
+```bash
+# Fork the repo
+# Make your changes
+# Test with real projects
+# Submit PR with:
+#   - What you changed
+#   - Why you changed it
+#   - How you tested it
+```
+
+## License
+
+MIT License - Use freely, modify as needed, share improvements if you want.
+
+## Acknowledgments
+
+**Built with:**
+- Claude Code (obviously)
+- Research from Product School, Atlassian, Aha.io, Leanware
+- Taskmaster AI documentation
+- Lessons learned from shipping features
+
+**Philosophy:**
+- LEARN → PRACTICE → MASTER methodology
+- Impact-weighted decision making
+- Evidence-based evaluation
+- Quality over speed
+
+## Support & Contact
+
+- **Issues:** [GitHub Issues](https://github.com/anombyte93/prd-taskmaster/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/anombyte93/prd-taskmaster/discussions)
+- **Questions:** Open an issue with the "question" label
+
+## Version History
+
+- **v1.0** (2025-01-22) - Initial public release
   - Comprehensive PRD generation
   - Full taskmaster integration
-  - Automated validation
+  - Automated validation (13 checks)
   - Impact-weighted evaluation methodology
+
+---
+
+**Made with Claude Code** | **Status: Beta** | **Feedback Welcome**
+
+*Planning is 95% of the work. Start with a solid PRD.*

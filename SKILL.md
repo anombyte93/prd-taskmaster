@@ -310,13 +310,132 @@ Parallelizable: [1.2, 2.2], [3.1, 4.1]
 
 Add this section to PRD as appendix or separate file (`.taskmaster/docs/task-hints.md`)
 
-### Step 8: Present to User
+### Step 8: Expand High-Level Tasks into Actionable Sub-Tasks
+
+**CRITICAL STEP**: After generating the PRD, expand high-level tasks into detailed, actionable sub-tasks that can be implemented immediately.
+
+**Task Expansion Process**:
+
+For each task in the roadmap, create expanded task files in `.taskmaster/tasks/` with:
+
+1. **Task Header**:
+   ```markdown
+   # TASK-001: Setup Electron + React + TypeScript Project
+
+   **Epic:** Phase 1 - Core Infrastructure
+   **Complexity:** Small (4 hours)
+   **Dependencies:** None
+   **Assignee:** Frontend Dev
+   **Status:** Ready
+   ```
+
+2. **Detailed Sub-Tasks** (Checkbox format):
+   ```markdown
+   ## Sub-Tasks
+
+   - [ ] 1. Initialize project with electron-vite
+     - Command: `npm create @quick-start/electron -- screentext-pro`
+     - Verify: Project folder created with src/main and src/renderer
+
+   - [ ] 2. Configure TypeScript with strict mode
+     - Create tsconfig.json with strict: true
+     - Add @/ path aliases for imports
+     - Test: `npm run type-check` passes
+
+   - [ ] 3. Set up ESLint and Prettier
+     - Install: @typescript-eslint/eslint-plugin, eslint-plugin-react
+     - Create .eslintrc.json and .prettierrc
+     - Test: `npm run lint` passes with 0 errors
+
+   - [ ] 4. Configure hot reload
+     - Verify electron main process watch mode works
+     - Verify React Fast Refresh works
+     - Test: Edit file, see changes without restart
+   ```
+
+3. **Implementation Guide**:
+   ```markdown
+   ## Implementation Guide
+
+   ### Step 1: Initialize Project
+   \`\`\`bash
+   npm create @quick-start/electron -- screentext-pro
+   cd screentext-pro
+   npm install
+   \`\`\`
+
+   ### Step 2: Configure TypeScript
+   Create `tsconfig.json`:
+   \`\`\`json
+   {
+     "compilerOptions": {
+       "target": "ES2020",
+       "strict": true,
+       "noImplicitAny": true,
+       "paths": {
+         "@/*": ["./src/*"]
+       }
+     }
+   }
+   \`\`\`
+
+   [Continue with detailed steps...]
+   ```
+
+4. **Acceptance Criteria** (testable):
+   ```markdown
+   ## Acceptance Criteria
+
+   - [x] `npm run dev` launches app successfully
+   - [x] Hot reload works for both main and renderer processes
+   - [x] ESLint passes with 0 warnings
+   - [x] TypeScript compiles with strict mode (no errors)
+   - [x] All tests pass (if applicable)
+   ```
+
+5. **Test Cases**:
+   ```markdown
+   ## Test Cases
+
+   1. **Test Hot Reload**:
+      - Start app with `npm run dev`
+      - Edit src/renderer/App.tsx
+      - Verify changes appear without manual restart
+
+   2. **Test TypeScript Strict Mode**:
+      - Add variable without type: `let x = 5;`
+      - Run `npm run type-check`
+      - Should error if reassigned wrong type
+
+   3. **Test ESLint**:
+      - Add unused variable
+      - Run `npm run lint`
+      - Should show warning
+   ```
+
+**Naming Convention**:
+- File: `.taskmaster/tasks/TASK-001-setup-project.md`
+- Format: `TASK-{number}-{short-slug}.md`
+
+**Create Expanded Tasks For**:
+- ALL MVP tasks (TASK-001 through TASK-039)
+- At minimum, expand first sprint (TASK-001 to TASK-005)
+- Include code snippets, commands, and file examples
+
+**Why This Matters**:
+- Developer can start coding immediately without additional research
+- Each sub-task is completable in <1 hour (atomic)
+- Clear acceptance criteria prevent misunderstandings
+- Test cases ensure quality
+
+### Step 9: Present to User
 
 Show comprehensive summary with actionable next steps:
 
 **Summary Format**:
 ```
 📄 PRD Created: .taskmaster/docs/prd.md
+📋 Tasks Expanded: .taskmaster/tasks/ (39 task files)
 
 📊 Overview:
   - Feature: [Name]
@@ -336,29 +455,37 @@ Show comprehensive summary with actionable next steps:
 
 ⚠️ Quality Validation:
   ✅ All required elements present
+  ✅ All tasks expanded with sub-tasks
   ⚠️ 2 minor improvements suggested (see validation section in PRD)
 
-📋 Suggested Task Breakdown:
-  - Phase 1: [X tasks] (foundation)
-  - Phase 2: [Y tasks] (core features)
-  - Phase 3: [Z tasks] (testing & polish)
+📋 Task Breakdown:
+  - Phase 1: 10 tasks expanded (TASK-001 to TASK-010)
+  - Phase 2: 6 tasks expanded (TASK-011 to TASK-016)
+  - Phase 3: 9 tasks expanded (TASK-017 to TASK-025)
+  - Phase 4: 14 tasks expanded (TASK-026 to TASK-039)
 
 🚀 Next Steps:
   1. Review PRD: .taskmaster/docs/prd.md
-  2. Install taskmaster CLI: npm install -g task-master-ai (if not installed)
-  3. Initialize taskmaster: taskmaster init
-  4. Generate tasks: taskmaster generate
-  5. Start implementation: taskmaster start
+  2. Review first sprint tasks: .taskmaster/tasks/TASK-001-* through TASK-005-*
+  3. Start TASK-001: Follow sub-tasks in .taskmaster/tasks/TASK-001-setup-project.md
+  4. Mark sub-tasks complete as you go (checkbox format)
+  5. When task complete, move to TASK-002
 
 📝 Open Questions ([X] remaining):
   1. [Question 1] - needs decision from [owner]
   2. [Question 2] - needs research on [topic]
 
+🎯 Ready to Start Coding:
+  ✅ First task ready: .taskmaster/tasks/TASK-001-setup-project.md
+  ✅ All sub-tasks defined with implementation steps
+  ✅ Acceptance criteria clear
+  ✅ No blockers - can start immediately
+
 Would you like me to:
   - Refine any section?
-  - Add more detail to specific requirements?
-  - Adjust complexity estimates?
-  - Initialize taskmaster now? (if CLI available)
+  - Expand more tasks in detail?
+  - Add more code examples?
+  - Create a sprint planning document?
 ```
 
 ## Common Patterns
@@ -537,4 +664,114 @@ For template structure:
 
 ---
 
-**Remember**: A comprehensive PRD is the foundation of successful implementation. Planning is 95% of the work. Take time to get it right, and taskmaster will generate high-quality actionable tasks.
+## Additional Helpful Documents to Generate
+
+After completing the core PRD and task expansion, consider creating these additional documents in `.taskmaster/docs/`:
+
+### 1. **sprint-planning.md**
+Sprint-by-sprint breakdown with:
+- Sprint goals and deliverables
+- Task assignments by role
+- Demo preparation checklist
+- Retrospective questions
+
+### 2. **architecture-decision-records/** (ADR directory)
+Document major technical decisions:
+- ADR-001: Why Electron over Tauri
+- ADR-002: SQLite vs PostgreSQL for MVP
+- ADR-003: DeepSeek-OCR vs Google Vision
+- Format: Context, Decision, Consequences
+
+### 3. **api-spec.yaml** (if building API)
+OpenAPI/Swagger specification for all endpoints:
+- Complete request/response schemas
+- Authentication flows
+- Error codes
+- Examples
+
+### 4. **test-plan.md**
+Comprehensive testing strategy:
+- Unit test coverage goals
+- Integration test scenarios
+- E2E test flows
+- Performance benchmarks
+- Security test checklist
+
+### 5. **deployment-guide.md**
+Step-by-step deployment instructions:
+- Environment setup
+- Build process
+- Configuration management
+- Rollback procedures
+- Monitoring setup
+
+### 6. **onboarding-guide.md**
+For new developers joining the project:
+- Getting started (clone, install, run)
+- Code organization overview
+- Development workflow
+- Code review guidelines
+- Where to ask for help
+
+### 7. **changelog.md**
+Track all changes during development:
+- Version numbers
+- Features added
+- Bugs fixed
+- Breaking changes
+
+### 8. **metrics-dashboard-spec.md**
+Define what metrics to track:
+- User analytics events
+- Performance metrics
+- Business KPIs
+- Alerting thresholds
+
+**When to Generate These**:
+- ADRs: As you make major technical decisions
+- API spec: If building API (before implementation)
+- Test plan: Before Sprint 2 (when code starts)
+- Deployment guide: Sprint 11-12 (before launch)
+- Onboarding: After Sprint 6 (mid-point)
+- Changelog: Start from Day 1
+- Metrics spec: Before Sprint 12 (analytics integration)
+
+---
+
+## Proactive Suggestions During PRD Creation
+
+While generating the PRD, proactively offer to:
+
+1. **Research competitors** if not provided
+   - "I can research top 5 competitors in this space. Should I?"
+
+2. **Generate user personas** from basic user descriptions
+   - "Would you like detailed user personas with demographics, pain points, and goals?"
+
+3. **Calculate market sizing** (TAM/SAM/SOM)
+   - "Should I estimate the total addressable market for this product?"
+
+4. **Create feature comparison matrix**
+   - "Want a feature matrix comparing your solution to competitors?"
+
+5. **Design database schema** from requirements
+   - "I can draft the complete database schema with all relationships. Proceed?"
+
+6. **Draft API endpoints** from user stories
+   - "Should I generate the full API specification with endpoints?"
+
+7. **Suggest tech stack alternatives**
+   - "I've chosen X, but alternatives are Y and Z. Want detailed comparison?"
+
+8. **Estimate pricing strategy**
+   - "Based on competitors and value, I can suggest pricing tiers. Interested?"
+
+9. **Identify technical risks**
+   - "I see 3 potential technical risks. Want risk mitigation plan?"
+
+10. **Create timeline with milestones**
+    - "Should I create a Gantt chart-style timeline in markdown?"
+
+---
+
+**Remember**: A comprehensive PRD is the foundation of successful implementation. Planning is 95% of the work. Take time to get it right, expand all tasks with actionable sub-tasks, and you'll have a clear roadmap from idea to production.
