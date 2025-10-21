@@ -15,3 +15,10 @@
 # Temporary files
 *.tmp
 *.bak
+
+# Publishing/Development files (not needed in public repo)
+YOUR_NEXT_STEPS.md
+PUBLISHING_GUIDE.md
+DEVELOPER_README.md
+DISCUSSION_WELCOME.md
+SHARING_TEMPLATES.md
