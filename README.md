@@ -33,43 +33,177 @@ This skill:
 
 **Result:** You go from "I have an idea" to "I have a complete, validated PRD ready for AI task generation" in minutes.
 
-## Quick Start
+## Installation
 
-### Installation
+This skill works with **Claude Code CLI** and **Codex** (VS Code extension). Choose your tool below:
 
-1. **Install as a Claude Code skill:**
+### Option A: Claude Code CLI (Recommended)
+
+**Prerequisites:**
+- Claude Code CLI installed ([installation guide](https://docs.claude.com/en/docs/claude-code/installation))
+- Git
+
+**Install the skill:**
+
+```bash
+# Clone to your Claude Code skills directory
+cd ~/.claude/skills
+git clone https://github.com/anombyte93/prd-taskmaster.git
+```
+
+**Verify installation:**
+
+```bash
+# Start Claude Code in any project
+claude
+
+# In the chat, type:
+# "I want a PRD for adding dark mode"
+```
+
+Claude Code should recognize the skill and activate it automatically!
+
+**Troubleshooting:**
+- If skill doesn't activate, check it's in `~/.claude/skills/prd-taskmaster/`
+- Verify `SKILL.md` exists in that directory
+- Try restarting Claude Code
+- Check skill is enabled: Look for the skill description when typing "/help" or similar commands
+
+---
+
+### Option B: Codex (VS Code Extension)
+
+**Prerequisites:**
+- VS Code installed
+- Codex extension installed ([get it here](https://marketplace.visualstudio.com/items?itemName=Anthropic.codex))
+- Git
+
+**Install the skill:**
+
+```bash
+# Clone to your Codex skills directory
+cd ~/.codex/skills
+git clone https://github.com/anombyte93/prd-taskmaster.git
+
+# OR, if you want to use the same skills for both tools:
+cd ~/.claude/skills
+git clone https://github.com/anombyte93/prd-taskmaster.git
+```
+
+**Configure Codex to find the skill:**
+
+1. Open VS Code
+2. Go to Settings (Cmd/Ctrl + ,)
+3. Search for "Codex skills"
+4. Add the path to your skills directory:
+   - If using `~/.codex/skills`: Should be auto-detected
+   - If using `~/.claude/skills`: Add this path to Codex settings
+
+**Verify installation:**
+
+1. Open VS Code
+2. Open the Codex panel (Cmd/Ctrl + Shift + P → "Codex: Open")
+3. In the chat, type:
+   ```
+   I want a PRD for adding dark mode
+   ```
+
+Codex should recognize and activate the skill!
+
+**Troubleshooting:**
+- Check the skill is in the correct directory
+- Restart VS Code
+- Check Codex settings for skills path
+- Verify `SKILL.md` exists in the skill directory
+
+---
+
+### Option C: Manual Installation (Advanced)
+
+If you use a different Claude-based tool or want to integrate this skill manually:
+
+1. **Clone the repository:**
    ```bash
-   # Clone to your Claude Code skills directory
-   cd ~/.claude/skills
    git clone https://github.com/anombyte93/prd-taskmaster.git
+   cd prd-taskmaster
    ```
 
-2. **Verify installation:**
-   ```bash
-   # Open Claude Code and type:
-   # "I want a PRD for adding dark mode"
-   ```
+2. **Understand the structure:**
+   - `SKILL.md` - Main skill file (read by Claude)
+   - `templates/` - PRD templates used by the skill
+   - `scripts/` - Helper scripts for directory setup
+   - `reference/` - Documentation and guides
+
+3. **Integration:**
+   - Copy contents to your tool's skills directory
+   - Or, provide `SKILL.md` as context when requesting PRDs
+   - Or, manually follow the workflow in `SKILL.md` as a guide
+
+---
+
+## Quick Start Guide
 
 ### Basic Usage
 
-Just tell Claude you want a PRD:
+Once installed, just tell Claude you want a PRD:
 
 ```
 "I want a PRD for [your feature/product]"
 ```
 
-**Examples:**
+**Activation phrases:**
 - "I want a PRD for adding two-factor authentication"
 - "Create product requirements for a user dashboard"
 - "Write a PRD for integrating with Stripe payments"
+- "Generate requirements for building a dark mode feature"
+
+### What Happens Next
 
 The skill will:
-1. Ask you questions (be as detailed as you can!)
-2. Analyze your codebase (if applicable)
-3. Generate a comprehensive PRD
-4. Set up taskmaster integration
-5. Validate everything
-6. Show you what to do next
+
+1. **Ask you 12+ detailed questions**
+   - What problem are you solving?
+   - Who's the target user?
+   - What are success metrics?
+   - What's the tech stack?
+   - Any constraints or dependencies?
+
+2. **Analyze your codebase** (if applicable)
+   - Scans for related code
+   - Identifies integration points
+   - References existing patterns
+
+3. **Generate a comprehensive PRD**
+   - All essential sections included
+   - Task breakdown hints
+   - Complexity estimates
+
+4. **Set up taskmaster integration**
+   - Creates `.taskmaster/` directory
+   - Places PRD in correct location
+   - Updates `.gitignore`
+
+5. **Validate everything**
+   - 13 automated quality checks
+   - Warns about vague language
+   - Scores PRD quality
+
+6. **Show you next steps**
+   - Summary of what was created
+   - Suggestions for taskmaster usage
+   - Open questions to address
+
+### First-Time Tips
+
+**Be detailed in your answers!** The more context you provide, the better the PRD.
+
+**Example good answer:**
+> "We need 2FA because we're seeing 150 security incidents per month from compromised accounts. Target users are enterprise customers who require SOC2 compliance. Success = reduce incidents to <10/month and meet SOC2 requirements."
+
+**Example too-vague answer:**
+> "We need 2FA for security."
+
+**Don't worry about perfect answers** - the skill will ask follow-ups if needed!
 
 ## What You Get
 
