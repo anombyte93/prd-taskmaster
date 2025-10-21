@@ -214,6 +214,27 @@ Automatically sets up:
 └── .gitignore              # Updated to exclude taskmaster artifacts
 ```
 
+### 🤖 CLAUDE.md - TDD Workflow Guide
+
+Generates a comprehensive `CLAUDE.md` file in your project root that guides Claude Code to:
+
+- **Follow TDD by default** - Write tests first, then implementation
+- **Use blind-validator agent** - Validate against PRD without seeing code
+- **Execute parallel tasks** - Run independent tasks simultaneously
+- **Leverage agents** - For validation, exploration, and context optimization
+- **Enforce quality gates** - Automated validation before marking tasks complete
+- **Follow taskmaster best practices** - Optimal workflow for AI-assisted development
+
+**Key sections in CLAUDE.md:**
+- TDD workflow (RED → GREEN → REFACTOR cycle)
+- Agent usage guidelines (when/how to use each agent type)
+- Parallel task execution strategies
+- Validation & quality gates
+- Tool preferences & context optimization
+- Project-specific configuration (tech stack, test commands, etc.)
+
+This ensures consistent, high-quality development across your entire project!
+
 ### ✅ Quality Validation
 
 13 automated checks ensure:
@@ -228,6 +249,7 @@ Automatically sets up:
 
 ```
 📄 PRD Created: .taskmaster/docs/prd.md
+🤖 CLAUDE.md Generated: Project root (TDD workflow guide)
 
 📊 Overview:
   - Feature: Two-Factor Authentication

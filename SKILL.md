@@ -219,6 +219,25 @@ fi
 - Use proper markdown formatting
 - Include table of contents for easy navigation
 
+**Generate CLAUDE.md for TDD Workflow**:
+- Use template from `templates/CLAUDE.md.template`
+- Replace placeholders with project-specific information:
+  - `{{PROJECT_NAME}}` - From PRD title
+  - `{{TECH_STACK}}` - From discovery questions
+  - `{{ARCHITECTURE_OVERVIEW}}` - From technical considerations
+  - `{{KEY_DEPENDENCIES}}` - From PRD dependencies section
+  - `{{TESTING_FRAMEWORK}}` - From tech stack or ask user
+  - `{{DEV_ENVIRONMENT}}` - From tech stack
+  - `{{TEST_COMMAND}}` - Inferred from tech stack (npm test, pytest, etc.)
+- Write to project root: `CLAUDE.md`
+- This file guides Claude Code to:
+  - Follow TDD approach by default (write tests first)
+  - Use blind-validator agent before marking tasks complete
+  - Execute parallel tasks when possible
+  - Leverage agents for validation and exploration
+  - Maintain quality through automated validation gates
+  - Follow taskmaster workflow best practices
+
 ### Step 6: Validate PRD Quality
 
 Run automated validation checks (see `reference/validation-checklist.md`):
@@ -436,6 +455,7 @@ Show comprehensive summary with actionable next steps:
 ```
 📄 PRD Created: .taskmaster/docs/prd.md
 📋 Tasks Expanded: .taskmaster/tasks/ (39 task files)
+🤖 CLAUDE.md Generated: Project root (TDD workflow guide)
 
 📊 Overview:
   - Feature: [Name]
@@ -466,10 +486,12 @@ Show comprehensive summary with actionable next steps:
 
 🚀 Next Steps:
   1. Review PRD: .taskmaster/docs/prd.md
-  2. Review first sprint tasks: .taskmaster/tasks/TASK-001-* through TASK-005-*
-  3. Start TASK-001: Follow sub-tasks in .taskmaster/tasks/TASK-001-setup-project.md
-  4. Mark sub-tasks complete as you go (checkbox format)
-  5. When task complete, move to TASK-002
+  2. Review CLAUDE.md: Project workflow guide (TDD, agents, validation)
+  3. Review first sprint tasks: .taskmaster/tasks/TASK-001-* through TASK-005-*
+  4. Start TASK-001: Follow sub-tasks in .taskmaster/tasks/TASK-001-setup-project.md
+  5. Mark sub-tasks complete as you go (checkbox format)
+  6. Use /blind-validator before marking tasks complete
+  7. When task complete, move to TASK-002
 
 📝 Open Questions ([X] remaining):
   1. [Question 1] - needs decision from [owner]

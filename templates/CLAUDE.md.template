@@ -1,0 +1,602 @@
+# Project: {{PROJECT_NAME}}
+
+> **Taskmaster-Managed Project with TDD-First Development**
+
+## Project Overview
+
+This project uses **taskmaster** for AI-assisted task breakdown and follows a **Test-Driven Development (TDD)** approach by default.
+
+**Key Documents:**
+- PRD: `.taskmaster/docs/prd.md` - Comprehensive product requirements
+- Tasks: `.taskmaster/tasks/` - AI-generated task breakdown
+- Architecture: `.taskmaster/docs/architecture.md` - System design (if applicable)
+
+**Development Philosophy:**
+> "Planning is 95% of the work. Tests are 95% of planning. Write tests first, implement second, validate always."
+
+---
+
+## Development Workflow: TDD-First Approach
+
+### MANDATORY: Test-Driven Development
+
+**Every feature, every task, every change follows TDD:**
+
+```
+RED → GREEN → REFACTOR
+```
+
+1. **RED** - Write a failing test that defines desired behavior
+2. **GREEN** - Implement minimal code to make the test pass
+3. **REFACTOR** - Improve code quality while keeping tests green
+
+### TDD Cycle in Practice
+
+**For each task:**
+
+```bash
+# 1. RED: Write failing test first
+# Example: For a user authentication feature
+write_test("test_user_can_login_with_valid_credentials")
+run_tests()  # Should FAIL (red)
+
+# 2. GREEN: Implement minimal code
+implement_feature("user_login")
+run_tests()  # Should PASS (green)
+
+# 3. REFACTOR: Improve code quality
+refactor_code("improve_login_performance")
+run_tests()  # Should still PASS (green)
+
+# 4. VALIDATE: Use blind-validator agent
+/blind-validator .taskmaster/docs/prd.md
+```
+
+### Never Skip Tests
+
+**IMPORTANT:** Do NOT implement features without tests. If you catch yourself:
+- Writing implementation code before tests → STOP
+- Skipping tests "to move faster" → STOP
+- Planning to "add tests later" → STOP
+
+**Always write tests first.**
+
+---
+
+## Taskmaster Integration
+
+### Working with Taskmaster Tasks
+
+**Task Location:** `.taskmaster/tasks/`
+
+**Reading Tasks:**
+```bash
+# View all tasks
+taskmaster list
+
+# View specific task
+taskmaster show <task-id>
+
+# View task dependencies
+taskmaster deps <task-id>
+```
+
+**Task Workflow:**
+
+1. **Read the task** - Understand requirements, acceptance criteria, dependencies
+2. **Read the PRD** - Reference relevant PRD sections
+3. **Write tests** - Based on acceptance criteria
+4. **Implement** - Minimal code to pass tests
+5. **Validate** - Use blind-validator agent
+6. **Mark complete** - Only when tests pass and validation succeeds
+
+### Task Dependencies
+
+**Before starting a task:**
+- Check dependencies: `taskmaster deps <task-id>`
+- Ensure dependent tasks are complete
+- If blocked, work on independent tasks in parallel
+
+**Parallel vs Sequential Tasks:**
+
+✅ **Parallel** (can run simultaneously):
+```
+Task A: Implement user model
+Task B: Implement product model
+Task C: Design authentication flow
+```
+
+❌ **Sequential** (must run in order):
+```
+Task 1: Create database schema → Task 2: Implement models → Task 3: Write API endpoints
+```
+
+### Marking Tasks Complete
+
+**Only mark complete when:**
+- ✅ All tests pass
+- ✅ Blind-validator agent confirms compliance with PRD
+- ✅ Acceptance criteria met
+- ✅ Code is refactored and clean
+- ✅ Documentation updated (if required)
+
+```bash
+# After validation passes:
+taskmaster complete <task-id>
+```
+
+---
+
+## Agent Usage Guidelines
+
+### When to Use Agents
+
+**Use agents to:**
+- **Reduce main context consumption** - Large codebases, extensive searches
+- **Validate independently** - Blind validation without implementation details
+- **Parallelize research** - Multiple exploration paths simultaneously
+- **Specialized analysis** - Deep dives into specific areas
+
+**Don't use agents for:**
+- Simple file reads (use Read tool directly)
+- Quick searches (use Grep/Glob directly)
+- Single-step tasks (overhead not worth it)
+
+### Agent Types for Taskmaster Workflow
+
+#### 1. Blind-Validator Agent
+
+**Purpose:** Validate implementation against PRD without seeing code
+
+**When to use:**
+- After implementing a feature
+- Before marking task complete
+- When you want unbiased validation
+
+**How to use:**
+```bash
+# After implementation:
+/blind-validator .taskmaster/docs/prd.md
+```
+
+**What it checks:**
+- ✅ Requirements met per PRD
+- ✅ Acceptance criteria satisfied
+- ✅ No deviation from spec
+- ✅ Edge cases handled
+
+#### 2. Explore Agent
+
+**Purpose:** Fast codebase exploration for understanding context
+
+**When to use:**
+- Starting a new task in unfamiliar codebase
+- Understanding integration points
+- Finding related code patterns
+
+**How to use:**
+```bash
+# Use Task tool with Explore agent
+# "Explore authentication implementation patterns in the codebase"
+```
+
+**Thoroughness levels:**
+- `quick` - Basic search (< 30 seconds)
+- `medium` - Moderate exploration (1-2 minutes)
+- `very thorough` - Comprehensive analysis (3-5 minutes)
+
+#### 3. General-Purpose Agent
+
+**Purpose:** Complex multi-step research and analysis
+
+**When to use:**
+- Multi-step research tasks
+- Complex codebase analysis
+- When single search won't suffice
+
+**How to use:**
+```bash
+# Use Task tool with general-purpose agent
+# "Analyze how error handling works across the API layer"
+```
+
+#### 4. Research Squadron (Parallel Agents)
+
+**Purpose:** Deploy multiple agents for comprehensive exploration
+
+**When to use:**
+- Need to explore multiple areas simultaneously
+- Want comprehensive coverage quickly
+- Starting work on large feature
+
+**How to use:**
+```bash
+/agents:research-squadron "authentication patterns"
+```
+
+### Agent Best Practices
+
+1. **Use agents proactively** - Don't wait to be blocked
+2. **Specify thoroughness** - Match effort to task complexity
+3. **Trust agent output** - Agents are specialized, their results are reliable
+4. **Parallelize when possible** - Launch multiple agents in single message
+5. **Review agent reports** - Synthesize findings before implementing
+
+---
+
+## Parallel Task Execution
+
+### Identifying Independent Tasks
+
+**Independent tasks can run in parallel:**
+
+✅ **Example:**
+```
+- Task A: Implement user authentication
+- Task B: Implement product catalog
+- Task C: Set up CI/CD pipeline
+```
+
+These are independent - work on them concurrently.
+
+❌ **Dependent tasks must be sequential:**
+```
+- Task 1: Design database schema
+- Task 2: Implement models (depends on Task 1)
+- Task 3: Write API (depends on Task 2)
+```
+
+### Using TodoWrite for Parallel Work
+
+**Track multiple concurrent tasks:**
+
+```markdown
+1. [in_progress] Implement user model with tests
+2. [in_progress] Implement product model with tests
+3. [pending] Set up authentication API
+4. [pending] Write integration tests
+```
+
+**Only ONE task should be `in_progress` at a time unless:**
+- Tasks are truly independent
+- You're using agents for some tasks
+- Parallel tool calls are being executed
+
+### Parallel Tool Calls
+
+**Execute multiple tools simultaneously when independent:**
+
+```bash
+# Good: Independent reads
+Read file_a.py
+Read file_b.py
+Read file_c.py
+
+# Good: Independent searches
+Grep "pattern_a"
+Grep "pattern_b"
+Glob "*.tsx"
+
+# Bad: Dependent operations
+Read schema.sql
+Write model.py (depends on schema)
+```
+
+**Always parallelize when possible** - faster execution, better efficiency.
+
+---
+
+## Validation & Quality Gates
+
+### Continuous Validation
+
+**At every step:**
+
+1. **Before implementation** - Write tests (red)
+2. **During implementation** - Run tests frequently
+3. **After implementation** - All tests pass (green)
+4. **Before task completion** - Blind-validator agent
+5. **Before commit** - Full test suite passes
+
+### Quality Checklist
+
+**For each task, verify:**
+
+- [ ] Tests written first (TDD)
+- [ ] All tests pass
+- [ ] Acceptance criteria met
+- [ ] PRD requirements satisfied
+- [ ] Blind-validator passes
+- [ ] Code is refactored and clean
+- [ ] No console errors or warnings
+- [ ] Documentation updated (if needed)
+- [ ] Ready for code review
+
+### Using Blind-Validator
+
+**Purpose:** Validate against requirements WITHOUT seeing implementation details
+
+**Why this matters:**
+- Prevents implementation bias
+- Ensures objective validation
+- Catches requirement gaps
+- Verifies acceptance criteria
+
+**How to use:**
+```bash
+# After implementing a feature:
+/blind-validator .taskmaster/docs/prd.md
+
+# Agent will:
+# 1. Read the PRD requirements
+# 2. Test the implementation (without reading code)
+# 3. Verify acceptance criteria
+# 4. Report pass/fail with details
+```
+
+**Only mark task complete after blind-validator passes.**
+
+---
+
+## Tool Preferences & Guidelines
+
+### When to Use Each Tool
+
+#### Task Tool (Agents)
+
+**Use for:**
+- Large codebase exploration
+- Multi-step research
+- Validation (blind-validator)
+- Parallel exploration (research-squadron)
+- Complex analysis requiring multiple steps
+
+**Don't use for:**
+- Simple file reads
+- Single grep/glob patterns
+- Straightforward implementations
+
+#### Direct Tools (Read, Write, Edit, Grep, Glob, Bash)
+
+**Use for:**
+- Reading specific known files
+- Searching for specific patterns
+- Implementing code changes
+- Running tests
+- Quick verifications
+
+#### Parallel Tool Calls
+
+**Always use when:**
+- Reading multiple independent files
+- Searching multiple patterns
+- Running independent commands
+- No dependencies between operations
+
+### Context Optimization
+
+**Strategies:**
+
+1. **Use agents for exploration** - Keep main context for implementation
+2. **Read files once** - Cache information, don't re-read
+3. **Use PROJECT_INDEX.json** - If available, leverage it
+4. **Minimize context** - Only read what's needed
+5. **Agent parallelization** - Multiple agents = distributed context
+
+**Example efficient workflow:**
+
+```bash
+# 1. Use Explore agent to understand codebase (saves main context)
+Task: "Find authentication patterns" (Explore agent)
+
+# 2. Synthesize findings in main context (minimal)
+# 3. Write tests (main context)
+# 4. Implement feature (main context)
+# 5. Use blind-validator to validate (saves main context)
+/blind-validator .taskmaster/docs/prd.md
+```
+
+---
+
+## Commit & Version Control
+
+### Commit Standards
+
+**Follow git best practices:**
+
+1. **Never commit untested code** (from CLAUDE.md rules)
+2. **Stay on feature branch** until work complete
+3. **Write descriptive commit messages**
+4. **Include test results in commit message** (if significant)
+
+### Commit Message Format
+
+```
+<type>: <short description>
+
+<detailed description>
+
+Tests: <test results>
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+**Types:**
+- `feat` - New feature
+- `fix` - Bug fix
+- `test` - Add/update tests
+- `refactor` - Code refactoring
+- `docs` - Documentation
+- `chore` - Maintenance
+
+### Branch Strategy
+
+**For taskmaster workflow:**
+
+```bash
+# Feature branch for each major task/feature
+git checkout -b feature/user-authentication
+
+# Stay on feature branch until:
+# - All tests pass
+# - Blind-validator passes
+# - Task marked complete
+# - Code reviewed (if applicable)
+
+# Then merge to main
+git checkout main
+git merge feature/user-authentication
+```
+
+---
+
+## Project-Specific Context
+
+### Tech Stack
+
+{{TECH_STACK}}
+
+### Architecture Overview
+
+{{ARCHITECTURE_OVERVIEW}}
+
+### Key Dependencies
+
+{{KEY_DEPENDENCIES}}
+
+### Testing Framework
+
+{{TESTING_FRAMEWORK}}
+
+### Development Environment
+
+{{DEV_ENVIRONMENT}}
+
+---
+
+## Quick Reference
+
+### Daily Workflow
+
+```bash
+# 1. Check tasks
+taskmaster list
+
+# 2. Pick a task (check dependencies)
+taskmaster show <task-id>
+taskmaster deps <task-id>
+
+# 3. Read PRD for context
+cat .taskmaster/docs/prd.md
+
+# 4. Write failing test (RED)
+# ... write test ...
+npm test  # or appropriate test command
+
+# 5. Implement feature (GREEN)
+# ... implement ...
+npm test
+
+# 6. Refactor (REFACTOR)
+# ... improve code ...
+npm test
+
+# 7. Validate (VALIDATE)
+/blind-validator .taskmaster/docs/prd.md
+
+# 8. Mark complete (only if validation passes)
+taskmaster complete <task-id>
+
+# 9. Commit
+git add .
+git commit -m "feat: implement <feature>
+
+Tests: All pass
+Validation: blind-validator passed"
+```
+
+### Common Commands
+
+```bash
+# Taskmaster
+taskmaster list                    # List all tasks
+taskmaster show <id>               # Show task details
+taskmaster deps <id>               # Show dependencies
+taskmaster complete <id>           # Mark complete
+
+# Validation
+/blind-validator .taskmaster/docs/prd.md
+/agents:research-squadron <query>
+
+# Testing
+{{TEST_COMMAND}}                   # Run tests
+
+# Git
+git status
+git add .
+git commit -m "message"
+```
+
+---
+
+## Best Practices Summary
+
+### Always Do
+
+✅ Write tests before implementation (TDD)
+✅ Use blind-validator before marking complete
+✅ Check task dependencies before starting
+✅ Parallelize independent tasks
+✅ Use agents for complex exploration
+✅ Run tests frequently
+✅ Commit only tested code
+✅ Stay on feature branch until complete
+✅ Refactor with confidence (tests protect you)
+
+### Never Do
+
+❌ Skip tests to "move faster"
+❌ Implement before writing tests
+❌ Mark task complete without validation
+❌ Commit untested code
+❌ Start dependent tasks before prerequisites
+❌ Use agents for simple tasks
+❌ Ignore PRD requirements
+❌ Force push to main/master
+
+---
+
+## Need Help?
+
+### Resources
+
+- **PRD:** `.taskmaster/docs/prd.md` - Full requirements
+- **Tasks:** `.taskmaster/tasks/` - Task breakdown
+- **Docs:** `.taskmaster/docs/` - Additional documentation
+
+### Troubleshooting
+
+**Tests failing?**
+- Read error messages carefully
+- Check PRD for requirements
+- Verify acceptance criteria
+- Use blind-validator for objective assessment
+
+**Blocked on task?**
+- Check dependencies: `taskmaster deps <id>`
+- Work on independent tasks instead
+- Use Explore agent to understand blockers
+
+**Not sure what to do?**
+- Read the PRD
+- Check task acceptance criteria
+- Use agents to explore options
+- Ask for clarification (open discussion)
+
+---
+
+**Remember:** Test first, implement second, validate always. TDD is not optional - it's how we ensure quality and maintain velocity over time.
+
+**Happy coding!** 🚀
