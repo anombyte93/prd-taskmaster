@@ -71,81 +71,58 @@ Claude Code should recognize the skill and activate it automatically!
 
 ---
 
-### Option B: Codex (VS Code Extension)
+### Option B: Codex (Untested)
 
 **Prerequisites:**
-- VS Code installed
-- Codex extension installed ([get it here](https://marketplace.visualstudio.com/items?itemName=Anthropic.codex))
+- Codex ([see]([https://marketplace.visualstudio.com/items?itemName=Anthropic.codex](https://github.com/openai/codex/blob/main/README.md)))
 - Git
 
 **Install the skill:**
 
 ```bash
-# Clone to your Codex skills directory
-cd ~/.codex/skills
+# Clone to where you want to run codex
+cd ~/<wherever>
 git clone https://github.com/anombyte93/prd-taskmaster.git
-
-# OR, if you want to use the same skills for both tools:
-cd ~/.claude/skills
-git clone https://github.com/anombyte93/prd-taskmaster.git
+cd prd-taskmaster
 ```
 
 **Configure Codex to find the skill:**
 
-1. Open VS Code
-2. Go to Settings (Cmd/Ctrl + ,)
-3. Search for "Codex skills"
-4. Add the path to your skills directory:
-   - If using `~/.codex/skills`: Should be auto-detected
-   - If using `~/.claude/skills`: Add this path to Codex settings
+1. Run Codex
+2. ```/init```
 
 **Verify installation:**
 
-1. Open VS Code
-2. Open the Codex panel (Cmd/Ctrl + Shift + P → "Codex: Open")
-3. In the chat, type:
-   ```
-   I want a PRD for adding dark mode
-   ```
-
-Codex should recognize and activate the skill!
-
-**Troubleshooting:**
-- Check the skill is in the correct directory
-- Restart VS Code
-- Check Codex settings for skills path
-- Verify `SKILL.md` exists in the skill directory
-
----
-
-### Option C: Manual Installation (Advanced)
-
-If you use a different Claude-based tool or want to integrate this skill manually:
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/anombyte93/prd-taskmaster.git
-   cd prd-taskmaster
-   ```
-
-2. **Understand the structure:**
-   - `SKILL.md` - Main skill file (read by Claude)
+1. **Understand the structure:**
+   - `SKILL.md` - Main skill file (read by Codex)
    - `templates/` - PRD templates used by the skill
    - `scripts/` - Helper scripts for directory setup
    - `reference/` - Documentation and guides
 
-3. **Integration:**
-   - Copy contents to your tool's skills directory
-   - Or, provide `SKILL.md` as context when requesting PRDs
+2. **Integration:**
+   - Provide `SKILL.md` as context when requesting PRDs
    - Or, manually follow the workflow in `SKILL.md` as a guide
 
+3. Ask Codex
+```bash
+What would you do if I told you to generate a prd?
+```
+
+4. Confirm it outputs something similar to the readme
+
+---
+
+**Troubleshooting:**
+- Check you cloned to the correct directory
+- Check you ran codex in the correct directory
+- Verify `SKILL.md` exists
 ---
 
 ## Quick Start Guide
 
 ### Basic Usage
 
-Once installed, just tell Claude you want a PRD:
+Once installed, just tell Claude/Codex you want a PRD:
 
 ```
 "I want a PRD for [your feature/product]"
