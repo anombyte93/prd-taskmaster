@@ -219,7 +219,7 @@ fi
 - Use proper markdown formatting
 - Include table of contents for easy navigation
 
-**Generate CLAUDE.md for TDD Workflow**:
+**Generate CLAUDE.md (and optionally codex.md) for TDD Workflow**:
 - Use template from `templates/CLAUDE.md.template`
 - Replace placeholders with project-specific information:
   - `{{PROJECT_NAME}}` - From PRD title
@@ -230,13 +230,17 @@ fi
   - `{{DEV_ENVIRONMENT}}` - From tech stack
   - `{{TEST_COMMAND}}` - Inferred from tech stack (npm test, pytest, etc.)
 - Write to project root: `CLAUDE.md`
-- This file guides Claude Code to:
+- **Ask user:** "Are you using Codex? If yes, I'll also create codex.md (same content as CLAUDE.md)"
+  - If yes: Copy `CLAUDE.md` to `codex.md` in project root
+  - If no: Skip codex.md creation
+- This file guides Claude Code/Codex to:
   - Follow TDD approach by default (write tests first)
   - Use blind-validator agent before marking tasks complete
   - Execute parallel tasks when possible
   - Leverage agents for validation and exploration
   - Maintain quality through automated validation gates
   - Follow taskmaster workflow best practices
+- The template includes instructions for keeping CLAUDE.md and codex.md in sync if using both tools
 
 ### Step 6: Validate PRD Quality
 
@@ -456,6 +460,7 @@ Show comprehensive summary with actionable next steps:
 📄 PRD Created: .taskmaster/docs/prd.md
 📋 Tasks Expanded: .taskmaster/tasks/ (39 task files)
 🤖 CLAUDE.md Generated: Project root (TDD workflow guide)
+   [+ codex.md if user requested]
 
 📊 Overview:
   - Feature: [Name]

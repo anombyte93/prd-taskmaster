@@ -74,7 +74,7 @@ Claude Code should recognize the skill and activate it automatically!
 ### Option B: Codex (Untested)
 
 **Prerequisites:**
-- Codex ([see]([https://marketplace.visualstudio.com/items?itemName=Anthropic.codex](https://github.com/openai/codex/blob/main/README.md)))
+- Codex ([see](https://github.com/openai/codex/blob/main/README.md))
 - Git
 
 **Install the skill:**
@@ -88,34 +88,33 @@ cd prd-taskmaster
 
 **Configure Codex to find the skill:**
 
-1. Run Codex
-2. ```/init```
+1. Run Codex in the `prd-taskmaster` directory
+2. Initialize Codex: `/init`
+3. Codex will read `SKILL.md` and understand how to generate PRDs
 
 **Verify installation:**
 
-1. **Understand the structure:**
-   - `SKILL.md` - Main skill file (read by Codex)
-   - `templates/` - PRD templates used by the skill
-   - `scripts/` - Helper scripts for directory setup
-   - `reference/` - Documentation and guides
-
-2. **Integration:**
-   - Provide `SKILL.md` as context when requesting PRDs
-   - Or, manually follow the workflow in `SKILL.md` as a guide
-
-3. Ask Codex
-```bash
-What would you do if I told you to generate a prd?
+Ask Codex:
+```
+What would you do if I told you to generate a PRD?
 ```
 
-4. Confirm it outputs something similar to the readme
+Confirm it outputs something similar to the workflow described in this README.
 
----
+**Using the generated codex.md:**
+
+When the skill generates a PRD for your project, it will ask if you're using Codex:
+- If yes: Creates both `CLAUDE.md` and `codex.md` in your project root
+- If no: Creates only `CLAUDE.md`
+
+The `codex.md` file guides Codex to follow TDD workflow, use agents, and maintain quality gates throughout development.
 
 **Troubleshooting:**
 - Check you cloned to the correct directory
-- Check you ran codex in the correct directory
-- Verify `SKILL.md` exists
+- Check you ran Codex in the `prd-taskmaster` directory
+- Run `/init` to ensure Codex reads `SKILL.md`
+- Verify `SKILL.md` exists in the directory
+
 ---
 
 ## Quick Start Guide
@@ -214,9 +213,9 @@ Automatically sets up:
 └── .gitignore              # Updated to exclude taskmaster artifacts
 ```
 
-### 🤖 CLAUDE.md - TDD Workflow Guide
+### 🤖 CLAUDE.md / codex.md - TDD Workflow Guide
 
-Generates a comprehensive `CLAUDE.md` file in your project root that guides Claude Code to:
+Generates a comprehensive workflow file in your project root that guides Claude Code/Codex to:
 
 - **Follow TDD by default** - Write tests first, then implementation
 - **Use blind-validator agent** - Validate against PRD without seeing code
@@ -225,13 +224,20 @@ Generates a comprehensive `CLAUDE.md` file in your project root that guides Clau
 - **Enforce quality gates** - Automated validation before marking tasks complete
 - **Follow taskmaster best practices** - Optimal workflow for AI-assisted development
 
-**Key sections in CLAUDE.md:**
+**Key sections:**
 - TDD workflow (RED → GREEN → REFACTOR cycle)
 - Agent usage guidelines (when/how to use each agent type)
 - Parallel task execution strategies
 - Validation & quality gates
 - Tool preferences & context optimization
 - Project-specific configuration (tech stack, test commands, etc.)
+
+**File naming:**
+- **Claude Code:** Creates `CLAUDE.md` (read automatically by Claude Code)
+- **Codex:** Creates `codex.md` (read by Codex when initialized with `/init`)
+- The skill will ask which tool you're using and create the appropriate file(s)
+- Both files have identical content
+- Includes instructions for keeping them in sync if you use both tools
 
 This ensures consistent, high-quality development across your entire project!
 
@@ -250,6 +256,7 @@ This ensures consistent, high-quality development across your entire project!
 ```
 📄 PRD Created: .taskmaster/docs/prd.md
 🤖 CLAUDE.md Generated: Project root (TDD workflow guide)
+   + codex.md (if you're using Codex)
 
 📊 Overview:
   - Feature: Two-Factor Authentication

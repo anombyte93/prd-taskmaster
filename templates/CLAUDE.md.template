@@ -16,6 +16,39 @@ This project uses **taskmaster** for AI-assisted task breakdown and follows a **
 
 ---
 
+## Tool-Specific Setup
+
+### Using with Claude Code CLI
+
+This file is named `CLAUDE.md` and will be automatically read by Claude Code when working in this project directory.
+
+**No additional setup needed!** Claude Code reads this file by default.
+
+### Using with Codex
+
+If you're using Codex instead of Claude Code, you should copy this file to `codex.md`:
+
+```bash
+# From your project root:
+cp CLAUDE.md codex.md
+```
+
+**Why both files?**
+- Claude Code reads `CLAUDE.md` by default
+- Codex reads `codex.md` by default (when initialized with `/init`)
+- Both files should have identical content
+- Update both when making workflow changes
+
+**Keeping them in sync:**
+```bash
+# After updating CLAUDE.md:
+cp CLAUDE.md codex.md
+git add CLAUDE.md codex.md
+git commit -m "Update workflow documentation"
+```
+
+---
+
 ## Development Workflow: TDD-First Approach
 
 ### MANDATORY: Test-Driven Development
