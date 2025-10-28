@@ -1,12 +1,12 @@
 ---
-name: Taskmaster-Integrated PRD System
-description: Comprehensive PRD generation with full taskmaster integration, datetime tracking, rollback support, and autonomous execution. Generates detailed technical PRDs optimized for task breakdown, sets up .taskmaster/ directory structure, validates against taskmaster requirements with 13 automated checks. Use when user requests "PRD", "product requirements", "create requirements", or mentions task-driven development. Optimized for engineer-driven, AI-assisted development workflows with quality gates and user validation checkpoints.
+name: PRD Generator for TaskMaster
+description: Smart PRD generator with TaskMaster integration. Detects existing PRDs and offers execute/update/replace options. Generates comprehensive technical PRDs optimized for task breakdown, validates with 13 automated checks, and optionally executes tasks autonomously with datetime tracking and rollback support. Use when user requests "PRD", "product requirements", or mentions task-driven development. Default: PRD generation + handoff to TaskMaster. Optional: autonomous execution with 4 modes.
 allowed-tools: [Read, Write, Edit, Grep, Glob, Bash, AskUserQuestion]
 ---
 
-# Taskmaster-Integrated PRD System v2.0
+# PRD Generator for TaskMaster v2.0
 
-Complete PRD generation system optimized for taskmaster AI task generation. Creates comprehensive, engineer-focused product requirements documents that enable effective task breakdown and implementation planning with built-in quality control, datetime tracking, and autonomous execution capabilities.
+Smart PRD generation system that detects existing PRDs and offers flexible workflows. Primarily generates comprehensive, engineer-focused product requirements documents optimized for TaskMaster task breakdown. Optionally executes tasks autonomously with quality control, datetime tracking, and validation checkpoints.
 
 ## When to Use This Skill
 
@@ -36,25 +36,26 @@ Do NOT activate for:
 
 **Complete Automation**: Provides 4 autonomous execution modes with git policies, progress logging, and datetime tracking.
 
-## Workflow Overview (11 Steps)
+## Workflow Overview (12 Steps)
 
-1. **Enable Plan Mode** - Ensure interactive prompts work
-2. **Detect Taskmaster** - MCP > CLI > Block if missing
-3. **Discovery Questions** - 12+ detailed questions
-4. **Initialize Taskmaster** - Via MCP/CLI (never manual)
-5. **Generate PRD** - Comprehensive 11-section document
-6. **Validate Quality** - 13 automated checks
-7. **Parse & Expand** - Combined operation with research
-8. **Insert User Tests** - Checkpoint every 5 tasks
-9. **Setup Tracking** - DateTime, rollback, accuracy scripts
-10. **Generate Execution Prompts** - 4 autonomous modes
-11. **Interactive Selection** - User picks mode (type 1/2/3/4)
+1. **Enable Plan Mode & Check State** - Resume detection + interactive prompts
+2. **Detect Existing PRD** - Smart detection with execute/update/replace options
+3. **Detect Taskmaster** - MCP > CLI > Block if missing
+4. **Discovery Questions** - 12+ detailed questions (if generating new PRD)
+5. **Initialize Taskmaster** - Via MCP/CLI (if not already initialized)
+6. **Generate PRD** - Comprehensive 11-section document (if creating new)
+7. **Validate Quality** - 13 automated checks
+8. **Parse & Expand** - Combined operation with research
+9. **Insert User Tests** - Checkpoint every 5 tasks
+10. **Setup Tracking** - DateTime, rollback, accuracy scripts
+11. **Choose Next Action** - Handoff to TaskMaster OR autonomous execution
+12. **Summary & Start** - Present overview and begin work
 
 ---
 
 ## Detailed Implementation
 
-### Step 0: Enable Plan Mode & Check for Incomplete Work
+### Step 1: Enable Plan Mode & Check for Incomplete Work
 
 **FIRST ACTION** when skill activates:
 
@@ -67,7 +68,7 @@ Do NOT activate for:
    - This ensures AskUserQuestion tool works properly
    - Inform user: "Enabling plan mode for interactive prompts..."
 
-3. Proceed to Step 1
+3. Proceed to Step 2
 ```
 
 **Auto-Resume if Crash Detected:**
@@ -95,7 +96,132 @@ Type: 1, 2, 3, or 4
 
 ---
 
-### Step 1: Detect Taskmaster (MANDATORY - Blocks if Missing)
+### Step 2: Detect Existing PRD (Smart Detection)
+
+**SECOND ACTION**: Check if PRD already exists before generating new one.
+
+**Detection Logic:**
+
+```
+1. Check if .taskmaster/ exists:
+   - Use Glob: .taskmaster/
+   - NO → New project, proceed to Step 3 (detect taskmaster)
+   - YES → Continue to check for PRD
+
+2. Check for existing PRD:
+   - Use Glob: .taskmaster/docs/*.md or .taskmaster/docs/prd.*
+   - Read .taskmaster/tasks/tasks.json to get task count and status
+   - Found PRD → Show existing PRD options (below)
+   - No PRD → Proceed to Step 3 (detect taskmaster)
+```
+
+**If Existing PRD Found:**
+
+```
+🔍 Found existing PRD: {filename}
+
+📄 PRD Details:
+  - Created: {date from file}
+  - Location: .taskmaster/docs/{filename}
+  - Tasks: {X total} ({Y completed}, {Z pending})
+  - Status: {% complete}
+
+What would you like to do?
+
+  1. Execute tasks from existing PRD
+     → Skip to Step 11 (choose execution mode)
+     → Start working on pending tasks
+
+  2. Update/refine existing PRD
+     → Edit current PRD with new requirements
+     → Re-parse to update tasks
+     → Merge with existing task list
+
+  3. Create new PRD (replace current)
+     → Confirm: "This will replace existing PRD. Continue?"
+     → Proceed to Step 3 (full PRD generation workflow)
+
+  4. Review existing PRD
+     → Show summary of current PRD
+     → Display task breakdown
+     → Exit skill
+
+Type: 1, 2, 3, or 4
+```
+
+**Option 1: Execute Existing Tasks**
+```
+User selects: 1
+
+✅ Using existing PRD: {filename}
+📋 Remaining tasks: {Z} pending tasks
+📍 Next checkpoint: {next USER-TEST}
+
+→ Skip to Step 11 (choose execution mode)
+```
+
+**Option 2: Update Existing PRD**
+```
+User selects: 2
+
+📝 What changes would you like to make?
+
+[User provides changes]
+
+✅ Updating PRD...
+→ Edit existing PRD file with changes
+→ Re-run parse-prd with --append flag
+→ Continue to Step 8 (insert user tests for new tasks only)
+→ Proceed to Step 11
+```
+
+**Option 3: Replace PRD**
+```
+User selects: 3
+
+⚠️  WARNING: This will replace your existing PRD and task list.
+
+Current work:
+  - {Y} tasks completed
+  - {Z} tasks pending
+  - All completed work will be preserved in git history
+  - Task files will be regenerated
+
+Type "yes" to confirm replacement, or "no" to cancel.
+
+[If yes]
+✅ Creating new PRD (old PRD backed up to .taskmaster/docs/prd-backup-{timestamp}.md)
+→ Proceed to Step 3 (full workflow)
+```
+
+**Option 4: Review**
+```
+User selects: 4
+
+📄 Current PRD Summary:
+  - Title: {title}
+  - Created: {date}
+  - Goals: {list top 3 goals}
+  - Requirements: {count functional requirements}
+  - Tasks: {X total} ({Y completed}, {Z pending})
+
+[Display executive summary and key sections]
+
+✅ Review complete. Skill exiting.
+```
+
+**If No PRD Found (but .taskmaster/ exists):**
+```
+🔍 Found .taskmaster/ directory (initialized)
+📄 No PRD found
+
+Creating PRD for TaskMaster...
+→ Proceed to Step 3 (detect taskmaster, already initialized)
+```
+
+---
+
+### Step 3: Detect Taskmaster (MANDATORY - Blocks if Missing)
 
 **CRITICAL**: Must detect taskmaster BEFORE proceeding with PRD generation.
 
@@ -148,7 +274,7 @@ Please install taskmaster and type 'done' when ready.
 
 ---
 
-### Step 2: Discovery (Comprehensive Requirements Gathering)
+### Step 4: Discovery (Comprehensive Requirements Gathering)
 
 Ask detailed questions to ensure comprehensive PRD:
 
@@ -180,7 +306,7 @@ Ask detailed questions to ensure comprehensive PRD:
 
 ---
 
-### Step 3: Initialize Taskmaster Project
+### Step 5: Initialize Taskmaster Project
 
 **CRITICAL**: Initialize ONLY via taskmaster MCP/CLI. NEVER create .taskmaster/ manually.
 
@@ -216,7 +342,7 @@ taskmaster init --yes --store-tasks-in-git --rules=claude
 
 ---
 
-### Step 4: Generate Comprehensive PRD
+### Step 6: Generate Comprehensive PRD
 
 Write PRD to `.taskmaster/docs/prd.md`
 
@@ -284,7 +410,7 @@ Write PRD to `.taskmaster/docs/prd.md`
 
 ---
 
-### Step 5: Validate PRD Quality (13 Automated Checks)
+### Step 7: Validate PRD Quality (13 Automated Checks)
 
 **Required Elements (5 checks):**
 1. ✅ Executive summary exists (2-3 sentences)
@@ -336,7 +462,7 @@ Quality Score: 55/60 (GOOD - minor improvements suggested)
 
 ---
 
-### Step 6: Parse PRD & Expand Tasks (Single Combined Operation)
+### Step 8: Parse PRD & Expand Tasks (Single Combined Operation)
 
 **IMPORTANT**: Combine parse-prd + expand-all with research into ONE operation.
 
@@ -386,7 +512,7 @@ taskmaster expand-all --research
 
 ---
 
-### Step 7: Insert User Testing Tasks (Every 5 Tasks)
+### Step 9: Insert User Testing Tasks (Every 5 Tasks)
 
 **CRITICAL NEW REQUIREMENT**: After tasks are expanded, insert user-facing testing tasks.
 
@@ -479,7 +605,7 @@ taskmaster add-task \
 
 ---
 
-### Step 8: Setup Tracking Scripts
+### Step 10: Setup Tracking Scripts
 
 Create automation scripts in `.taskmaster/scripts/`:
 
@@ -497,53 +623,83 @@ See sections below for complete script implementations.
 
 ---
 
-### Step 9: Generate 4 Autonomous Execution Prompts
-
-Generate prompts for different execution modes. User will choose one in Step 10.
-
-**Prompt 1: Sequential to Checkpoint**
-- Executes tasks one-by-one until next USER-TEST
-- Stops for user validation
-- Best for quality control
-- RECOMMENDED for first-time features
-
-**Prompt 2: Parallel to Checkpoint**
-- Executes independent tasks in parallel
-- Stops at next USER-TEST
-- Faster execution
-- Good for experienced users
-
-**Prompt 3: Full Autonomous**
-- Runs ALL tasks in parallel without stopping
-- Auto-completes USER-TEST tasks
-- Fastest execution
-- WARNING: Skips manual validation
-
-**Prompt 4: Manual Control**
-- User decides which tasks to run
-- Full control over execution
-- No autonomous execution
-
-**All prompts include:**
-- Strict git branching policies (branch per task, sub-branch per subtask)
-- Commit checkpoints after every task
-- Progress logging to .taskmaster/docs/progress.md
-- Datetime tracking with track-time.py
-- Autonomous execution (no user input except at checkpoints)
-
-See full prompt templates in implementation section below.
-
 ---
 
-### Step 10: Interactive Selection (AskUserQuestion)
+### Step 11: Choose Next Action (Handoff vs Autonomous Execution)
 
-**Use AskUserQuestion tool** to let user choose execution mode:
+**CRITICAL CHOICE**: After PRD and tasks are ready, ask user how they want to proceed.
+
+**Use AskUserQuestion tool** to present two main options:
 
 ```
 Use AskUserQuestion:
 
 questions:
-  - question: "How would you like to execute these tasks?"
+  - question: "Your PRD and tasks are ready. How would you like to proceed?"
+    header: "Next Action"
+    multiSelect: false
+    options:
+      - label: "Show TaskMaster Commands"
+        description: "Hand off to TaskMaster. I'll show you the commands to run tasks manually. Full control."
+
+      - label: "Autonomous Execution"
+        description: "I'll execute tasks for you autonomously with 4 execution modes to choose from."
+```
+
+**Option A: Handoff to TaskMaster (DEFAULT)**
+
+If user selects "Show TaskMaster Commands":
+
+```
+✅ PRD Complete: .taskmaster/docs/prd.md
+📋 Tasks Ready: {X} tasks ({Y} subtasks)
+📍 Next checkpoint: {next USER-TEST}
+
+🚀 TaskMaster Commands (Use these to work on tasks):
+
+Sequential Execution:
+  taskmaster next-task        # Get next available task
+  taskmaster get-task {id}    # Work on specific task
+  taskmaster set-task-status {id} --status=done
+
+Parallel Execution (for independent tasks):
+  taskmaster get-tasks --status=pending --with-subtasks
+  # Work on multiple tasks simultaneously
+
+Progress Tracking:
+  taskmaster get-tasks --with-subtasks    # See all tasks
+  python3 .taskmaster/scripts/track-time.py start {task_id}
+  python3 .taskmaster/scripts/track-time.py complete {task_id}
+
+Quality & Safety:
+  bash .taskmaster/scripts/rollback.sh {task_id}    # Rollback to checkpoint
+  python3 .taskmaster/scripts/security-audit.py     # Security check
+
+📚 Documentation:
+  - PRD: .taskmaster/docs/prd.md
+  - Tasks: .taskmaster/tasks/
+  - Progress: .taskmaster/docs/progress.md
+
+💡 Tip: Use TaskMaster MCP tools for the best experience!
+
+Ready to start? Run: taskmaster next-task
+```
+
+Then EXIT the skill (skill complete).
+
+---
+
+**Option B: Autonomous Execution**
+
+If user selects "Autonomous Execution":
+
+Ask follow-up question with 4 execution modes:
+
+```
+Use AskUserQuestion:
+
+questions:
+  - question: "Select autonomous execution mode:"
     header: "Execution Mode"
     multiSelect: false
     options:
@@ -560,41 +716,74 @@ questions:
         description: "You decide which tasks to run. Full control over execution."
 ```
 
-**After user selects:**
+**Execution Mode Details:**
+
+**Mode 1: Sequential to Checkpoint**
+- Executes tasks one-by-one until next USER-TEST
+- Stops for user validation
+- Best for quality control
+- RECOMMENDED for first-time features
+
+**Mode 2: Parallel to Checkpoint**
+- Executes independent tasks in parallel
+- Stops at next USER-TEST
+- Faster execution
+- Good for experienced users
+
+**Mode 3: Full Autonomous**
+- Runs ALL tasks in parallel without stopping
+- Auto-completes USER-TEST tasks
+- Fastest execution
+- WARNING: Skips manual validation
+
+**Mode 4: Manual Control**
+- User decides which tasks to run
+- Full control over execution
+- No autonomous execution
+
+**All execution modes include:**
+- Strict git branching policies (branch per task, sub-branch per subtask)
+- Commit checkpoints after every task
+- Progress logging to .taskmaster/docs/progress.md
+- Datetime tracking with track-time.py
+- Autonomous execution (no user input except at checkpoints)
+
+**After mode selected:**
 
 1. Store their selection
 2. Output the corresponding full execution prompt
-3. Recognize if user types just "1", "2", "3", or "4" in next message
-4. Auto-execute that prompt
+3. Recognize if user types "begin" or "start"
+4. Begin autonomous execution
 
 **Claude Recommendation:**
 
 Based on context, recommend the best option:
-- First-time feature OR critical system → Option 1 (Sequential)
-- Experienced user OR non-critical → Option 2 (Parallel)
-- Trusted implementation OR time-critical → Option 3 (Full)
-- Complex requirements OR learning → Option 4 (Manual)
+- First-time feature OR critical system → Mode 1 (Sequential)
+- Experienced user OR non-critical → Mode 2 (Parallel)
+- Trusted implementation OR time-critical → Mode 3 (Full)
+- Complex requirements OR learning → Mode 4 (Manual)
 
-Display recommendation: "⭐ Claude Recommends: Option {N}"
+Display recommendation: "⭐ Claude Recommends: Mode {N}"
+
+See full execution prompt templates in "EXECUTION PROMPT TEMPLATES" section below.
 
 ---
 
-### Step 11: Re-Enable Plan Mode & Present Summary
+### Step 12: Present Final Summary
 
-**Final Actions:**
+**Summary depends on the path taken:**
 
-1. Check if plan mode is still enabled
-2. If disabled: Re-enable plan mode
-3. Inform user: "Plan mode ready for future interactions"
+---
 
-**Present Comprehensive Summary:**
+**If Handoff to TaskMaster (Step 11 Option A):**
 
 ```
+✅ PRD COMPLETE
+
 📄 PRD Created: .taskmaster/docs/prd.md
 ✅ Taskmaster Initialized: Using {MCP/CLI}
 📋 Tasks Generated: {X} tasks ({Y} implementation + {Z} user tests)
 🔄 Tasks Expanded: {N} subtasks
-🤖 CLAUDE.md Generated: Project root (TDD workflow guide)
 📊 Scripts Created: .taskmaster/scripts/ (5 automation scripts)
 
 📊 Overview:
@@ -608,14 +797,8 @@ Display recommendation: "⭐ Claude Recommends: Option {N}"
   2. {Second functional requirement}
   3. {Third functional requirement}
 
-🔧 Technical Highlights:
-  - Architecture: {key decision}
-  - Integration: {main integration point}
-  - Database: {schema changes}
-
 ⚠️ Quality Validation: {score}/60
   ✅ All 13 validation checks passed
-  ✅ Ready for execution
 
 📋 Task Breakdown:
   - Phase 1: {X} tasks
@@ -628,21 +811,59 @@ Display recommendation: "⭐ Claude Recommends: Option {N}"
   - USER-TEST-2: After Task {N}
   - USER-TEST-3: After Task {N}
 
-🚀 Ready to Execute!
+🚀 Next Steps:
 
-Selected: {execution mode}
+Run: taskmaster next-task
+
+Or use TaskMaster MCP tools to manage tasks.
+
+See commands above for full TaskMaster usage.
+
+✨ PRD generation complete! Ready to build.
+```
+
+Then EXIT skill.
+
+---
+
+**If Autonomous Execution (Step 11 Option B):**
+
+```
+✅ PRD COMPLETE - STARTING AUTONOMOUS EXECUTION
+
+📄 PRD: .taskmaster/docs/prd.md
+✅ Taskmaster: Using {MCP/CLI}
+📋 Tasks: {X} tasks ({Y} implementation + {Z} user tests)
+🔄 Subtasks: {N} subtasks
+📊 Scripts: Ready (.taskmaster/scripts/)
+
+📊 Overview:
+  - Feature: {name}
+  - Complexity: {Simple/Medium/Complex}
+  - Mode: {Selected execution mode}
+  - Next Checkpoint: {next USER-TEST}
+
+⚠️ Quality: {score}/60 ✅
+
+🚀 Execution Starting!
+
+Selected: {execution mode name}
 
 [If Sequential/Parallel:]
 Next: Tasks {start}-{end} → USER-TEST-{N}
+Working autonomously until checkpoint...
 
 [If Full Autonomous:]
 All {X} tasks will execute in parallel
+Working autonomously until complete...
 
 [If Manual:]
-Use taskmaster commands to manage tasks
+Awaiting your commands...
 
 Type "begin" or "start" to execute!
 ```
+
+Then PROCEED to autonomous execution using the selected mode's prompt template (see EXECUTION PROMPT TEMPLATES section).
 
 ---
 
@@ -989,6 +1210,12 @@ For complete script implementations, see:
 
 ## Tips for Best Results
 
+**Understand the Workflow:**
+- This skill PRIMARILY generates PRDs (with optional execution)
+- If you already have a PRD, the skill will detect it and offer options
+- Default behavior: Generate PRD → Hand off to TaskMaster
+- Optional: Choose autonomous execution after PRD is ready
+
 **Provide Context Upfront:**
 - More detail in discovery → Better PRD
 - Share constraints, dependencies, assumptions
@@ -999,7 +1226,21 @@ For complete script implementations, see:
 - Define what "done" looks like
 - Specify how you'll measure success
 
-**Leverage Automation:**
+**Choose the Right Path:**
+- **Handoff to TaskMaster** (Default): Best if you want full control
+- **Autonomous Execution**: Best if you trust the process and want speed
+  - Sequential to Checkpoint: Quality-focused, stops for validation
+  - Parallel to Checkpoint: Faster, stops at checkpoints
+  - Full Autonomous: Maximum speed, skips validation
+  - Manual Control: You decide every step
+
+**If Using Existing PRD:**
+- Option 1: Execute tasks (pick up where you left off)
+- Option 2: Update PRD (add new requirements)
+- Option 3: Replace PRD (start fresh, old PRD backed up)
+- Option 4: Review PRD (just read it)
+
+**Leverage Automation (if using autonomous execution):**
 - Use datetime tracking to improve estimates
 - Use rollback if you need to undo work
 - Let accuracy learning adjust your estimates
@@ -1009,9 +1250,9 @@ For complete script implementations, see:
 - USER-TEST checkpoints catch issues early
 - Git checkpoints allow easy rollback
 - Progress.md shows exactly what happened
-- Autonomous execution saves time
+- TaskMaster integration ensures smooth workflow
 
 ---
 
-**Remember**: A comprehensive PRD with automated quality control, datetime tracking, and validation checkpoints is the foundation of successful implementation. Plan carefully, validate often, ship confidently.
+**Remember**: A comprehensive PRD with automated quality control and TaskMaster integration is the foundation of successful implementation. This skill focuses on creating that foundation. Execution is optional - you can always hand off to TaskMaster for more control.
 
