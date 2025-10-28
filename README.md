@@ -571,3 +571,38 @@ MIT License - Use freely, modify as needed, share improvements if you want.
 **Made with Claude Code** | **Status: Beta** | **Feedback Welcome**
 
 *Planning is 95% of the work. Start with a solid PRD.*
+
+## What's New in v2.0 (Top 5 Enhancements)
+
+### 1. Real DateTime Tracking
+- Precise UTC timestamps for all tasks/subtasks
+- Automatic duration calculation
+- JSON state persistence
+- Compare actual vs estimated time
+
+### 2. Instant Rollback Command
+- Type "rollback to task X" any time during execution
+- Reverts to any checkpoint tag
+- Backs up current work before rollback
+- Safety confirmations
+
+### 3. Accuracy Learning System
+- Analyzes estimated vs actual times
+- Calculates adjustment factor
+- Recommends estimate improvements
+- Learns from your pace
+
+### 4. Security Audit Checklist
+- Auto-generated based on your code
+- Scans for security patterns
+- Standard security checks included
+- Automated scan suggestions
+
+### 5. Auto-Resume After Crash
+- Detects incomplete work from previous session
+- Offers multiple resume points
+- Continues exactly where crashed
+- No work lost
+
+All enhancements work seamlessly with MCP or CLI integration!
+
