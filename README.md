@@ -366,14 +366,42 @@ Catches common issues:
 
 ### Using with Taskmaster
 
+The skill now **automatically detects and prefers MCP** over CLI for seamless integration!
+
+#### Automatic Detection (Recommended)
+
+The skill will automatically:
+1. **Detect MCP Task-Master-AI** (if installed in Claude Code)
+2. **Fallback to CLI** (if MCP not available but CLI is installed)
+3. **Provide installation instructions** (if neither is available)
+
+**With MCP (PREFERRED):**
+- ✅ Seamless integration with direct function calls
+- ✅ No shell dependency
+- ✅ Automatic task initialization, parsing, and expansion
+- ✅ Query tasks using MCP tools directly in Claude Code
+
+The skill will automatically:
+- Initialize taskmaster project structure
+- Parse your PRD to generate tasks
+- Expand all tasks into subtasks
+- No manual CLI commands needed!
+
+**With CLI (Fallback):**
 ```bash
 # After PRD is generated:
 npm install -g task-master-ai
 cd your-project
 taskmaster init
-taskmaster generate    # Uses your PRD
-taskmaster start       # Begin implementation
+taskmaster parse-prd --input .taskmaster/docs/prd.md
+taskmaster expand-all --research
+taskmaster next-task  # Begin implementation
 ```
+
+**Without Taskmaster:**
+- Skill generates manual task files in `.taskmaster/tasks/`
+- Provides installation instructions for MCP or CLI
+- You can still follow the PRD and task files manually
 
 ### Customizing Templates
 

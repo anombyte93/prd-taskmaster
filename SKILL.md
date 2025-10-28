@@ -68,7 +68,7 @@ Ask detailed questions to ensure comprehensive PRD:
 
 ### Step 2: Environment Check
 
-Check for existing taskmaster setup:
+Check for existing taskmaster setup and available tools:
 
 ```bash
 # Check if .taskmaster/ exists
@@ -78,15 +78,31 @@ if [ -d ".taskmaster" ]; then
     Ask: "Found existing prd.md. Update it or create new version?"
   fi
 fi
-
-# Check if taskmaster CLI installed (optional, for later integration)
-which taskmaster
 ```
+
+**Detect Taskmaster Integration Method** (prioritize MCP over CLI):
+
+1. **Check for MCP Task-Master-AI** (PREFERRED):
+   - Attempt to use `mcp__task-master-ai__get_tasks` tool
+   - If available: MCP is installed and functional
+   - Set `TASKMASTER_METHOD="MCP"`
+   - Note: MCP provides superior integration (direct function calls, no shell dependency)
+
+2. **Fallback to CLI**:
+   - Run: `which taskmaster` or `taskmaster --version`
+   - If found: CLI is available
+   - Set `TASKMASTER_METHOD="CLI"`
+
+3. **Neither Available**:
+   - Set `TASKMASTER_METHOD="NONE"`
+   - Will provide installation instructions
 
 **Actions**:
 - If `.taskmaster/` exists → Respect existing structure, ask before overwriting
 - If no `.taskmaster/` → Will create it in Step 5
-- If taskmaster CLI not installed → Note for user (non-blocking)
+- MCP detected → Use MCP tools for all taskmaster operations (preferred)
+- CLI detected → Use CLI commands for taskmaster operations
+- Neither detected → Suggest installation options (non-blocking)
 
 ### Step 3: Codebase Analysis (if applicable)
 
@@ -333,9 +349,104 @@ Parallelizable: [1.2, 2.2], [3.1, 4.1]
 
 Add this section to PRD as appendix or separate file (`.taskmaster/docs/task-hints.md`)
 
-### Step 8: Expand High-Level Tasks into Actionable Sub-Tasks
+### Step 8: Initialize Taskmaster Project (MCP/CLI Integration)
 
-**CRITICAL STEP**: After generating the PRD, expand high-level tasks into detailed, actionable sub-tasks that can be implemented immediately.
+**NEW STEP**: After generating the PRD, initialize taskmaster and optionally parse the PRD to generate tasks.
+
+**Method Selection** (based on Step 2 detection):
+
+#### Option A: MCP Integration (PREFERRED if available)
+
+If `TASKMASTER_METHOD="MCP"`:
+
+1. **Initialize Taskmaster Project**:
+   ```
+   Use mcp__task-master-ai__initialize_project with:
+   - projectRoot: Current directory (absolute path)
+   - yes: true (skip prompts)
+   - storeTasksInGit: true
+   - initGit: false (if git already initialized)
+   ```
+
+2. **Parse PRD to Generate Tasks**:
+   ```
+   Use mcp__task-master-ai__parse_prd with:
+   - projectRoot: Current directory (absolute path)
+   - input: ".taskmaster/docs/prd.md" (or prd.txt if using plain text)
+   - numTasks: Estimated based on PRD complexity (10-30 for typical projects)
+   - research: true (for better task generation)
+   ```
+
+3. **Expand All Tasks** (optional, ask user first):
+   ```
+   Use mcp__task-master-ai__expand_all with:
+   - projectRoot: Current directory (absolute path)
+   - research: true
+   - force: false
+   ```
+
+#### Option B: CLI Integration (Fallback)
+
+If `TASKMASTER_METHOD="CLI"`:
+
+1. **Initialize Taskmaster Project**:
+   ```bash
+   taskmaster init --yes --store-tasks-in-git
+   ```
+
+2. **Parse PRD to Generate Tasks**:
+   ```bash
+   taskmaster parse-prd --input .taskmaster/docs/prd.md --num-tasks 15 --research
+   ```
+
+3. **Expand All Tasks** (optional, ask user first):
+   ```bash
+   taskmaster expand-all --research
+   ```
+
+#### Option C: Manual Instructions
+
+If `TASKMASTER_METHOD="NONE"`:
+
+Provide installation instructions:
+```
+📦 Taskmaster Not Detected
+
+To use taskmaster AI for automated task generation:
+
+Option 1 (RECOMMENDED): Install MCP Task-Master-AI
+  - Add to Claude Code MCP settings
+  - Provides seamless integration with direct function calls
+  - See: https://github.com/cyanheads/task-master-ai
+
+Option 2: Install CLI
+  - npm install -g task-master-ai
+  - Use command-line interface
+  - See: https://github.com/cyanheads/task-master-ai
+
+After installation, you can:
+  1. Initialize: taskmaster init
+  2. Parse PRD: taskmaster parse-prd --input .taskmaster/docs/prd.md
+  3. Start work: taskmaster next-task
+```
+
+**User Confirmation Before Execution**:
+
+Before running taskmaster initialization/parsing, ask:
+```
+"I've detected [MCP/CLI/no] taskmaster installation.
+
+Would you like me to:
+  1. Initialize taskmaster project structure
+  2. Parse the PRD to auto-generate tasks
+  3. Expand all tasks into subtasks (recommended)
+
+Note: Using [MCP/CLI] method for seamless integration."
+```
+
+### Step 9: Expand High-Level Tasks into Actionable Sub-Tasks (Manual Method)
+
+**ALTERNATIVE TO STEP 8**: If user declines automated taskmaster integration, manually expand high-level tasks into detailed, actionable sub-tasks.
 
 **Task Expansion Process**:
 
@@ -451,14 +562,18 @@ For each task in the roadmap, create expanded task files in `.taskmaster/tasks/`
 - Clear acceptance criteria prevent misunderstandings
 - Test cases ensure quality
 
-### Step 9: Present to User
+### Step 10: Present to User
 
-Show comprehensive summary with actionable next steps:
+Show comprehensive summary with actionable next steps (adapt based on integration method):
 
-**Summary Format**:
+**Summary Format** (adapt based on method):
+
+#### If MCP Integration Used:
 ```
 📄 PRD Created: .taskmaster/docs/prd.md
-📋 Tasks Expanded: .taskmaster/tasks/ (39 task files)
+✅ Taskmaster Initialized: Using MCP (seamless integration)
+📋 Tasks Generated: [X] tasks from PRD parsing
+🔄 Tasks Expanded: All [X] tasks expanded into subtasks
 🤖 CLAUDE.md Generated: Project root (TDD workflow guide)
    [+ codex.md if user requested]
 
@@ -489,7 +604,114 @@ Show comprehensive summary with actionable next steps:
   - Phase 3: 9 tasks expanded (TASK-017 to TASK-025)
   - Phase 4: 14 tasks expanded (TASK-026 to TASK-039)
 
-🚀 Next Steps:
+🚀 Next Steps (MCP Method):
+  1. Review PRD: .taskmaster/docs/prd.md
+  2. Review CLAUDE.md: Project workflow guide (TDD, agents, validation)
+  3. View tasks: Use mcp__task-master-ai__get_tasks to see all tasks
+  4. Get next task: Use mcp__task-master-ai__next_task
+  5. Update progress: Use mcp__task-master-ai__set_task_status
+  6. View specific task: Use mcp__task-master-ai__get_task --id=[X]
+
+📝 Open Questions ([X] remaining):
+  1. [Question 1] - needs decision from [owner]
+  2. [Question 2] - needs research on [topic]
+
+🎯 Ready to Start Coding:
+  ✅ Taskmaster fully initialized and integrated via MCP
+  ✅ All tasks generated and expanded automatically
+  ✅ Can query tasks using MCP tools
+  ✅ No blockers - can start immediately
+```
+
+#### If CLI Integration Used:
+```
+📄 PRD Created: .taskmaster/docs/prd.md
+✅ Taskmaster Initialized: Using CLI
+📋 Tasks Generated: [X] tasks from PRD parsing
+🔄 Tasks Expanded: All [X] tasks expanded into subtasks
+🤖 CLAUDE.md Generated: Project root (TDD workflow guide)
+   [+ codex.md if user requested]
+
+📊 Overview:
+  - Feature: [Name]
+  - Complexity: [Simple/Medium/Complex]
+  - Estimated Effort: [X tasks, ~Y hours]
+  - Key Goal: [Primary success metric]
+
+🎯 Key Requirements:
+  1. [Top functional requirement]
+  2. [Second functional requirement]
+  3. [Third functional requirement]
+
+🔧 Technical Highlights:
+  - Architecture: [Key architectural decision]
+  - Integration: [Main integration point]
+  - Database: [Schema changes]
+
+⚠️ Quality Validation:
+  ✅ All required elements present
+  ✅ All tasks expanded via CLI
+  ⚠️ 2 minor improvements suggested (see validation section in PRD)
+
+📋 Task Breakdown:
+  - Phase 1: [X] tasks generated
+  - Phase 2: [X] tasks generated
+  - Phase 3: [X] tasks generated
+  - Phase 4: [X] tasks generated
+
+🚀 Next Steps (CLI Method):
+  1. Review PRD: .taskmaster/docs/prd.md
+  2. Review CLAUDE.md: Project workflow guide (TDD, agents, validation)
+  3. View tasks: taskmaster get-tasks
+  4. Get next task: taskmaster next-task
+  5. Update progress: taskmaster set-task-status --id=[X] --status=in-progress
+  6. View specific task: taskmaster get-task --id=[X]
+
+📝 Open Questions ([X] remaining):
+  1. [Question 1] - needs decision from [owner]
+  2. [Question 2] - needs research on [topic]
+
+🎯 Ready to Start Coding:
+  ✅ Taskmaster CLI initialized and tasks generated
+  ✅ Can manage tasks using CLI commands
+  ✅ No blockers - can start immediately
+```
+
+#### If Manual Method Used (No Taskmaster):
+```
+📄 PRD Created: .taskmaster/docs/prd.md
+📋 Tasks Expanded: .taskmaster/tasks/ (39 task files - manually created)
+🤖 CLAUDE.md Generated: Project root (TDD workflow guide)
+   [+ codex.md if user requested]
+
+📊 Overview:
+  - Feature: [Name]
+  - Complexity: [Simple/Medium/Complex]
+  - Estimated Effort: [X tasks, ~Y hours]
+  - Key Goal: [Primary success metric]
+
+🎯 Key Requirements:
+  1. [Top functional requirement]
+  2. [Second functional requirement]
+  3. [Third functional requirement]
+
+🔧 Technical Highlights:
+  - Architecture: [Key architectural decision]
+  - Integration: [Main integration point]
+  - Database: [Schema changes]
+
+⚠️ Quality Validation:
+  ✅ All required elements present
+  ✅ All tasks expanded with sub-tasks manually
+  ⚠️ 2 minor improvements suggested (see validation section in PRD)
+
+📋 Task Breakdown:
+  - Phase 1: 10 tasks expanded (TASK-001 to TASK-010)
+  - Phase 2: 6 tasks expanded (TASK-011 to TASK-016)
+  - Phase 3: 9 tasks expanded (TASK-017 to TASK-025)
+  - Phase 4: 14 tasks expanded (TASK-026 to TASK-039)
+
+🚀 Next Steps (Manual Method):
   1. Review PRD: .taskmaster/docs/prd.md
   2. Review CLAUDE.md: Project workflow guide (TDD, agents, validation)
   3. Review first sprint tasks: .taskmaster/tasks/TASK-001-* through TASK-005-*
@@ -497,6 +719,10 @@ Show comprehensive summary with actionable next steps:
   5. Mark sub-tasks complete as you go (checkbox format)
   6. Use /blind-validator before marking tasks complete
   7. When task complete, move to TASK-002
+
+💡 Optional: Install taskmaster for better task management:
+  - Option 1 (Recommended): Install MCP - see CLAUDE.md for instructions
+  - Option 2: Install CLI - npm install -g task-master-ai
 
 📝 Open Questions ([X] remaining):
   1. [Question 1] - needs decision from [owner]
