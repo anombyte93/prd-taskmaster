@@ -3,7 +3,7 @@
 > **Comprehensive PRD generation optimized for AI-assisted development workflows**
 
 [![Claude Code Skill](https://img.shields.io/badge/Claude_Code-Skill-8A2BE2)](https://github.com/anombyte93/prd-taskmaster)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/anombyte93/prd-taskmaster/blob/main/LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/anombyte93/prd-taskmaster/blob/master/LICENSE)
 [![Status: Beta](https://img.shields.io/badge/Status-Beta-orange)](https://github.com/anombyte93/prd-taskmaster)
 [![GitHub stars](https://img.shields.io/github/stars/anombyte93/prd-taskmaster)](https://github.com/anombyte93/prd-taskmaster/stargazers)
 [![GitHub last commit](https://img.shields.io/github/last-commit/anombyte93/prd-taskmaster)](https://github.com/anombyte93/prd-taskmaster/commits)
