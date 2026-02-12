@@ -9,6 +9,19 @@
 [![GitHub last commit](https://img.shields.io/github/last-commit/anombyte93/prd-taskmaster)](https://github.com/anombyte93/prd-taskmaster/commits)
 [![GitHub issues](https://img.shields.io/github/issues/anombyte93/prd-taskmaster)](https://github.com/anombyte93/prd-taskmaster/issues)
 
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/anombyte93/prd-taskmaster/master/install.sh | bash
+```
+
+This installs the skill to `~/.claude/skills/prd-taskmaster/`. Run the same command to upgrade.
+
+**Check for updates:**
+```bash
+bash ~/.claude/skills/prd-taskmaster/install.sh --check-update
+```
+
 ## What is This?
 
 A Claude Code skill that generates **detailed, engineer-focused Product Requirements Documents (PRDs)** designed to work seamlessly with AI task breakdown tools like Taskmaster.
