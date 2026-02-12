@@ -15,7 +15,7 @@
 curl -fsSL https://raw.githubusercontent.com/anombyte93/prd-taskmaster/master/install.sh | bash
 ```
 
-This installs the skill to `~/.claude/skills/prd-taskmaster/`. Run the same command to upgrade.
+This installs the skill to `~/.claude/skills/prd-taskmaster/`. Run the same command to upgrade -- the installer checks for updates and only overwrites when there are changes.
 
 **Check for updates:**
 ```bash
@@ -53,41 +53,22 @@ This skill:
 
 This skill works with **Claude Code CLI** and **Codex** (VS Code extension). Choose your tool below:
 
-### Option A: Claude Code CLI (Recommended)
-
-**Prerequisites:**
-- Claude Code CLI installed ([installation guide](https://docs.claude.com/en/docs/claude-code/installation))
-- Git
-
-**Install the skill:**
+### Option A: One-Liner (Recommended)
 
 ```bash
-# Clone to your Claude Code skills directory
+curl -fsSL https://raw.githubusercontent.com/anombyte93/prd-taskmaster/master/install.sh | bash
+```
+
+The installer handles everything: cloning, updating, and placing files in `~/.claude/skills/prd-taskmaster/`.
+
+### Option B: Manual Clone
+
+```bash
 cd ~/.claude/skills
 git clone https://github.com/anombyte93/prd-taskmaster.git
 ```
 
-**Verify installation:**
-
-```bash
-# Start Claude Code in any project
-claude
-
-# In the chat, type:
-# "I want a PRD for adding dark mode"
-```
-
-Claude Code should recognize the skill and activate it automatically!
-
-**Troubleshooting:**
-- If skill doesn't activate, check it's in `~/.claude/skills/prd-taskmaster/`
-- Verify `SKILL.md` exists in that directory
-- Try restarting Claude Code
-- Check skill is enabled: Look for the skill description when typing "/help" or similar commands
-
----
-
-### Option B: Codex (Untested)
+### Option C: Codex (Untested)
 
 **Prerequisites:**
 - Codex ([see](https://github.com/openai/codex/blob/main/README.md))
@@ -108,15 +89,6 @@ cd prd-taskmaster
 2. Initialize Codex: `/init`
 3. Codex will read `SKILL.md` and understand how to generate PRDs
 
-**Verify installation:**
-
-Ask Codex:
-```
-What would you do if I told you to generate a PRD?
-```
-
-Confirm it outputs something similar to the workflow described in this README.
-
 **Using the generated codex.md:**
 
 When the skill generates a PRD for your project, it will ask if you're using Codex:
@@ -125,11 +97,22 @@ When the skill generates a PRD for your project, it will ask if you're using Cod
 
 The `codex.md` file guides Codex to follow TDD workflow, use agents, and maintain quality gates throughout development.
 
+**Verify installation:**
+
+```bash
+# Start Claude Code in any project
+claude
+
+# In the chat, type:
+# "I want a PRD for adding dark mode"
+```
+
+Claude Code should recognize the skill and activate it automatically.
+
 **Troubleshooting:**
-- Check you cloned to the correct directory
-- Check you ran Codex in the `prd-taskmaster` directory
-- Run `/init` to ensure Codex reads `SKILL.md`
-- Verify `SKILL.md` exists in the directory
+- If skill doesn't activate, check it's in `~/.claude/skills/prd-taskmaster/`
+- Verify `SKILL.md` exists in that directory
+- Try restarting Claude Code
 
 ---
 
@@ -151,39 +134,20 @@ Once installed, just tell Claude/Codex you want a PRD:
 
 ### What Happens Next
 
-The skill will:
+The skill runs a 12-step workflow:
 
-1. **Ask you 12+ detailed questions**
-   - What problem are you solving?
-   - Who's the target user?
-   - What are success metrics?
-   - What's the tech stack?
-   - Any constraints or dependencies?
-
-2. **Analyze your codebase** (if applicable)
-   - Scans for related code
-   - Identifies integration points
-   - References existing patterns
-
-3. **Generate a comprehensive PRD**
-   - All essential sections included
-   - Task breakdown hints
-   - Complexity estimates
-
-4. **Set up taskmaster integration**
-   - Creates `.taskmaster/` directory
-   - Places PRD in correct location
-   - Updates `.gitignore`
-
-5. **Validate everything**
-   - 13 automated quality checks
-   - Warns about vague language
-   - Scores PRD quality
-
-6. **Show you next steps**
-   - Summary of what was created
-   - Suggestions for taskmaster usage
-   - Open questions to address
+1. **Checks for existing work** - Detects previous PRDs and crash state for auto-resume
+2. **Offers options** - Execute, update, replace, or review existing PRDs
+3. **Detects Taskmaster** - MCP or CLI, blocks if neither is installed
+4. **Asks 12+ detailed questions** - Problem, users, metrics, tech stack, constraints
+5. **Initializes Taskmaster** - Sets up `.taskmaster/` directory structure
+6. **Generates a comprehensive PRD** - From templates, filled with your answers
+7. **Validates quality** - 13 automated checks with a letter grade
+8. **Parses and expands tasks** - Breaks PRD into actionable tasks with subtasks
+9. **Inserts user test checkpoints** - Every 5 tasks, a manual validation point
+10. **Sets up tracking scripts** - 5 scripts for time tracking, rollback, accuracy learning, security audit, and execution state
+11. **Generates CLAUDE.md** - TDD workflow guide for your project (if one doesn't exist)
+12. **Hands off or executes** - Your choice: command reference or autonomous execution in 4 modes
 
 ### First-Time Tips
 
@@ -199,7 +163,7 @@ The skill will:
 
 ## What You Get
 
-### 📄 Comprehensive PRD
+### Comprehensive PRD
 
 A complete product requirements document with:
 
@@ -213,7 +177,7 @@ A complete product requirements document with:
 - **Dependencies** - What depends on what
 - **Out of Scope** - What you're NOT building
 
-### 🗂️ Taskmaster Integration
+### Taskmaster Integration
 
 Automatically sets up:
 
@@ -224,12 +188,18 @@ Automatically sets up:
 │   └── architecture.md     # Placeholder for architecture docs
 ├── tasks/
 │   └── .gitkeep
+├── scripts/
+│   ├── track-time.py       # DateTime tracking per task
+│   ├── rollback.sh         # Rollback to any checkpoint
+│   ├── learn-accuracy.py   # Estimate vs actual analysis
+│   ├── security-audit.py   # Auto-generated security checks
+│   └── execution-state.py  # Crash recovery state
 ├── notes/
 │   └── .gitkeep
 └── .gitignore              # Updated to exclude taskmaster artifacts
 ```
 
-### 🤖 CLAUDE.md / codex.md - TDD Workflow Guide
+### CLAUDE.md / codex.md - TDD Workflow Guide
 
 Generates a comprehensive workflow file in your project root that guides Claude Code/Codex to:
 
@@ -240,24 +210,12 @@ Generates a comprehensive workflow file in your project root that guides Claude 
 - **Enforce quality gates** - Automated validation before marking tasks complete
 - **Follow taskmaster best practices** - Optimal workflow for AI-assisted development
 
-**Key sections:**
-- TDD workflow (RED → GREEN → REFACTOR cycle)
-- Agent usage guidelines (when/how to use each agent type)
-- Parallel task execution strategies
-- Validation & quality gates
-- Tool preferences & context optimization
-- Project-specific configuration (tech stack, test commands, etc.)
-
 **File naming:**
 - **Claude Code:** Creates `CLAUDE.md` (read automatically by Claude Code)
 - **Codex:** Creates `codex.md` (read by Codex when initialized with `/init`)
 - The skill will ask which tool you're using and create the appropriate file(s)
-- Both files have identical content
-- Includes instructions for keeping them in sync if you use both tools
 
-This ensures consistent, high-quality development across your entire project!
-
-### ✅ Quality Validation
+### Quality Validation
 
 13 automated checks ensure:
 - All required sections are present
@@ -267,74 +225,73 @@ This ensures consistent, high-quality development across your entire project!
 - Task breakdown hints are included
 - Dependencies are mapped
 
-### 📊 Example Output
+Grading scale: EXCELLENT (91%+), GOOD (83-90%), ACCEPTABLE (75-82%), NEEDS_WORK (<75%).
+
+### Example Output
 
 ```
-📄 PRD Created: .taskmaster/docs/prd.md
-🤖 CLAUDE.md Generated: Project root (TDD workflow guide)
-   + codex.md (if you're using Codex)
+PRD Created: .taskmaster/docs/prd.md
+CLAUDE.md Generated: Project root (TDD workflow guide)
 
-📊 Overview:
+Overview:
   - Feature: Two-Factor Authentication
   - Complexity: Medium
   - Estimated Effort: 26 tasks, ~119 hours
   - Key Goal: Reduce security incidents from 150/month to <10/month
 
-🎯 Key Requirements:
+Key Requirements:
   1. REQ-001: TOTP/SMS 2FA support
   2. REQ-002: Backup codes for recovery
   3. REQ-003: Login flow integration
 
-🔧 Technical Highlights:
+Technical Highlights:
   - Architecture: Auth service + Redis for sessions
   - Integration: Twilio for SMS delivery
   - Database: 2 new tables (user_2fa, backup_codes)
 
-⚠️ Quality Validation: 58/60 (EXCELLENT ✅)
-  ✅ All required elements present
-  ⚠️ 1 minor warning (REQ-007 has vague language)
+Quality Validation: 58/60 (EXCELLENT)
+  - All required elements present
+  - 1 minor warning (REQ-007 has vague language)
 
-📋 Suggested Task Breakdown:
+Suggested Task Breakdown:
   - Phase 1: 3 tasks (foundation)
   - Phase 2: 8 tasks (core features)
   - Phase 3: 5 tasks (testing)
 
-🚀 Next Steps:
+Next Steps:
   1. Review PRD: .taskmaster/docs/prd.md
-  2. Install taskmaster: npm install -g task-master-ai
-  3. Initialize: taskmaster init
-  4. Generate tasks: taskmaster generate
+  2. Generate tasks: taskmaster generate
+  3. Begin implementation: taskmaster next-task
 ```
 
 ## Who Is This For?
 
 ### Perfect For You If:
 
-- ✅ You use AI-assisted development workflows (Claude, Cursor, etc.)
-- ✅ You want to use Taskmaster or similar task breakdown tools
-- ✅ You're building features/products and need comprehensive specs
-- ✅ You prefer detailed planning before coding
-- ✅ You're tired of writing PRDs manually
+- You use AI-assisted development workflows (Claude, Cursor, etc.)
+- You want to use Taskmaster or similar task breakdown tools
+- You're building features/products and need comprehensive specs
+- You prefer detailed planning before coding
+- You're tired of writing PRDs manually
 
 ### Maybe Not For You If:
 
-- ❌ You prefer writing PRDs entirely yourself
-- ❌ You don't use AI development tools
-- ❌ You prefer minimal documentation
-- ❌ You work in a strict corporate environment with specific PRD templates
+- You prefer writing PRDs entirely yourself
+- You don't use AI development tools
+- You prefer minimal documentation
+- You work in a strict corporate environment with specific PRD templates
 
 ## Features
 
-### 🤖 Intelligent Discovery
+### Intelligent Discovery
 
-Asks smart questions:
-- What problem are you solving?
-- Who's the user?
-- What's the tech stack?
-- What are success metrics?
-- Timeline expectations?
+Asks smart questions across four categories:
+- **Essential (5):** Problem, users, solution, metrics, constraints
+- **Technical (4):** Codebase, tech stack, integrations, performance
+- **TaskMaster-specific (3):** Experience, complexity, timeline
+- **Open-ended (1):** Edge cases, additional context
 
-### 🔍 Codebase-Aware
+### Codebase-Aware
 
 If you're working in an existing codebase:
 - Scans related code
@@ -342,13 +299,13 @@ If you're working in an existing codebase:
 - Ensures consistency with existing patterns
 - Identifies integration points
 
-### 📐 Multiple Templates
+### Multiple Templates
 
 Choose based on project size:
 - **Comprehensive** (default) - Full 12-section PRD
 - **Minimal** - Quick template for simple features
 
-### 🎯 Taskmaster-Optimized
+### Taskmaster-Optimized
 
 Everything taskmaster needs:
 - Task breakdown hints
@@ -357,7 +314,7 @@ Everything taskmaster needs:
 - Acceptance criteria
 - Implementation notes
 
-### ✨ Smart Validation
+### Smart Validation
 
 Catches common issues:
 - Vague language ("fast", "secure" without specifics)
@@ -365,43 +322,64 @@ Catches common issues:
 - Non-testable requirements
 - Incomplete technical specs
 
+### Auto-Resume After Crash
+
+- Detects incomplete work from previous session
+- Offers multiple resume points (last subtask, current task, last checkpoint, fresh start)
+- Continues exactly where you left off
+- No work lost
+
 ## How It Works
 
-### The 8-Step Workflow
+### The 12-Step Workflow
 
-1. **Discovery** - Ask comprehensive questions
-2. **Environment Check** - Look for existing taskmaster setup
-3. **Codebase Analysis** - Understand existing code (if applicable)
-4. **PRD Generation** - Write comprehensive requirements
-5. **Directory Setup** - Create `.taskmaster/` structure
-6. **Validation** - Run 13 quality checks
-7. **Task Hints** - Suggest breakdowns and dependencies
-8. **Presentation** - Show summary and next steps
+| Step | Name | What Happens |
+|------|------|------|
+| 1 | Preflight & Resume | Detects existing state, offers crash recovery |
+| 2 | Detect Existing PRD | Offers execute/update/replace/review options |
+| 3 | Detect Taskmaster | Finds MCP or CLI, blocks if neither installed |
+| 4 | Discovery Questions | 12+ questions across 4 categories |
+| 5 | Initialize Taskmaster | Creates `.taskmaster/` directory structure |
+| 6 | Generate PRD | Fills template with your answers |
+| 7 | Validate Quality | 13 automated checks, letter grade |
+| 8 | Parse & Expand Tasks | Breaks PRD into tasks with subtasks |
+| 9 | Insert User Test Tasks | Manual checkpoints every 5 tasks |
+| 10 | Setup Tracking Scripts | 5 scripts for time, rollback, accuracy, security, state |
+| 10.5 | Generate CLAUDE.md | TDD workflow guide (skips if exists) |
+| 11 | Choose Next Action | Handoff with commands or autonomous execution |
+| 12 | Summary & Start | Display summary, begin work or exit |
+
+### Autonomous Execution Modes
+
+If you choose autonomous execution at Step 11, pick a mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Sequential to Checkpoint** | Tasks one-by-one, stops at each USER-TEST |
+| **Parallel to Checkpoint** | Up to 3 concurrent independent tasks, stops at USER-TEST |
+| **Full Autonomous** | Up to 5 concurrent, auto-completes USER-TEST checkpoints |
+| **Manual Control** | You decide each task: "next task", "task 5", "parallel 3,4" |
+
+All modes include: datetime tracking, git branching per task, checkpoint tags, rollback support, and progress logging.
 
 ## Advanced Usage
 
 ### Using with Taskmaster
 
-The skill now **automatically detects and prefers MCP** over CLI for seamless integration!
+The skill **automatically detects and prefers MCP** over CLI for seamless integration.
 
 #### Automatic Detection (Recommended)
 
 The skill will automatically:
 1. **Detect MCP Task-Master-AI** (if installed in Claude Code)
 2. **Fallback to CLI** (if MCP not available but CLI is installed)
-3. **Provide installation instructions** (if neither is available)
+3. **Block with installation instructions** (if neither is available)
 
-**With MCP (PREFERRED):**
-- ✅ Seamless integration with direct function calls
-- ✅ No shell dependency
-- ✅ Automatic task initialization, parsing, and expansion
-- ✅ Query tasks using MCP tools directly in Claude Code
-
-The skill will automatically:
-- Initialize taskmaster project structure
-- Parse your PRD to generate tasks
-- Expand all tasks into subtasks
-- No manual CLI commands needed!
+**With MCP (Preferred):**
+- Seamless integration with direct function calls
+- No shell dependency
+- Automatic task initialization, parsing, and expansion
+- Query tasks using MCP tools directly in Claude Code
 
 **With CLI (Fallback):**
 ```bash
@@ -414,11 +392,6 @@ taskmaster expand-all --research
 taskmaster next-task  # Begin implementation
 ```
 
-**Without Taskmaster:**
-- Skill generates manual task files in `.taskmaster/tasks/`
-- Provides installation instructions for MCP or CLI
-- You can still follow the PRD and task files manually
-
 ### Customizing Templates
 
 Edit templates in `templates/` directory:
@@ -429,24 +402,73 @@ Edit templates in `templates/` directory:
 
 Use the validation checklist:
 ```bash
-cat reference/validation-checklist.md
+cat ~/.claude/skills/prd-taskmaster/reference/validation-checklist.md
 ```
+
+Or re-run validation on any PRD:
+```bash
+python3 ~/.claude/skills/prd-taskmaster/script.py validate-prd --input .taskmaster/docs/prd.md
+```
+
+## Architecture: The Codification Pattern
+
+v3.0 introduced a clean separation between **AI judgment** and **deterministic operations**:
+
+```
+SKILL.md (303 lines)          script.py (37KB)
+  AI decides WHAT to do   -->   Script does HOW to do it
+  Questions, content,           File I/O, validation,
+  decisions, recommendations    calculations, templates
+```
+
+**SKILL.md** contains the workflow logic, decision points, and instructions for AI judgment calls -- what questions to ask, how to interpret answers, when to recommend fixes.
+
+**script.py** handles everything deterministic -- preflight checks, template loading, PRD validation (13 checks), task calculations, script generation, progress logging. Every command outputs JSON, making the interface clean and predictable.
+
+This pattern reduced SKILL.md from 1,343 lines to 303 lines (78% reduction) while making the skill more reliable -- deterministic operations don't depend on AI interpretation.
+
+### script.py Subcommands
+
+| Command | Purpose |
+|---------|---------|
+| `preflight` | Detect existing state, taskmaster, crash recovery |
+| `detect-taskmaster` | Find MCP or CLI installation |
+| `init-taskmaster` | Initialize `.taskmaster/` directory |
+| `load-template` | Load PRD template (comprehensive or minimal) |
+| `validate-prd` | Run 13 quality checks, return score and grade |
+| `calc-tasks` | Calculate recommended task count from requirements |
+| `gen-test-tasks` | Generate USER-TEST checkpoint definitions |
+| `gen-scripts` | Create 5 tracking scripts |
+| `log-progress` | Record task completion with timing data |
+| `backup-prd` | Backup existing PRD before replacement |
+
+**Interested in this pattern?** The codification approach -- extracting deterministic operations from a SKILL.md into a companion script -- is applicable to any Claude Code skill. A companion skill called `codify` automates this extraction process. It's not published separately yet, but the pattern is straightforward: identify every operation that doesn't require AI judgment, move it to a script that outputs JSON, and call it from SKILL.md.
 
 ## Files & Structure
 
 ```
 prd-taskmaster/
-├── SKILL.md                              # Main skill (480 lines)
-├── PUBLIC_README.md                      # This file
-├── README.md                             # Developer documentation
+├── SKILL.md                              # AI judgment logic (303 lines)
+├── script.py                             # Deterministic operations (37KB)
+├── install.sh                            # Curl installer with update checking
+├── README.md                             # This file
+├── SKILL.md.pre-codify                   # Pre-codification backup (1,343 lines)
+├── LICENSE                               # MIT
+├── CODE_OF_CONDUCT.md                    # Community standards
+├── CONTRIBUTING.md                       # Contribution guide
+├── .github/
+│   └── ISSUE_TEMPLATE/
+│       ├── bug_report.md
+│       └── feature_request.md
 ├── templates/
 │   ├── taskmaster-prd-comprehensive.md   # Full PRD template
-│   └── taskmaster-prd-minimal.md         # Quick template
-├── scripts/
-│   └── setup-taskmaster.sh               # Directory setup script
-└── reference/
-    ├── taskmaster-integration-guide.md   # Taskmaster best practices
-    └── validation-checklist.md           # Quality criteria
+│   ├── taskmaster-prd-minimal.md         # Quick template
+│   └── CLAUDE.md.template                # TDD workflow template
+├── reference/
+│   ├── taskmaster-integration-guide.md   # Taskmaster best practices
+│   └── validation-checklist.md           # Quality criteria
+└── scripts/
+    └── setup-taskmaster.sh               # Directory setup script
 ```
 
 ## Development Approach
@@ -550,6 +572,8 @@ If it does, great! If not, no worries - maybe you'll fork it and make it better 
 #   - How you tested it
 ```
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
+
 ## License
 
 MIT License - Use freely, modify as needed, share improvements if you want.
@@ -563,7 +587,7 @@ MIT License - Use freely, modify as needed, share improvements if you want.
 - Lessons learned from shipping features
 
 **Philosophy:**
-- LEARN → PRACTICE → MASTER methodology
+- LEARN, PRACTICE, MASTER methodology
 - Impact-weighted decision making
 - Evidence-based evaluation
 - Quality over speed
@@ -576,6 +600,24 @@ MIT License - Use freely, modify as needed, share improvements if you want.
 
 ## Version History
 
+- **v3.0** (2025-02-12) - Codification refactor
+  - Extracted all deterministic operations into `script.py` (37KB)
+  - Reduced SKILL.md from 1,343 lines to 303 lines (78% reduction)
+  - All script commands output JSON for clean AI-script interface
+  - Added `install.sh` with curl one-liner installer and update checking
+  - Added community files: CODE_OF_CONDUCT.md, CONTRIBUTING.md, issue templates
+  - Preserved SKILL.md.pre-codify as backup reference
+
+- **v2.0** (2025-02-05) - Feature expansion
+  - Real datetime tracking with UTC timestamps and duration calculation
+  - Instant rollback to any checkpoint tag
+  - Accuracy learning system (estimated vs actual time analysis)
+  - Security audit checklist auto-generated from code patterns
+  - Auto-resume after crash with multiple recovery points
+  - 4 autonomous execution modes (sequential, parallel, full auto, manual)
+  - User test checkpoints inserted every 5 tasks
+  - MCP-first Taskmaster detection with CLI fallback
+
 - **v1.0** (2025-01-22) - Initial public release
   - Comprehensive PRD generation
   - Full taskmaster integration
@@ -587,38 +629,3 @@ MIT License - Use freely, modify as needed, share improvements if you want.
 **Made with Claude Code** | **Status: Beta** | **Feedback Welcome**
 
 *Planning is 95% of the work. Start with a solid PRD.*
-
-## What's New in v2.0 (Top 5 Enhancements)
-
-### 1. Real DateTime Tracking
-- Precise UTC timestamps for all tasks/subtasks
-- Automatic duration calculation
-- JSON state persistence
-- Compare actual vs estimated time
-
-### 2. Instant Rollback Command
-- Type "rollback to task X" any time during execution
-- Reverts to any checkpoint tag
-- Backs up current work before rollback
-- Safety confirmations
-
-### 3. Accuracy Learning System
-- Analyzes estimated vs actual times
-- Calculates adjustment factor
-- Recommends estimate improvements
-- Learns from your pace
-
-### 4. Security Audit Checklist
-- Auto-generated based on your code
-- Scans for security patterns
-- Standard security checks included
-- Automated scan suggestions
-
-### 5. Auto-Resume After Crash
-- Detects incomplete work from previous session
-- Offers multiple resume points
-- Continues exactly where crashed
-- No work lost
-
-All enhancements work seamlessly with MCP or CLI integration!
-
