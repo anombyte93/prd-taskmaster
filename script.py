@@ -166,13 +166,13 @@ def cmd_preflight(args: argparse.Namespace) -> None:
 
 def _detect_taskmaster_method() -> dict:
     """Detect taskmaster: MCP > CLI > none."""
-    # Check CLI
-    cli_path = shutil.which("taskmaster")
+    # Check CLI — try both binary names
+    cli_path = shutil.which("task-master-ai") or shutil.which("taskmaster")
     cli_version = None
     if cli_path:
         try:
             result = subprocess.run(
-                ["taskmaster", "--version"],
+                [cli_path, "--version"],
                 capture_output=True, text=True, timeout=10
             )
             cli_version = result.stdout.strip() if result.returncode == 0 else None
@@ -992,6 +992,55 @@ else:
 '''
 
 
+# ─── Capability detection ────────────────────────────────────────────────────
+
+def cmd_detect_capabilities(args: argparse.Namespace) -> None:
+    """Scan for available skills, tools, and plugins that enable execution modes."""
+    capabilities = {}
+
+    # Check superpowers plugin
+    superpowers_paths = [
+        Path.home() / ".claude" / "plugins" / "cache" / "claude-plugins-official" / "superpowers",
+        Path.home() / ".claude" / "plugins" / "superpowers",
+    ]
+    capabilities["superpowers"] = any(p.is_dir() for p in superpowers_paths)
+
+    # Check specific skills
+    skills_dir = Path.home() / ".claude" / "skills"
+    for skill_name in ["cdd", "ralph-loop", "atlas-user-test", "expand-tasks", "phase-executor", "org-tree"]:
+        skill_path = skills_dir / skill_name / "SKILL.md"
+        capabilities[skill_name] = skill_path.is_file()
+
+    # Check TaskMaster
+    tm = _detect_taskmaster_method()
+    capabilities["taskmaster-mcp"] = tm["method"] == "mcp"
+    capabilities["taskmaster-cli"] = tm["method"] in ("mcp", "cli")
+
+    # Determine recommended mode
+    if capabilities.get("cdd") and capabilities.get("ralph-loop"):
+        recommended = "D"
+        reason = "Atlas Loop — CDD + ralph-loop detected for premium gamified execution"
+    elif capabilities["superpowers"] and capabilities.get("ralph-loop"):
+        recommended = "C"
+        reason = "Plan + Ralph Loop — superpowers + ralph-loop for iterative execution"
+    elif capabilities["superpowers"]:
+        recommended = "A"
+        reason = "Plan Only — superpowers plugin detected for AI-assisted planning"
+    elif capabilities["taskmaster-cli"]:
+        recommended = "B"
+        reason = "TaskMaster Auto-Execute — native CLI execution loop"
+    else:
+        recommended = "A"
+        reason = "Plan Only — universal fallback"
+
+    emit({
+        "ok": True,
+        "capabilities": capabilities,
+        "recommended_mode": recommended,
+        "recommended_reason": reason,
+    })
+
+
 # ─── Argument parsing ─────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1047,6 +1096,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("init-taskmaster", help="Initialize taskmaster project")
     p.add_argument("--method", required=True, choices=["cli", "mcp"])
 
+    # detect-capabilities
+    sub.add_parser("detect-capabilities", help="Scan for available skills/tools/plugins")
+
     return parser
 
 
@@ -1062,6 +1114,7 @@ DISPATCH = {
     "read-state": cmd_read_state,
     "log-progress": cmd_log_progress,
     "init-taskmaster": cmd_init_taskmaster,
+    "detect-capabilities": cmd_detect_capabilities,
 }
 
 
