@@ -50,20 +50,31 @@ task-master models
 
 Check the output for an active main model provider.
 
-**If no provider configured or API key missing**:
-- Default to `claude-code` provider (zero API key required for Claude Max users):
+**Important:** TaskMaster's CLI uses a two-argument model syntax: `--set-main <model-id> --<provider-flag>`. The model ID is NOT the provider name. For the claude-code provider the valid model IDs are `sonnet`, `opus`, and `haiku` (all FREE via Claude Max — no API key required).
+
+**If no provider configured or API key missing**, default to `claude-code` + `sonnet` (zero API key for Claude Max users) and also set research + fallback so task operations work autonomously:
+
 ```bash
-task-master models --set-main claude-code
+task-master models --set-main sonnet --claude-code
+task-master models --set-research opus --claude-code
+task-master models --set-fallback haiku --claude-code
 ```
-- If user is NOT on Claude Max, offer alternatives:
+
+This configures the full trio with zero API cost. Verify with `task-master models` — the Main/Research/Fallback rows should all show `claude-code` provider with `Free` cost.
+
+**If user is NOT on Claude Max**, offer alternatives:
 ```
-No API key detected. Options:
-  1. claude-code (zero API key — requires Claude Max subscription)
+No Claude Max detected. Provider options:
+  1. claude-code (FREE — requires Claude Max subscription)
   2. anthropic (requires ANTHROPIC_API_KEY)
   3. openai (requires OPENAI_API_KEY)
+  4. openrouter (single key, many providers — ANTHROPIC-compatible free models available)
+  5. ollama (local, free, slower — no cloud calls)
 ```
 
 **If provider already configured**: Report status silently.
+
+**Common failure mode:** users who run `task-master models --set-main claude-code` (without a model ID) see `Error: Model ID "claude-code" not found`. That's the wrong syntax — `claude-code` is a provider flag, not a model ID. Always use `--set-main <sonnet|opus|haiku> --claude-code`.
 
 ## Step 4: Probe Test
 

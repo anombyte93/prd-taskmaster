@@ -53,9 +53,12 @@ python3 ~/.claude/skills/prd-taskmaster-v2/script.py preflight
 | Condition | Action |
 |-----------|--------|
 | `prd_path` exists + `task_count > 0` | Ask: execute tasks / update PRD / new PRD / review |
+| `prd_path` exists + `task_count == 0` | Ask: parse existing PRD / replace with new PRD / review then decide. `backup-prd` before replacing. |
 | `taskmaster_method == "none"` | Return to Phase 0 — setup incomplete |
 | `has_taskmaster` but no PRD | Proceed to Discovery |
 | `has_crash_state` | Offer: resume from crash point or start fresh |
+
+**Autonomous mode:** if invoked via `/pentest-wtf`, `/ralph-loop`, or with auto-approval active and no human to answer, choose sensible defaults without blocking: backup-and-replace for stale PRDs, fresh for missing crash state, proceed to Discovery with self-brainstorm. See `phases/DISCOVER.md` for the autonomous discovery path.
 
 **Gate: TaskMaster detected and environment ready. Proceed to Discovery.**
 

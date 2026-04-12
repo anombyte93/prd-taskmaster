@@ -165,9 +165,21 @@ def cmd_preflight(args: argparse.Namespace) -> None:
 
 
 def _detect_taskmaster_method() -> dict:
-    """Detect taskmaster: MCP > CLI > none."""
-    # Check CLI — try both binary names
-    cli_path = shutil.which("task-master-ai") or shutil.which("taskmaster")
+    """Detect taskmaster: MCP > CLI > none.
+
+    task-master (CLI) and task-master-ai (MCP server binary) are different.
+    On most installs both are present — task-master is the CLI entry point,
+    task-master-ai is the MCP server. `taskmaster` is usually a shell alias,
+    not a real binary, so shutil.which() won't find it.
+    """
+    # Check CLI — try all three known names. task-master is the real CLI
+    # binary on current task-master-ai npm installs; task-master-ai is the
+    # MCP server. `taskmaster` is a legacy/alias name kept for compatibility.
+    cli_path = (
+        shutil.which("task-master")
+        or shutil.which("task-master-ai")
+        or shutil.which("taskmaster")
+    )
     cli_version = None
     if cli_path:
         try:
@@ -663,30 +675,60 @@ def cmd_log_progress(args: argparse.Namespace) -> None:
 
 
 def cmd_init_taskmaster(args: argparse.Namespace) -> None:
-    """Initialize taskmaster project via CLI."""
+    """Initialize taskmaster project via CLI.
+
+    Uses task-master (the CLI binary), not taskmaster (shell alias) or
+    task-master-ai (MCP server). Gracefully degrades flag set on older
+    task-master versions — only --yes is required.
+    """
     method = args.method
 
     if method == "cli":
-        cli_path = shutil.which("taskmaster")
+        cli_path = (
+            shutil.which("task-master")
+            or shutil.which("task-master-ai")
+            or shutil.which("taskmaster")
+        )
         if not cli_path:
-            fail("taskmaster CLI not found in PATH")
-
-        try:
-            result = subprocess.run(
-                ["taskmaster", "init", "--yes", "--store-tasks-in-git", "--rules=claude"],
-                capture_output=True, text=True, timeout=60
+            fail(
+                "task-master CLI not found in PATH",
+                install_hint="npm install -g task-master-ai",
+                searched=["task-master", "task-master-ai", "taskmaster"],
             )
-            emit({
-                "ok": result.returncode == 0,
-                "method": "cli",
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "returncode": result.returncode,
-            })
-        except subprocess.TimeoutExpired:
-            fail("taskmaster init timed out after 60s")
-        except FileNotFoundError:
-            fail("taskmaster CLI not found")
+
+        # Try full flag set first, fall back to minimal if flags aren't supported.
+        attempts = [
+            [cli_path, "init", "--yes", "--store-tasks-in-git", "--rules=claude"],
+            [cli_path, "init", "--yes"],
+        ]
+        last_error = None
+        for cmd in attempts:
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=60
+                )
+                if result.returncode == 0:
+                    emit({
+                        "ok": True,
+                        "method": "cli",
+                        "command": " ".join(cmd),
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "returncode": 0,
+                    })
+                    return
+                last_error = (cmd, result.stderr or result.stdout)
+            except subprocess.TimeoutExpired:
+                fail("task-master init timed out after 60s", command=" ".join(cmd))
+            except FileNotFoundError:
+                fail("task-master CLI binary disappeared between which() and run()")
+
+        # All attempts failed
+        fail(
+            "task-master init failed on all flag combinations",
+            attempts=[" ".join(c) for c in attempts],
+            last_error=last_error[1] if last_error else None,
+        )
 
     elif method == "mcp":
         # MCP init must be done by AI via tool calls - we just confirm readiness
@@ -995,7 +1037,18 @@ else:
 # ─── Capability detection ────────────────────────────────────────────────────
 
 def cmd_detect_capabilities(args: argparse.Namespace) -> None:
-    """Scan for available skills, tools, and plugins that enable execution modes."""
+    """Scan for available skills, tools, and plugins that enable execution modes.
+
+    Mode routing is aligned with HANDOFF.md:
+      - Mode A: plan-only fallback (superpowers or nothing)
+      - Mode B: TaskMaster native auto-execute (CLI-only environments)
+      - Mode C: ralph-loop + superpowers (recommended free tier)
+      - Mode D: atlas-loop + atlas-cdd (premium tier)
+
+    The distinction between Mode C and Mode D is Atlas-specific markers.
+    The generic `cdd` skill exists in the pr-review-toolkit plugin and is
+    NOT Atlas premium — it alone should not trigger Mode D.
+    """
     capabilities = {}
 
     # Check superpowers plugin
@@ -1007,7 +1060,13 @@ def cmd_detect_capabilities(args: argparse.Namespace) -> None:
 
     # Check specific skills
     skills_dir = Path.home() / ".claude" / "skills"
-    for skill_name in ["cdd", "ralph-loop", "atlas-user-test", "expand-tasks", "phase-executor", "org-tree"]:
+    skill_names = [
+        "cdd", "ralph-loop", "atlas-user-test", "expand-tasks",
+        "phase-executor", "org-tree",
+        # Atlas premium markers — these ship as part of the Atlas bundle
+        "atlas-loop", "atlas-cdd", "atlas-plan", "atlas-gamify",
+    ]
+    for skill_name in skill_names:
         skill_path = skills_dir / skill_name / "SKILL.md"
         capabilities[skill_name] = skill_path.is_file()
 
@@ -1016,16 +1075,28 @@ def cmd_detect_capabilities(args: argparse.Namespace) -> None:
     capabilities["taskmaster-mcp"] = tm["method"] == "mcp"
     capabilities["taskmaster-cli"] = tm["method"] in ("mcp", "cli")
 
-    # Determine recommended mode
-    if capabilities.get("cdd") and capabilities.get("ralph-loop"):
+    # Derive tier flags
+    has_atlas_premium = (
+        capabilities.get("atlas-loop", False)
+        and capabilities.get("atlas-cdd", False)
+    )
+    has_free_ralph_stack = (
+        capabilities.get("superpowers", False)
+        and capabilities.get("ralph-loop", False)
+    )
+
+    # Determine recommended mode — Atlas premium takes precedence ONLY when
+    # the actual Atlas skills are installed, not when the free `cdd` skill
+    # is present.
+    if has_atlas_premium:
         recommended = "D"
-        reason = "Atlas Loop — CDD + ralph-loop detected for premium gamified execution"
-    elif capabilities["superpowers"] and capabilities.get("ralph-loop"):
+        reason = "Atlas Loop (premium) — atlas-loop + atlas-cdd detected"
+    elif has_free_ralph_stack:
         recommended = "C"
-        reason = "Plan + Ralph Loop — superpowers + ralph-loop for iterative execution"
+        reason = "Plan + Ralph Loop (recommended free) — superpowers + ralph-loop detected"
     elif capabilities["superpowers"]:
         recommended = "A"
-        reason = "Plan Only — superpowers plugin detected for AI-assisted planning"
+        reason = "Plan Only — superpowers detected, no execution loop"
     elif capabilities["taskmaster-cli"]:
         recommended = "B"
         reason = "TaskMaster Auto-Execute — native CLI execution loop"
@@ -1036,6 +1107,7 @@ def cmd_detect_capabilities(args: argparse.Namespace) -> None:
     emit({
         "ok": True,
         "capabilities": capabilities,
+        "tier": "premium" if has_atlas_premium else "free",
         "recommended_mode": recommended,
         "recommended_reason": reason,
     })
