@@ -12,6 +12,9 @@
 *.swo
 *~
 
+# Claude Code session-local state (handoff handshakes, prompts, chains)
+.claude/
+
 # Python
 __pycache__/
 *.pyc

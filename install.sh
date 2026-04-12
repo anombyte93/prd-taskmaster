@@ -33,7 +33,7 @@ CLONE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}.git"
 # ---------------------------------------------------------------------------
 # Colors (disabled when piped or in CI)
 # ---------------------------------------------------------------------------
-if [[ -t 1 ]] && [[ -z "${CI:-}" ]] && [[ -z "${NO_COLOR:-}" ]]; then
+if { [[ -t 1 ]] || [[ -t 2 ]]; } && [[ -z "${CI:-}" ]] && [[ -z "${NO_COLOR:-}" ]]; then
     RED='\033[0;31m'
     GREEN='\033[0;32m'
     YELLOW='\033[0;33m'
@@ -47,9 +47,9 @@ fi
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-info()  { printf "${CYAN}[info]${RESET}  %s\n" "$*"; }
-ok()    { printf "${GREEN}[ok]${RESET}    %s\n" "$*"; }
-warn()  { printf "${YELLOW}[warn]${RESET}  %s\n" "$*"; }
+info()  { printf "${CYAN}[info]${RESET}  %s\n" "$*" >&2; }
+ok()    { printf "${GREEN}[ok]${RESET}    %s\n" "$*" >&2; }
+warn()  { printf "${YELLOW}[warn]${RESET}  %s\n" "$*" >&2; }
 err()   { printf "${RED}[error]${RESET} %s\n" "$*" >&2; }
 die()   { err "$@"; exit 1; }
 
@@ -278,19 +278,19 @@ VEOF
     # ------------------------------------------------------------------
     # Success
     # ------------------------------------------------------------------
-    printf "\n"
+    printf "\n" >&2
     printf "${GREEN}${BOLD}Successfully %s ${SKILL_NAME} v${VERSION}${RESET}\n" \
-        "$([ "${mode}" = "upgrade" ] && echo "upgraded" || echo "installed")"
-    printf "  Location: %s\n" "${SKILL_DIR}"
+        "$([ "${mode}" = "upgrade" ] && echo "upgraded" || echo "installed")" >&2
+    printf "  Location: %s\n" "${SKILL_DIR}" >&2
 
     if [[ "${mode}" = "upgrade" ]] && [[ -f "${SKILL_DIR}/SKILL.md.bak" ]]; then
-        printf "  Backup:   %s\n" "${SKILL_DIR}/SKILL.md.bak"
+        printf "  Backup:   %s\n" "${SKILL_DIR}/SKILL.md.bak" >&2
     fi
 
-    printf "\n"
+    printf "\n" >&2
     info "To use this skill in Claude Code, reference it with:"
-    printf "  ${CYAN}/%s${RESET}\n" "${SKILL_NAME}"
-    printf "\n"
+    printf "  ${CYAN}/%s${RESET}\n" "${SKILL_NAME}" >&2
+    printf "\n" >&2
 }
 
 # ---------------------------------------------------------------------------

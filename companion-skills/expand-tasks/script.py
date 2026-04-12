@@ -160,6 +160,7 @@ DESCRIPTION:
 {f"DETAILS:{chr(10)}{details}" if details else ""}
 {subtask_text}
 {dep_context}
+{prd_context}
 
 Research these questions using Perplexity MCP tools (perplexity_batch preferred, perplexity_search as fallback):
 
