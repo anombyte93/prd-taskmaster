@@ -66,7 +66,7 @@ def count_requirements(text: str) -> int:
 
 def has_section(text: str, heading: str) -> bool:
     """Check if markdown heading exists (case-insensitive)."""
-    pattern = r'^#{1,3}\s+.*' + re.escape(heading) + r'.*$'
+    pattern = r'^#{1,6}\s+.*' + re.escape(heading) + r'.*$'
     return bool(re.search(pattern, text, re.MULTILINE | re.IGNORECASE))
 
 

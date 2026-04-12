@@ -47,7 +47,7 @@ class TestDetectTaskmasterPaths:
     def test_detect_none_when_no_config(self, tmp_path):
         """Returns 'none' when no MCP config and no CLI in PATH."""
         env = os.environ.copy()
-        env["PATH"] = "/usr/bin:/bin"  # minimal PATH without taskmaster
+        env["PATH"] = str(tmp_path)  # empty dir — no binaries, truly excludes task-master-ai
         env["HOME"] = str(tmp_path)  # no config files here
         result = subprocess.run(
             [sys.executable, str(SCRIPT_PY), "detect-taskmaster"],

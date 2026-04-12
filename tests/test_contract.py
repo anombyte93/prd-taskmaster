@@ -289,9 +289,9 @@ class TestCrossFileConsistency:
     def test_skill_md_references_correct_template_types(self):
         """SKILL.md's template types match what load-template accepts."""
         # SKILL.md: --type <comprehensive|minimal>
-        skill_types = re.findall(r'--type\s+(?:<)?(\w+(?:\|\w+)*)', self.skill_md)
+        skill_types = re.findall(r'--type\s+(?:<)?(\w+(?:\\?\|\w+)*)', self.skill_md)
         if skill_types:
-            types_str = skill_types[0]
+            types_str = skill_types[0].replace('\\|', '|')  # unescape markdown table pipe
             documented_types = set(types_str.split('|'))
         else:
             documented_types = set()

@@ -150,7 +150,7 @@ class TestInstallConstants:
     def test_skill_name(self):
         """Skill name matches."""
         content = INSTALL_SH.read_text()
-        assert 'SKILL_NAME="prd-taskmaster"' in content
+        assert 'SKILL_NAME="prd-taskmaster-v2"' in content
 
     def test_version_defined(self):
         """Version is defined."""
