@@ -91,27 +91,28 @@ This installs v4 alongside the stable v3 at a different skill name (`prd-taskmas
 
 ---
 
-## Where This Fits (the Atlas pipeline)
+## Standalone by default — works great without anything else
 
-`prd-taskmaster-v2` is one stage in a larger workflow. If you're using the full Atlas set of skills, the order is:
+`prd-taskmaster-v2` is a **free, standalone** Claude Code skill. No subscription, no account, no Atlas pipeline, no paid add-ons. Say "I want a PRD for X" in any Claude Code session, answer the discovery questions, get `.taskmaster/docs/prd.md` and `tasks.json`. That's the whole product. Use the output however you want — `task-master next` to begin implementation, hand the PRD to a teammate, feed it into a custom workflow, whatever.
 
-```
-atlas-start → prd-taskmaster-v2 → atlas-plan → atlas-go / atlas-loop → atlas-sync
-  (bootstrap)   (THIS SKILL)       (plan)        (execute)              (wrap up)
-```
+The only hard dependency is `task-master-ai` (install with `npm install -g task-master-ai`), and v4's Phase 0 SETUP gate walks you through it with zero questions. For Claude Max users, the provider chain defaults to `claude-code` (free, no API key).
 
-| Skill | When to use it | Invocation |
-|---|---|---|
-| `atlas-start` | Start of a session, before anything else | `/atlas-start` |
-| **`prd-taskmaster-v2`** | **You have a goal and need a spec + tasks** | `"I want a PRD for X"` |
-| `atlas-plan` | You have tasks and need a step-by-step plan | `/atlas-plan` |
-| `atlas-go` | You have a plan and want fresh subagents to execute it | `/atlas-go` |
-| `atlas-loop` | Iterative execution with gamified scoring | `/atlas-loop` |
-| `atlas-sync` | End of a session, save state | `/atlas-sync` |
+### Handoff — one recommendation, not four
 
-**Common confusion:** `atlas-go` is **not** the entry point. It executes plans; it needs a plan to run. Start with `prd-taskmaster-v2` (or a goal statement that auto-activates it), let it produce tasks, then route to `atlas-plan` → `atlas-go`.
+At Phase 4 HANDOFF the skill scans your environment and recommends **one** execution mode that fits what you actually have installed:
 
-**Standalone use:** the skill works fine without the rest of the pipeline. Input a goal, get `prd.md` + `tasks.json`. Use them however you want.
+| Mode | Tier | Requires | What it gives you |
+|---|---|---|---|
+| **A** Plan Only | Free | `superpowers` plugin | `/writing-plans` turns your tasks into a plan, you drive execution |
+| **B** TaskMaster Auto-Execute | Free | `task-master-ai` only | `task-master next` → implement → `set-status done` loop |
+| **C** Plan + Ralph Loop *(recommended free)* | Free | `superpowers` + `ralph-loop` | `/writing-plans` plan + ralph-loop wraps execution with doubt gates |
+| **D** Atlas Loop | Premium | `atlas-loop` + `atlas-cdd` | Tier-S browser verification, `/question` deep research per task, atlas-gamify scoring, walk-away-and-come-back-to-proof |
+
+Most users land on Mode A or Mode C. Mode D only triggers if you explicitly have the `atlas-loop` and `atlas-cdd` skills installed — the skill does not push you toward anything paid.
+
+### Optional: fits into larger pipelines
+
+If you're building with an ecosystem of skills (e.g., the Atlas skill set), `prd-taskmaster-v2` composes at the "goal → tasks" step of a `bootstrap → PRD → plan → execute → wrap up` flow. Nothing in the skill assumes a larger pipeline exists. **`atlas-go`, `atlas-plan`, and `atlas-loop` are separate skills — they're not this one.** If you hear about them and want to know where this skill fits: right before planning, right after bootstrapping a session.
 
 ---
 

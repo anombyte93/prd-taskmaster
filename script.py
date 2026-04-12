@@ -37,6 +37,11 @@ TASKMASTER_SCRIPTS = TASKMASTER_DIR / "scripts"
 TASKMASTER_STATE = TASKMASTER_DIR / "state"
 TASKMASTER_TASKS = TASKMASTER_DIR / "tasks"
 
+# Minimum task-master version known to work with v4's CLI invocations.
+# Bump this when we detect a breaking flag/argument change. Detected at
+# runtime via _check_taskmaster_version().
+TASKMASTER_MIN_VERSION = "0.43.0"
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def emit(data: dict) -> None:
@@ -162,6 +167,59 @@ def cmd_preflight(args: argparse.Namespace) -> None:
         "has_crash_state": crash_state.get("has_incomplete", False),
         "crash_state": crash_state if crash_state.get("has_incomplete") else None,
     })
+
+
+def _parse_version(v: str) -> tuple:
+    """Parse 'X.Y.Z' into a comparable tuple. Returns (0, 0, 0) on failure."""
+    if not v:
+        return (0, 0, 0)
+    # Strip common prefixes like 'v', 'task-master-ai '
+    match = re.search(r'(\d+)\.(\d+)\.(\d+)', v)
+    if not match:
+        return (0, 0, 0)
+    return tuple(int(x) for x in match.groups())
+
+
+def _check_taskmaster_version(cli_path: str) -> dict:
+    """Probe the task-master binary for version and compare against minimum.
+
+    Returns a dict with:
+      detected_version: str (or None)
+      supported: bool (True if >= TASKMASTER_MIN_VERSION)
+      warning: str (if version is too old or undetectable)
+    """
+    if not cli_path:
+        return {
+            "detected_version": None,
+            "supported": False,
+            "warning": "task-master binary not found",
+        }
+    try:
+        result = subprocess.run(
+            [cli_path, "--version"],
+            capture_output=True, text=True, timeout=5,
+        )
+        detected = result.stdout.strip() if result.returncode == 0 else None
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        detected = None
+
+    if not detected:
+        return {
+            "detected_version": None,
+            "supported": False,
+            "warning": "could not read task-master --version output",
+        }
+
+    dv = _parse_version(detected)
+    mv = _parse_version(TASKMASTER_MIN_VERSION)
+    supported = dv >= mv
+
+    return {
+        "detected_version": detected,
+        "minimum_version": TASKMASTER_MIN_VERSION,
+        "supported": supported,
+        "warning": None if supported else f"task-master {detected} is older than minimum supported {TASKMASTER_MIN_VERSION}. Upgrade: npm install -g task-master-ai@latest",
+    }
 
 
 def _detect_taskmaster_method() -> dict:
@@ -1178,6 +1236,17 @@ def cmd_validate_setup(args: argparse.Namespace) -> None:
         "passed": bool(cli_path),
         "detail": f"Found at {cli_path} (version {cli_version})" if cli_path else "Not found in PATH",
         "fix": "npm install -g task-master-ai" if not cli_path else None,
+    })
+
+    # Version awareness: warn if task-master is older than known-good minimum
+    version_info = _check_taskmaster_version(cli_path)
+    checks.append({
+        "id": "version",
+        "name": f"task-master version >= {TASKMASTER_MIN_VERSION}",
+        "passed": version_info["supported"],
+        "detail": f"detected {version_info['detected_version']} (min {TASKMASTER_MIN_VERSION})" if version_info["detected_version"] else "version not detectable",
+        "fix": "npm install -g task-master-ai@latest" if not version_info["supported"] else None,
+        "severity": "warning",  # old versions often still work partially
     })
 
     # Check 2: .taskmaster/ directory exists

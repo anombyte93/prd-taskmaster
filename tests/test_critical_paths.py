@@ -26,11 +26,15 @@ from conftest import SCRIPT_PY, EXPAND_SCRIPT_PY, run_script
 class TestInitTaskmasterCLI:
     """Tests for init-taskmaster --method cli (previously untested)."""
 
-    def test_init_cli_no_taskmaster_installed(self):
-        """CLI init fails gracefully when taskmaster binary is missing."""
-        # Modify PATH to exclude taskmaster
+    def test_init_cli_no_taskmaster_installed(self, tmp_path):
+        """CLI init fails gracefully when taskmaster binary is missing.
+
+        Uses a truly empty PATH (tmp_path) to guarantee no task-master binary
+        is reachable — unlike /usr/bin:/bin which may contain task-master on
+        developer machines with task-master-ai installed via npm -g.
+        """
         env = os.environ.copy()
-        env["PATH"] = "/usr/bin:/bin"  # minimal PATH without taskmaster
+        env["PATH"] = str(tmp_path)  # empty dir — no binaries whatsoever
         result = subprocess.run(
             [sys.executable, str(SCRIPT_PY), "init-taskmaster", "--method", "cli"],
             capture_output=True, text=True, env=env,
