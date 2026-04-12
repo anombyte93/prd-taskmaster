@@ -35,12 +35,7 @@ Returns a `tier` field (`"free"` or `"premium"`) plus per-capability flags. Key 
 
 ## Step 2: Recommend ONE Mode
 
-**Decision logic:**
-1. If atlas-loop + atlas-cdd detected -> Recommend **Mode D** (premium, most capable)
-2. If superpowers + ralph-loop detected -> Recommend **Mode C** (recommended free)
-3. If superpowers detected (no ralph-loop) -> Recommend **Mode A** (plan only)
-4. If TaskMaster CLI only -> Recommend **Mode B** (native auto-execute)
-5. Fallback -> Recommend **Mode A** (always works)
+**Decision logic** (first match wins): atlas-loop + atlas-cdd → **Mode D** | superpowers + ralph-loop → **Mode C** | superpowers only → **Mode A** | taskmaster-only → **Mode B** | fallback → **Mode A**. External-tool modes E-J are offered as alternatives, not primary recommendations.
 
 ### Mode A: Plan Only (Manual)
 ```
@@ -61,20 +56,13 @@ Recommended: TaskMaster Auto-Execute
 ### Mode C: Plan + Ralph Loop (Recommended Free)
 ```
 Recommended: Plan + Ralph Loop
-  /writing-plans creates implementation plan
-  Ralph-loop wraps execution:
-    next_task -> expand subtasks if missing
-    -> set_task_status("in-progress")
-    -> pre-task doubt: "Do I understand this? Research if <80% confident"
-    -> superpowers:subagent-driven-development executes
-    -> EXECUTION GATE: run it, capture output, cold-start check
-    -> Evidence must be Tier A+ (captured execution output minimum)
-    -> Post-execution doubt: "Would user see this working?"
-    -> Log evidence to .claude/verification-log.md
-    -> set_task_status("done") -> update TodoWrite
-    -> repeat
-  At completion: doubt agent reviews verification log before promise
-  Research via WebSearch (or your configured provider)
+  /writing-plans → implementation plan
+  ralph-loop wraps each task:
+    next_task → set_task_status("in-progress") → research if <80% confident
+    → subagent-driven-development → execution gate (Tier A+ evidence)
+    → post-doubt check → log to .claude/verification-log.md
+    → set_task_status("done") → TodoWrite → repeat
+  Completion: doubt agent reviews verification log before promise.
 ```
 
 ### Mode D: Atlas Loop (Premium)
@@ -88,6 +76,19 @@ Recommended: Atlas Loop (Premium)
     atlas-gamify scoring with evidence hierarchy
     Walk away, come back to proof
 ```
+
+### Alternative modes E-J (external AI tools)
+
+`detect-capabilities` returns `alternative_modes` when these tools are installed. Users can pick any of them instead of Modes A-D. All are tool-agnostic wrappers around the same `tasks.json`.
+
+| Mode | Tool | Invocation |
+|---|---|---|
+| **E** | Cursor Composer | `cursor --open .taskmaster/tasks/tasks.json`, @-ref in Composer |
+| **F** | RooCode | VS Code command palette → `RooCode: Run tasks.json` |
+| **G** | Codex CLI | `task-master next --format json \| codex implement` (free via ChatGPT) |
+| **H** | Gemini CLI | `gemini --file .taskmaster/tasks/tasks.json implement next` (free via Google) |
+| **I** | CodeRabbit | Implement via A-H, open PR, CodeRabbit reviews per task. Combines with other modes. |
+| **J** | Aider | `aider --read .taskmaster/tasks/tasks.json` — pair-programming style |
 
 ## Step 3: Append Task Workflow to CLAUDE.md
 

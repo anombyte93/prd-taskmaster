@@ -50,31 +50,52 @@ task-master models
 
 Check the output for an active main model provider.
 
-**Important:** TaskMaster's CLI uses a two-argument model syntax: `--set-main <model-id> --<provider-flag>`. The model ID is NOT the provider name. For the claude-code provider the valid model IDs are `sonnet`, `opus`, and `haiku` (all FREE via Claude Max — no API key required).
+**Important:** TaskMaster's CLI uses a two-argument model syntax: `--set-main <model-id> --<provider-flag>`. The model ID is NOT the provider name.
 
-**If no provider configured or API key missing**, default to `claude-code` + `sonnet` (zero API key for Claude Max users) and also set research + fallback so task operations work autonomously:
+### Recommended stack (v4 default)
 
+**Gemini + Perplexity** is the documented default as of v4:
+
+```bash
+task-master models --set-main gemini-3-pro-preview --gemini-cli
+task-master models --set-research sonar-pro --perplexity   # requires PERPLEXITY_API_KEY
+task-master models --set-fallback gemini-3-flash-preview --gemini-cli
+```
+
+Why this stack: Gemini is 113× more token-efficient than sonnet for parse-prd (measured 6K vs 684K tokens on the same PRD), free via any Google account, no subscription. Perplexity's `sonar-pro` model is web-grounded so research calls return up-to-date citations instead of stale training data.
+
+**If PERPLEXITY_API_KEY is not set**, research falls back to Gemini:
+```bash
+task-master models --set-research gemini-3-pro-preview --gemini-cli
+```
+
+### Alternative: Claude Max
+
+If you already have a Claude Max subscription, this is the zero-install path:
 ```bash
 task-master models --set-main sonnet --claude-code
 task-master models --set-research opus --claude-code
 task-master models --set-fallback haiku --claude-code
 ```
 
-This configures the full trio with zero API cost. Verify with `task-master models` — the Main/Research/Fallback rows should all show `claude-code` provider with `Free` cost.
+### Alternative: other providers
 
-**If user is NOT on Claude Max**, offer alternatives:
+TaskMaster supports 12 provider families. Pick whichever you already have credentials for:
 ```
-No Claude Max detected. Provider options:
-  1. claude-code (FREE — requires Claude Max subscription)
-  2. anthropic (requires ANTHROPIC_API_KEY)
-  3. openai (requires OPENAI_API_KEY)
-  4. openrouter (single key, many providers — ANTHROPIC-compatible free models available)
-  5. ollama (local, free, slower — no cloud calls)
+  anthropic       — ANTHROPIC_API_KEY
+  openai          — OPENAI_API_KEY
+  openrouter      — OPENROUTER_API_KEY (single key, many models, free tiers available)
+  ollama          — local, free, slower, no cloud
+  bedrock         — AWS Bedrock
+  vertex          — GCP Vertex AI
+  codex-cli       — OpenAI Codex CLI (free via ChatGPT subscription)
+  lmstudio        — local LM Studio
+  openai-compatible — any OpenAI-schema-compatible endpoint
 ```
 
-**If provider already configured**: Report status silently.
+Run `task-master models --help` for the full flag syntax.
 
-**Common failure mode:** users who run `task-master models --set-main claude-code` (without a model ID) see `Error: Model ID "claude-code" not found`. That's the wrong syntax — `claude-code` is a provider flag, not a model ID. Always use `--set-main <sonnet|opus|haiku> --claude-code`.
+**Common failure mode:** users who run `task-master models --set-main claude-code` (without a model ID) see `Error: Model ID "claude-code" not found`. That's the wrong syntax — `claude-code` is a provider flag, not a model ID. Always use `--set-main <model_id> --<provider-flag>`.
 
 ## Step 4: Probe Test
 

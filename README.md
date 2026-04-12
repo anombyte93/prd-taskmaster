@@ -9,18 +9,22 @@
 
 ---
 
-## 🚧 Coming soon: v4 (the 5-phase rewrite)
+## 🚧 Coming soon: v4 (the tool-agnostic rewrite)
 
-**This README describes the v4 architecture, which is in active development on the `handoff-overhaul` branch and has not yet been merged to `master`.** What you install today with the curl command below is the stable v3 release (12-step workflow). v4 lands when the `handoff-overhaul` branch is merged — watch the repo for release notes.
+**This README describes the v4 architecture, which is in active development on the `main` branch and has not yet been tagged as a release.** What you install today with the curl command below is the stable v3 release. v4 tags when the dogfood verification completes — watch the repo for release notes.
 
 **What v4 changes:**
-- **Install story rewrite** — v4 ships as a **Claude Code plugin** (primary) and an **npm package** (secondary). The legacy `curl | bash` install stays available as an optional path for people who want it, but it's no longer the recommended way in.
+- **Tool-agnostic** — v4 is a model/tool-agnostic plugin. Works with Claude Code (Max or API), **Gemini CLI, Codex CLI, Cursor, RooCode, CodeRabbit, Aider, Continue**. Any tool task-master supports (12 providers) as the model, any external AI tool as the executor. Swap providers with 3 CLI commands, zero code changes.
+- **New default provider stack**: Gemini (main) + Perplexity (research) + Gemini Flash (fallback). Claude Code remains a first-class alternative. See [Provider comparison](docs/v4-release/provider-comparison.md) — Gemini used **113x fewer tokens than sonnet** for parse-prd in head-to-head testing, same quality output.
+- **Customisation via `/customise-workflow`** — new companion skill. AI asks 10 curated questions about your preferred provider, validation strictness, execution mode, template choice, etc. Writes your preferences to `.taskmaster/config/user-workflow.json`. You never manually edit JSON — the AI does it for you.
+- **Install story rewrite** — v4 ships as a **Claude Code plugin** (primary) and an **npm package** (secondary). Legacy `curl | bash` stays available as an optional path.
 - 5 phases with explicit gates (SETUP → PREFLIGHT → DISCOVER → GENERATE → HANDOFF) instead of v3's 12-step linear workflow
-- Zero-config setup — TaskMaster and provider detection are automatic; no API key required for Claude Max users (`claude-code` provider default)
+- Zero-config setup — TaskMaster and provider detection are automatic; no API key required for Gemini (free via Google account) or Claude Max users
 - TaskMaster's native `analyze-complexity` and `expand_task` replace the v3 custom task classification
-- Adaptive discovery via `superpowers:brainstorming` (one question at a time) replaces v3's fixed 12+ question script
-- Handoff recommends **one** execution mode based on detected capabilities, not four equal choices
+- Adaptive discovery via `superpowers:brainstorming` (one question at a time) — first-class **autonomous mode** for ralph-loop / pentest-wtf / auto-approve sessions
+- Handoff recommends **one** execution mode based on detected capabilities, plus lists alternative modes (Cursor, Codex, Gemini CLI, etc.) the user could pick instead
 - Domain-agnostic — works for software, pentest, business planning, learning plans, anything
+- **20-tool MCP server** (`mcp_server/`) — 12 script.py wrappers + 8 task-master wrappers, usable alongside the real `task-master-ai` MCP
 
 **If you want the current stable v3 behaviour**, install with the curl command below and ignore everything below the "5-Phase Pipeline" section until v4 ships. If you want to try v4 early, clone the `handoff-overhaul` branch directly (see [Early access](#early-access-v4-in-development)).
 
@@ -88,6 +92,63 @@ This installs v4 alongside the stable v3 at a different skill name (`prd-taskmas
 **You don't invoke `script.py` yourself. You don't pick a workflow mode upfront. You don't set any API keys.** The skill drives the conversation; everything else is auto-detected.
 
 > Not working? Verify `SKILL.md` exists at `~/.claude/skills/prd-taskmaster-v2/SKILL.md` and restart Claude Code.
+
+---
+
+## Use with any AI tool (v4: tool-agnostic)
+
+v4 is a **model/tool-agnostic plugin.** The skill generates PRDs and parses tasks — execution can happen via whichever AI tool you prefer.
+
+**Providers (drives task-master's main/research/fallback models):**
+
+| Provider | Free? | Set with |
+|---|---|---|
+| **Gemini CLI** (v4 default) | ✅ Google account | `task-master models --set-main gemini-3-pro-preview --gemini-cli` |
+| **Claude Code** | ✅ Claude Max | `task-master models --set-main sonnet --claude-code` |
+| **Perplexity** (best for research role) | requires `PERPLEXITY_API_KEY` | `task-master models --set-research sonar-pro --perplexity` |
+| Codex CLI | ✅ ChatGPT subscription | `--set-main gpt-5-codex --codex-cli` |
+| OpenAI / Anthropic / OpenRouter / Ollama / Bedrock / Vertex / etc. | varies | `task-master models --help` |
+
+**Execution tools** (drives which AI runs the parsed tasks):
+
+| Tool | Mode | How v4 detects it |
+|---|---|---|
+| Claude Code + ralph-loop (**recommended free**) | C | `superpowers` + `ralph-loop` skills installed |
+| Claude Code + atlas-loop (premium) | D | `atlas-loop` + `atlas-cdd` skills installed |
+| TaskMaster native loop | B | task-master CLI only |
+| Cursor Composer | E | `cursor` binary or `~/.cursor` dir |
+| RooCode | F | `roo`/`roocode` binary or RooCode VS Code extension |
+| Codex CLI | G | `codex` binary |
+| Gemini CLI | H | `gemini` binary |
+| CodeRabbit PR loop | I | `coderabbit` binary |
+| Aider | J | `aider` binary |
+| Continue | — | `~/.continue` dir |
+
+`script.py detect-capabilities` returns all detected tools + a `tier` field + an `alternative_modes` list. Phase 4 HANDOFF recommends **one** primary mode and lists the alternatives so users can pick the tool they prefer.
+
+**The key insight:** v4 has **zero provider-specific code** in `script.py`. The only LLM calls happen via `task-master` (opt-in `--ai` flag on `validate-prd`), which already abstracts providers. **Result:** swapping from Claude Max to Gemini (or Codex, or any other) is a 3-command config change with zero code edits. See `docs/v4-release/provider-comparison.md` for a measured head-to-head.
+
+---
+
+## Customise your workflow (`/customise-workflow`)
+
+v4 ships a companion skill at `companion-skills/customise-workflow/` that lets you tune how prd-taskmaster behaves — **without manually editing any JSON**.
+
+Usage:
+```
+You: /customise-workflow
+Claude: Asks 10 curated questions about your preferred provider, strictness,
+        execution mode, template, validation policy, autonomous-mode behaviour.
+You: Answer in plain English.
+Claude: Validates each answer, writes .taskmaster/config/user-workflow.json,
+        shows you the final config.
+```
+
+Future runs of prd-taskmaster read `user-workflow.json` and apply your preferences to phase gates, validation strictness, the default provider recommendation, and the preferred execution mode. Graceful fallback to documented defaults when keys are missing.
+
+Reset anytime with `/customise-workflow reset` or by deleting `.taskmaster/config/user-workflow.json`.
+
+**Why it exists:** one-size-fits-all skills don't survive contact with real workflows. Strict teams want to block on NEEDS_WORK; fast-prototype teams want to accept ACCEPTABLE. Some users want Gemini, some want Claude. Some want auto-handoff, some want a confirm gate. Rather than making these global flags in SKILL.md (brittle) or environment variables (invisible), v4 treats user preferences as a first-class data file that the skill reads at runtime.
 
 ---
 

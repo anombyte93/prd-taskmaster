@@ -1341,45 +1341,89 @@ def cmd_validate_setup(args: argparse.Namespace) -> None:
 
 
 def cmd_detect_capabilities(args: argparse.Namespace) -> None:
-    """Scan for available skills, tools, and plugins that enable execution modes.
+    """Scan for available skills, tools, plugins, and external AI tools.
 
-    Mode routing is aligned with HANDOFF.md:
-      - Mode A: plan-only fallback (superpowers or nothing)
-      - Mode B: TaskMaster native auto-execute (CLI-only environments)
-      - Mode C: ralph-loop + superpowers (recommended free tier)
-      - Mode D: atlas-loop + atlas-cdd (premium tier)
+    v4 is designed to be tool-agnostic — users can execute the parsed tasks
+    via any of a dozen supported tools. Detection covers:
 
-    The distinction between Mode C and Mode D is Atlas-specific markers.
-    The generic `cdd` skill exists in the pr-review-toolkit plugin and is
-    NOT Atlas premium — it alone should not trigger Mode D.
+      - Claude Code plugins (superpowers, atlas-*)
+      - Claude Code skills (cdd, ralph-loop, phase-executor, etc.)
+      - External AI tools (Cursor, RooCode, Codex CLI, Gemini CLI, CodeRabbit)
+      - TaskMaster (CLI or MCP)
+
+    Mode routing is aligned with HANDOFF.md. The recommendation prefers
+    tools the user already has installed — atlas-premium > ralph-free >
+    external-tools > taskmaster-native > plan-only.
     """
     capabilities = {}
 
-    # Check superpowers plugin
+    # ── Claude Code plugin detection ──────────────────────────────────
     superpowers_paths = [
         Path.home() / ".claude" / "plugins" / "cache" / "claude-plugins-official" / "superpowers",
         Path.home() / ".claude" / "plugins" / "superpowers",
     ]
     capabilities["superpowers"] = any(p.is_dir() for p in superpowers_paths)
 
-    # Check specific skills
+    # ── Claude Code skill detection ───────────────────────────────────
     skills_dir = Path.home() / ".claude" / "skills"
     skill_names = [
         "cdd", "ralph-loop", "atlas-user-test", "expand-tasks",
         "phase-executor", "org-tree",
-        # Atlas premium markers — these ship as part of the Atlas bundle
+        # Atlas premium markers
         "atlas-loop", "atlas-cdd", "atlas-plan", "atlas-gamify",
+        # Customisation (v4+)
+        "customise-workflow",
     ]
     for skill_name in skill_names:
         skill_path = skills_dir / skill_name / "SKILL.md"
         capabilities[skill_name] = skill_path.is_file()
 
-    # Check TaskMaster
+    # ── External AI tool detection (v4: tool-agnostic) ────────────────
+    # Each entry: capability_key -> list of detection strategies
+    external_tools = {
+        "cursor": [
+            lambda: bool(shutil.which("cursor")),
+            lambda: (Path.home() / ".cursor").is_dir(),
+            lambda: (Path.home() / ".config" / "Cursor").is_dir(),
+        ],
+        "codex-cli": [
+            lambda: bool(shutil.which("codex")),
+            lambda: bool(shutil.which("openai-codex")),
+        ],
+        "gemini-cli": [
+            lambda: bool(shutil.which("gemini")),
+        ],
+        "roo-code": [
+            lambda: bool(shutil.which("roo")),
+            lambda: bool(shutil.which("roocode")),
+            lambda: (Path.home() / ".vscode" / "extensions").is_dir()
+                    and any(
+                        "roo" in p.name.lower()
+                        for p in (Path.home() / ".vscode" / "extensions").glob("*")
+                    ) if (Path.home() / ".vscode" / "extensions").is_dir() else False,
+        ],
+        "coderabbit": [
+            lambda: bool(shutil.which("coderabbit")),
+            lambda: bool(shutil.which("cr")),
+        ],
+        "aider": [
+            lambda: bool(shutil.which("aider")),
+        ],
+        "continue": [
+            lambda: (Path.home() / ".continue").is_dir(),
+        ],
+    }
+    for tool_name, strategies in external_tools.items():
+        capabilities[tool_name] = any(
+            _safe_call(s) for s in strategies
+        )
+
+    # ── TaskMaster detection ──────────────────────────────────────────
     tm = _detect_taskmaster_method()
     capabilities["taskmaster-mcp"] = tm["method"] == "mcp"
     capabilities["taskmaster-cli"] = tm["method"] in ("mcp", "cli")
 
-    # Derive tier flags
+    # ── Derive tier flags ─────────────────────────────────────────────
     has_atlas_premium = (
         capabilities.get("atlas-loop", False)
         and capabilities.get("atlas-cdd", False)
@@ -1388,33 +1432,62 @@ def cmd_detect_capabilities(args: argparse.Namespace) -> None:
         capabilities.get("superpowers", False)
         and capabilities.get("ralph-loop", False)
     )
+    has_external_ai_tools = any(
+        capabilities.get(t, False)
+        for t in ("cursor", "codex-cli", "gemini-cli", "roo-code", "aider", "continue")
+    )
 
-    # Determine recommended mode — Atlas premium takes precedence ONLY when
-    # the actual Atlas skills are installed, not when the free `cdd` skill
-    # is present.
+    # ── Mode recommendation ───────────────────────────────────────────
+    # Preference order: atlas premium > ralph free > taskmaster native
+    # External tools are listed as alternatives, not the primary mode.
     if has_atlas_premium:
         recommended = "D"
         reason = "Atlas Loop (premium) — atlas-loop + atlas-cdd detected"
     elif has_free_ralph_stack:
         recommended = "C"
         reason = "Plan + Ralph Loop (recommended free) — superpowers + ralph-loop detected"
-    elif capabilities["superpowers"]:
+    elif capabilities.get("superpowers"):
         recommended = "A"
         reason = "Plan Only — superpowers detected, no execution loop"
-    elif capabilities["taskmaster-cli"]:
+    elif capabilities.get("taskmaster-cli"):
         recommended = "B"
         reason = "TaskMaster Auto-Execute — native CLI execution loop"
     else:
         recommended = "A"
         reason = "Plan Only — universal fallback"
 
+    # List of alternative external-tool modes the user could pick instead
+    alternative_modes = []
+    if capabilities.get("cursor"):
+        alternative_modes.append({"mode": "E", "tool": "cursor", "description": "Cursor Composer handoff — open tasks.json as @-mention in Composer"})
+    if capabilities.get("roo-code"):
+        alternative_modes.append({"mode": "F", "tool": "roo-code", "description": "RooCode agent handoff — tasks fed to RooCode's task runner"})
+    if capabilities.get("codex-cli"):
+        alternative_modes.append({"mode": "G", "tool": "codex-cli", "description": "Codex CLI auto-execute — task-master next piped to codex"})
+    if capabilities.get("gemini-cli"):
+        alternative_modes.append({"mode": "H", "tool": "gemini-cli", "description": "Gemini CLI orchestrator — gemini reads tasks and drives implementation"})
+    if capabilities.get("coderabbit"):
+        alternative_modes.append({"mode": "I", "tool": "coderabbit", "description": "CodeRabbit PR review loop — implement locally, CodeRabbit reviews each task's PR"})
+    if capabilities.get("aider"):
+        alternative_modes.append({"mode": "J", "tool": "aider", "description": "Aider pair-programming — aider reads tasks and edits files"})
+
     emit({
         "ok": True,
         "capabilities": capabilities,
         "tier": "premium" if has_atlas_premium else "free",
+        "has_external_ai_tools": has_external_ai_tools,
         "recommended_mode": recommended,
         "recommended_reason": reason,
+        "alternative_modes": alternative_modes,
     })
+
+
+def _safe_call(fn):
+    """Run a detection lambda, swallowing exceptions as False."""
+    try:
+        return bool(fn())
+    except Exception:
+        return False
 
 
 # ─── Argument parsing ─────────────────────────────────────────────────────────
