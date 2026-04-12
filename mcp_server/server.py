@@ -30,6 +30,7 @@ from typing import Any, Literal
 from mcp.server.fastmcp import FastMCP
 
 from mcp_server.lib import ScriptError, run_script
+from mcp_server.taskmaster import parse_models_output, run_taskmaster
 
 mcp = FastMCP("prd-taskmaster")
 
@@ -151,6 +152,223 @@ def log_progress(
 def init_taskmaster(method: Literal["cli", "mcp"], cwd: str | None = None) -> dict[str, Any]:
     """Initialize a TaskMaster project using the given method (CLI or MCP)."""
     return _invoke("init-taskmaster", args=["--method", method], cwd=cwd)
+
+
+# ─── TaskMaster CLI wrappers ──────────────────────────────────────────────────
+#
+# These tools shell out to the `task-master` binary (v0.43.1) rather than
+# script.py. They complement the script.py wrappers above so the skill's
+# phase files can drive both layers through a single MCP server. All flags
+# below were verified against `task-master <subcommand> --help` on 0.43.1.
+
+
+@mcp.tool()
+def tm_models_set(
+    role: Literal["main", "research", "fallback"],
+    model_id: str,
+    provider: Literal[
+        "claude-code",
+        "anthropic",
+        "openai",
+        "openrouter",
+        "ollama",
+        "bedrock",
+        "azure",
+        "vertex",
+        "gemini-cli",
+        "codex-cli",
+        "lmstudio",
+        "openai-compatible",
+    ],
+    cwd: str | None = None,
+) -> dict[str, Any]:
+    """Set the TaskMaster model for a given role.
+
+    Maps to ``task-master models --set-<role> <model_id> --<provider>``.
+    Note: TaskMaster 0.43.1 uses ``--set-main``/``--set-research``/``--set-fallback``
+    as the role flag and a separate provider flag (e.g. ``--claude-code``).
+    """
+    result = run_taskmaster(
+        "models",
+        f"--set-{role}",
+        model_id,
+        f"--{provider}",
+        cwd=cwd,
+        parse_json=False,
+    )
+    if not result.get("ok"):
+        return {"ok": False, "error": result.get("error") or result.get("stderr"), **result}
+    return {
+        "ok": True,
+        "role": role,
+        "model_id": model_id,
+        "provider": provider,
+        "stdout": result["stdout"],
+    }
+
+
+@mcp.tool()
+def tm_models_list(cwd: str | None = None) -> dict[str, Any]:
+    """List the currently configured main / research / fallback models.
+
+    ``task-master models`` emits a human-formatted table — this tool
+    de-ANSI's it and best-effort extracts the three role rows. The full
+    output is returned under ``raw`` for callers that need it.
+    """
+    result = run_taskmaster("models", cwd=cwd, parse_json=False)
+    if not result.get("ok"):
+        return {"ok": False, "error": result.get("error") or result.get("stderr"), **result}
+    parsed = parse_models_output(result["stdout"])
+    return {
+        "ok": True,
+        "main": parsed["roles"]["main"],
+        "research": parsed["roles"]["research"],
+        "fallback": parsed["roles"]["fallback"],
+        "raw": result["stdout"],
+    }
+
+
+@mcp.tool()
+def tm_parse_prd(
+    input_path: str,
+    num_tasks: int | None = None,
+    append: bool = False,
+    cwd: str | None = None,
+) -> dict[str, Any]:
+    """Parse a PRD file into TaskMaster tasks.
+
+    Maps to ``task-master parse-prd --input <path> [--num-tasks N] [--append]``.
+    """
+    args = ["parse-prd", "--input", input_path]
+    if num_tasks is not None:
+        args.extend(["--num-tasks", str(num_tasks)])
+    if append:
+        args.append("--append")
+    result = run_taskmaster(*args, cwd=cwd, parse_json=False)
+    if not result.get("ok"):
+        return {"ok": False, "error": result.get("error") or result.get("stderr"), **result}
+    return {"ok": True, "stdout": result["stdout"], "stderr": result["stderr"]}
+
+
+@mcp.tool()
+def tm_analyze_complexity(
+    task_id: int | None = None,
+    research: bool = False,
+    cwd: str | None = None,
+) -> dict[str, Any]:
+    """Run TaskMaster's complexity analysis.
+
+    Maps to ``task-master analyze-complexity [--id <id>] [--research]``.
+    task-master 0.43.1 does not emit JSON on stdout for this subcommand —
+    the report is written to ``.taskmaster/reports/task-complexity-report.json``.
+    We return the raw stdout and let callers read the report file.
+    """
+    args = ["analyze-complexity"]
+    if task_id is not None:
+        args.extend(["--id", str(task_id)])
+    if research:
+        args.append("--research")
+    result = run_taskmaster(*args, cwd=cwd, parse_json=True)
+    if not result.get("ok"):
+        return {"ok": False, "error": result.get("error") or result.get("stderr"), **result}
+    return {"ok": True, "analysis": result.get("json"), "raw": result["stdout"]}
+
+
+@mcp.tool()
+def tm_expand(
+    task_id: int | None = None,
+    all_tasks: bool = False,
+    research: bool = False,
+    cwd: str | None = None,
+) -> dict[str, Any]:
+    """Expand a task (or all pending tasks) into subtasks.
+
+    Maps to ``task-master expand --id <id>`` or ``task-master expand --all``.
+    """
+    args = ["expand"]
+    if all_tasks:
+        args.append("--all")
+    elif task_id is not None:
+        args.extend(["--id", str(task_id)])
+    else:
+        return {"ok": False, "error": "must set task_id or all_tasks=True"}
+    if research:
+        args.append("--research")
+    result = run_taskmaster(*args, cwd=cwd, parse_json=False)
+    if not result.get("ok"):
+        return {"ok": False, "error": result.get("error") or result.get("stderr"), **result}
+    return {"ok": True, "stdout": result["stdout"], "stderr": result["stderr"]}
+
+
+@mcp.tool()
+def tm_list(
+    status: str | None = None,
+    with_subtasks: bool = False,
+    cwd: str | None = None,
+) -> dict[str, Any]:
+    """List TaskMaster tasks, optionally filtered by status.
+
+    Maps to ``task-master list [--status <status>] [--with-subtasks] --json``.
+    task-master 0.43.1 supports ``--json`` (shorthand for ``--format json``),
+    so this tool returns structured task data when available.
+    """
+    args = ["list", "--json"]
+    if status is not None:
+        args.extend(["--status", status])
+    if with_subtasks:
+        args.append("--with-subtasks")
+    result = run_taskmaster(*args, cwd=cwd, parse_json=True)
+    if not result.get("ok"):
+        return {"ok": False, "error": result.get("error") or result.get("stderr"), **result}
+    return {"ok": True, "tasks": result.get("json"), "raw": result["stdout"]}
+
+
+@mcp.tool()
+def tm_next(cwd: str | None = None) -> dict[str, Any]:
+    """Get the next task TaskMaster recommends working on.
+
+    Maps to ``task-master next --format json``. In an empty project this
+    returns ``ok: True`` with an empty ``task`` field and the raw text.
+    """
+    result = run_taskmaster("next", "--format", "json", cwd=cwd, parse_json=True)
+    if not result.get("ok"):
+        return {"ok": False, "error": result.get("error") or result.get("stderr"), **result}
+    parsed = result.get("json")
+    task = None
+    if isinstance(parsed, dict):
+        # TaskMaster may return either {"task": {...}} or the task dict directly.
+        task = parsed.get("task", parsed)
+    return {"ok": True, "task": task, "raw": result["stdout"]}
+
+
+@mcp.tool()
+def tm_set_status(
+    task_id: str,
+    status: Literal["pending", "in-progress", "done", "blocked", "deferred", "cancelled", "review"],
+    cwd: str | None = None,
+) -> dict[str, Any]:
+    """Update the status of a task.
+
+    Maps to ``task-master set-status --id <id> --status <status>``. Note
+    that TaskMaster 0.43.1 uses ``in-progress`` (hyphen), not ``in_progress``.
+    """
+    result = run_taskmaster(
+        "set-status",
+        "--id",
+        task_id,
+        "--status",
+        status,
+        cwd=cwd,
+        parse_json=False,
+    )
+    if not result.get("ok"):
+        return {"ok": False, "error": result.get("error") or result.get("stderr"), **result}
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "status": status,
+        "stdout": result["stdout"],
+    }
 
 
 def main() -> None:

@@ -140,6 +140,38 @@ def main() -> None:
             sys.exit(1)
         print(f"PASS validate_prd (ok={result.get('ok')}, checks={len(result.get('checks', []))})")
 
+    # ─── task-master CLI wrapper smoke tests ─────────────────────────────
+    # These run in a fresh tmp dir so the main repo's .taskmaster/ is untouched.
+    import shutil
+    if shutil.which("task-master") is None:
+        print("SKIP task-master CLI tests (binary not in PATH)")
+    else:
+        with tempfile.TemporaryDirectory() as tmp2:
+            # tm_models_list — run from repo root (has .taskmaster/config.json)
+            # so we get a real parsed response. If the repo isn't initialized,
+            # this still returns a structured ok=False dict (valid outcome).
+            result = server.tm_models_list(cwd=str(REPO_ROOT))
+            if not isinstance(result, dict) or "ok" not in result:
+                print("FAIL tm_models_list: missing 'ok' key")
+                print(json.dumps(result, indent=2)[:800])
+                sys.exit(1)
+            print(f"PASS tm_models_list (ok={result.get('ok')}, main={bool(result.get('main'))})")
+
+            # tm_next in an empty dir — expect a sensible "no tasks" response.
+            # task-master may exit non-zero here; we just want a structured dict.
+            result = server.tm_next(cwd=tmp2)
+            if not isinstance(result, dict) or "ok" not in result:
+                print("FAIL tm_next: missing 'ok' key")
+                sys.exit(1)
+            print(f"PASS tm_next (ok={result.get('ok')}, has_task={result.get('task') is not None})")
+
+            # tm_list in an empty dir — ditto.
+            result = server.tm_list(cwd=tmp2)
+            if not isinstance(result, dict) or "ok" not in result:
+                print("FAIL tm_list: missing 'ok' key")
+                sys.exit(1)
+            print(f"PASS tm_list (ok={result.get('ok')})")
+
     print("\nAll smoke tests passed.")
 
 

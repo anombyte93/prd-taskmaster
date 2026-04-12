@@ -19,11 +19,10 @@ HANDOFF CHECKLIST:
 
 ## Step 1: Detect Capabilities
 
-```bash
-python3 ~/.claude/skills/prd-taskmaster-v2/script.py detect-capabilities
-```
+**MCP**: `mcp__prd-taskmaster__detect_capabilities()`
+**CLI**: `python3 script.py detect-capabilities`
 
-Key signals:
+Returns a `tier` field (`"free"` or `"premium"`) plus per-capability flags. Key signals:
 
 | Capability | What It Enables |
 |------------|----------------|
@@ -54,8 +53,9 @@ Recommended: Plan Only
 ### Mode B: TaskMaster Auto-Execute
 ```
 Recommended: TaskMaster Auto-Execute
-  task-master next -> implement -> task-master set-status done -> repeat
-  Native TaskMaster execution loop
+  MCP:  mcp__task-master-ai__next_task -> implement -> set_task_status(id, "done")
+  CLI:  task-master next -> implement -> task-master set-status --id N --status done
+  Native TaskMaster execution loop (no external orchestrator)
 ```
 
 ### Mode C: Plan + Ralph Loop (Recommended Free)
@@ -64,7 +64,7 @@ Recommended: Plan + Ralph Loop
   /writing-plans creates implementation plan
   Ralph-loop wraps execution:
     next_task -> expand subtasks if missing
-    -> set_task_status("in_progress")
+    -> set_task_status("in-progress")
     -> pre-task doubt: "Do I understand this? Research if <80% confident"
     -> superpowers:subagent-driven-development executes
     -> EXECUTION GATE: run it, capture output, cold-start check
@@ -96,13 +96,15 @@ Read the project's `./CLAUDE.md`. Append this section (if not already present):
 ```markdown
 ## Task Execution Workflow (prd-taskmaster-v2)
 
-When implementing tasks, use TaskMaster MCP/CLI tools:
-1. `next_task` / `task-master next` -- get next dependency-ready task
-2. `set_task_status(id, "in_progress")` -- mark started
+When implementing tasks, prefer task-master-ai MCP tools over the CLI:
+1. `mcp__task-master-ai__next_task()` or `task-master next` -- get next ready task
+2. `set_task_status(id, "in-progress")` -- note hyphen; underscore is rejected
 3. Implement the task (follow the plan step linked to this task)
 4. `set_task_status(id, "done")` -- mark complete
 5. Update TodoWrite with progress
 6. Repeat from step 1
+
+Valid statuses: `pending`, `in-progress`, `done`, `review`, `blocked`, `deferred`, `cancelled`.
 
 ### Progress Tracking
 - Update TodoWrite BEFORE and AFTER each task

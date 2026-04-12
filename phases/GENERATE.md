@@ -25,9 +25,8 @@ Decide based on discovery depth:
 - **Comprehensive**: 4+ detailed answers, complex project
 - **Minimal**: Quick project, thin answers, user wants speed
 
-```bash
-python3 ~/.claude/skills/prd-taskmaster-v2/script.py load-template --type comprehensive
-```
+**MCP (preferred)**: `mcp__prd-taskmaster__load_template(type="comprehensive")`
+**CLI fallback**: `python3 script.py load-template --type comprehensive`
 
 ## Step 2: Generate Spec
 
@@ -63,11 +62,12 @@ Key rule: Every `[placeholder]`, `{{variable}}`, `[TBD]`, `[TODO]` must be repla
 
 ## Step 3: Validate Spec Quality
 
-```bash
-python3 ~/.claude/skills/prd-taskmaster-v2/script.py validate-prd --input .taskmaster/docs/prd.md
-```
+**MCP (preferred)**: `mcp__prd-taskmaster__validate_prd(input_path=".taskmaster/docs/prd.md")`
+**CLI fallback**: `python3 script.py validate-prd --input .taskmaster/docs/prd.md`
 
 Returns: `score`, `grade`, `checks`, `warnings`, `placeholders_found`.
+
+**Optional AI-augmented review** (opt-in): pass `--ai` (CLI) or `ai=True` (MCP) to additionally invoke TaskMaster's configured main model for a holistic quality review. The deterministic regex checks always run first — AI review is additive, never a replacement. If task-master is unavailable, the AI path falls back silently with a warning.
 
 **Grading**: EXCELLENT (91%+), GOOD (83-90%), ACCEPTABLE (75-82%), NEEDS_WORK (<75%).
 
@@ -78,30 +78,38 @@ Returns: `score`, `grade`, `checks`, `warnings`, `placeholders_found`.
 ## Step 4: Parse Tasks via TaskMaster
 
 Calculate task count:
-```bash
-python3 ~/.claude/skills/prd-taskmaster-v2/script.py calc-tasks --requirements <count>
-```
+**MCP**: `mcp__prd-taskmaster__calc_tasks(requirements_count=<count>)`
+**CLI**: `python3 script.py calc-tasks --requirements <count>`
 
 Parse (detect method from preflight):
 
-**MCP**: `parse_prd` tool with input=".taskmaster/docs/prd.md", numTasks=<recommended>
+**MCP (preferred)**: `mcp__task-master-ai__parse_prd(input=".taskmaster/docs/prd.md", numTasks=<recommended>)`
+**MCP fallback**: `mcp__prd-taskmaster__tm_parse_prd(input_path=".taskmaster/docs/prd.md", num_tasks=<recommended>)` (wraps the CLI)
 **CLI**: `task-master parse-prd --input .taskmaster/docs/prd.md --num-tasks <recommended>`
 
 ## Step 5: Analyze Complexity via TaskMaster
 
 Use TaskMaster's native complexity analysis instead of custom classification:
 
-**MCP**: `analyze_complexity` (analyzes all tasks)
+**MCP (preferred)**: `mcp__task-master-ai__analyze_complexity` (analyzes all tasks)
+**MCP fallback**: `mcp__prd-taskmaster__tm_analyze_complexity` (wraps the CLI)
 **CLI**: `task-master analyze-complexity`
 
-This replaces the old `enrich-tasks` command. TaskMaster's built-in analysis is more accurate because it has full context of the task graph and dependencies.
+**Important — output location**: `analyze-complexity` does NOT emit JSON to stdout. It writes structured analysis to `.taskmaster/reports/task-complexity-report.json` and prints a human-readable table to stdout. To read the structured result, read the report file:
+
+```bash
+cat .taskmaster/reports/task-complexity-report.json | jq .
+```
+
+Do not try to parse the stdout table — it's colour-coded ASCII and will break. This replaces the old `enrich-tasks` command. TaskMaster's built-in analysis is more accurate because it has full context of the task graph and dependencies.
 
 ## Step 6: Expand Tasks into Subtasks (MANDATORY)
 
 Every task MUST be expanded into subtasks before execution begins. Subtasks are verifiable checkpoints --- without them, tasks are black boxes that either pass or fail with no intermediate proof.
 
 **For each task:**
-**MCP**: `expand_task` with id=<task_id>
+**MCP (preferred)**: `mcp__task-master-ai__expand_task(id=<task_id>)`
+**MCP fallback**: `mcp__prd-taskmaster__tm_expand(task_id=<task_id>)`
 **CLI**: `task-master expand --id=<task_id>`
 
 If research provider is available, add `--research` flag for richer expansion.

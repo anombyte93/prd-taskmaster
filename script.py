@@ -264,8 +264,102 @@ def cmd_load_template(args: argparse.Namespace) -> None:
     })
 
 
+def _ai_review_prd(prd_path: Path, prd_text: str) -> dict:
+    """Optional AI-augmented holistic quality review via TaskMaster's main model.
+
+    Runs only when --ai flag is passed to validate-prd. Reuses the user's
+    configured TaskMaster provider chain (main > research > fallback) so
+    there is zero additional config or API key required.
+
+    Returns a dict with {ok, score, notes, warnings} or {ok: false, error}.
+
+    Philosophy (from /question research 2026-04-13): deterministic regex
+    checks are primary and always run. AI review is opt-in augmentation for
+    subjective quality calls (testability, specificity, architectural
+    coverage) where regex is too rigid. Never replaces regex — augments it.
+    """
+    # Locate the task-master binary — same detection as init-taskmaster
+    cli_path = (
+        shutil.which("task-master")
+        or shutil.which("task-master-ai")
+        or shutil.which("taskmaster")
+    )
+    if not cli_path:
+        return {
+            "ok": False,
+            "error": "task-master CLI not found — AI review skipped",
+            "install_hint": "npm install -g task-master-ai",
+        }
+
+    # Shell out to task-master's `chat` / `ask` mode if available,
+    # otherwise fall back to piping through a prompt file that task-master
+    # can read. In task-master 0.43.1 the simplest reuse path is to call
+    # `task-master research` which uses the configured research model and
+    # accepts a custom query.
+    prompt = (
+        "You are reviewing a Product Requirements Document. Rate its overall "
+        "quality on a 0-100 scale along these four axes and return ONLY a "
+        "valid JSON object with the fields (no prose before or after):\n"
+        "  specificity: how measurable and testable the requirements are\n"
+        "  coverage: whether architectural, non-functional, and dependency "
+        "aspects are addressed\n"
+        "  risk: how well risks, open questions, and edge cases are captured\n"
+        "  actionability: how directly an engineer could start implementing\n"
+        "Also include a 'notes' array with up to 5 specific improvement "
+        "suggestions and a 'score' field with the average of the four axes.\n\n"
+        "PRD CONTENT:\n---\n"
+        + prd_text[:8000]  # cap to avoid blowing token budget
+        + ("\n...[truncated at 8000 chars]" if len(prd_text) > 8000 else "")
+    )
+
+    try:
+        result = subprocess.run(
+            [cli_path, "research", prompt],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            return {
+                "ok": False,
+                "error": f"task-master research failed: rc={result.returncode}",
+                "stderr": result.stderr[:500] if result.stderr else None,
+            }
+
+        # Try to extract JSON from stdout (task-master decorates output)
+        raw = result.stdout
+        # Strip ANSI escape codes
+        ansi_re = re.compile(r'\x1b\[[0-9;]*m')
+        cleaned = ansi_re.sub('', raw)
+        # Find the first { ... } block
+        brace_start = cleaned.find('{')
+        brace_end = cleaned.rfind('}')
+        if brace_start >= 0 and brace_end > brace_start:
+            try:
+                parsed = json.loads(cleaned[brace_start:brace_end + 1])
+                return {"ok": True, **parsed, "raw_length": len(raw)}
+            except json.JSONDecodeError:
+                pass
+
+        # Couldn't parse — return raw so the caller can still show it
+        return {
+            "ok": True,
+            "score": None,
+            "notes": ["AI review returned non-JSON output — see raw field"],
+            "raw": cleaned[:1500],
+        }
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "AI review timed out after 120s"}
+    except FileNotFoundError:
+        return {"ok": False, "error": "task-master CLI disappeared mid-call"}
+
+
 def cmd_validate_prd(args: argparse.Namespace) -> None:
-    """Run 13 quality checks on a PRD file."""
+    """Run 13 quality checks on a PRD file.
+
+    Deterministic regex checks always run. When --ai is passed, additionally
+    shells out to task-master's configured main/research model for a holistic
+    quality review. The AI review is ADDITIVE — it never replaces the regex
+    path, and failures fall back silently with a warning.
+    """
     prd_path = Path(args.input)
     if not prd_path.is_file():
         fail(f"PRD file not found: {args.input}")
@@ -496,7 +590,7 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
 
     passed_count = sum(1 for c in checks if c["passed"])
 
-    emit({
+    result = {
         "ok": True,
         "score": score,
         "max_score": max_score,
@@ -507,7 +601,22 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
         "checks": checks,
         "warnings": warnings,
         "vague_penalty": vague_penalty,
-    })
+    }
+
+    # Optional AI-augmented review — opt-in only. Runs after the deterministic
+    # checks so it never blocks the fast path. Failures degrade to a warning,
+    # never a hard error, so the deterministic score is always available.
+    if getattr(args, 'ai', False):
+        ai_result = _ai_review_prd(prd_path, text)
+        result["ai_review"] = ai_result
+        if not ai_result.get("ok"):
+            result["warnings"].append({
+                "type": "ai_review_unavailable",
+                "detail": ai_result.get("error", "unknown"),
+                "suggestion": "Run without --ai for deterministic checks only, or install task-master-ai and configure a provider via 'task-master models --set-main sonnet --claude-code'",
+            })
+
+    emit(result)
 
 
 def cmd_calc_tasks(args: argparse.Namespace) -> None:
@@ -1036,6 +1145,132 @@ else:
 
 # ─── Capability detection ────────────────────────────────────────────────────
 
+def cmd_validate_setup(args: argparse.Namespace) -> None:
+    """Run all Phase 0 SETUP checks and return per-check pass/fail + fix hints.
+
+    This is the one-shot diagnostic for first-run failures. Users who hit
+    confusing errors during SETUP can run `python3 script.py validate-setup`
+    and get a machine-readable answer about exactly what's broken.
+    """
+    checks = []
+
+    # Check 1: task-master binary installed
+    cli_path = (
+        shutil.which("task-master")
+        or shutil.which("task-master-ai")
+        or shutil.which("taskmaster")
+    )
+    cli_version = None
+    if cli_path:
+        try:
+            result = subprocess.run(
+                [cli_path, "--version"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                cli_version = result.stdout.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+    checks.append({
+        "id": "binary",
+        "name": "task-master CLI installed",
+        "passed": bool(cli_path),
+        "detail": f"Found at {cli_path} (version {cli_version})" if cli_path else "Not found in PATH",
+        "fix": "npm install -g task-master-ai" if not cli_path else None,
+    })
+
+    # Check 2: .taskmaster/ directory exists
+    has_tm_dir = TASKMASTER_DIR.is_dir()
+    checks.append({
+        "id": "project",
+        "name": ".taskmaster/ project initialized",
+        "passed": has_tm_dir,
+        "detail": f".taskmaster/ {'exists' if has_tm_dir else 'missing'}",
+        "fix": "task-master init --yes" if not has_tm_dir else None,
+    })
+
+    # Check 3: config.json present (indicates `task-master init` actually ran)
+    config_file = TASKMASTER_DIR / "config.json"
+    has_config = config_file.is_file()
+    checks.append({
+        "id": "config",
+        "name": ".taskmaster/config.json present",
+        "passed": has_config,
+        "detail": "config.json found" if has_config else "config.json missing — project may not be fully initialized",
+        "fix": "task-master init --yes" if not has_config else None,
+    })
+
+    # Check 4: provider configured (parse config.json models section)
+    provider_ok = False
+    provider_detail = "Cannot read config"
+    main_model = None
+    research_model = None
+    fallback_model = None
+    if has_config:
+        try:
+            with open(config_file) as f:
+                cfg = json.load(f)
+            models = cfg.get("models", {})
+            main_model = models.get("main", {}).get("modelId")
+            research_model = models.get("research", {}).get("modelId")
+            fallback_model = models.get("fallback", {}).get("modelId")
+            provider_ok = bool(main_model)
+            provider_detail = (
+                f"main={main_model or 'unset'}, research={research_model or 'unset'}, fallback={fallback_model or 'unset'}"
+            )
+        except (json.JSONDecodeError, KeyError, OSError) as exc:
+            provider_detail = f"config.json unreadable: {exc}"
+
+    checks.append({
+        "id": "provider_main",
+        "name": "Main model configured",
+        "passed": provider_ok,
+        "detail": provider_detail,
+        "fix": "task-master models --set-main sonnet --claude-code" if not provider_ok else None,
+    })
+
+    # Check 5: research model configured (soft — not blocking but task ops work better with it)
+    checks.append({
+        "id": "provider_research",
+        "name": "Research model configured (optional but recommended)",
+        "passed": bool(research_model),
+        "detail": f"research={research_model}" if research_model else "research model unset — expand --research will fail",
+        "fix": "task-master models --set-research opus --claude-code" if not research_model else None,
+        "severity": "warning",
+    })
+
+    # Check 6: fallback model configured
+    checks.append({
+        "id": "provider_fallback",
+        "name": "Fallback model configured (optional)",
+        "passed": bool(fallback_model),
+        "detail": f"fallback={fallback_model}" if fallback_model else "fallback model unset — failed main calls will not auto-retry",
+        "fix": "task-master models --set-fallback haiku --claude-code" if not fallback_model else None,
+        "severity": "warning",
+    })
+
+    # Aggregate
+    critical_failures = [c for c in checks if not c["passed"] and c.get("severity") != "warning"]
+    warnings_only = [c for c in checks if not c["passed"] and c.get("severity") == "warning"]
+    all_passed = len(critical_failures) == 0
+
+    emit({
+        "ok": True,
+        "ready": all_passed,
+        "checks": checks,
+        "critical_failures": len(critical_failures),
+        "warnings": len(warnings_only),
+        "cli_path": cli_path,
+        "cli_version": cli_version,
+        "next_action": (
+            "Setup complete. Proceed to Phase 1 (Preflight)."
+            if all_passed
+            else f"{len(critical_failures)} critical check(s) failing. Run the 'fix' command from each failed check."
+        ),
+    })
+
+
 def cmd_detect_capabilities(args: argparse.Namespace) -> None:
     """Scan for available skills, tools, and plugins that enable execution modes.
 
@@ -1135,6 +1370,10 @@ def build_parser() -> argparse.ArgumentParser:
     # validate-prd
     p = sub.add_parser("validate-prd", help="Run 13 quality checks on a PRD")
     p.add_argument("--input", required=True, help="Path to PRD file")
+    p.add_argument(
+        "--ai", action="store_true",
+        help="Also run AI-augmented holistic quality review via task-master's configured main model (opt-in, deterministic checks always run first)",
+    )
 
     # calc-tasks
     p = sub.add_parser("calc-tasks", help="Calculate recommended task count")
@@ -1171,6 +1410,9 @@ def build_parser() -> argparse.ArgumentParser:
     # detect-capabilities
     sub.add_parser("detect-capabilities", help="Scan for available skills/tools/plugins")
 
+    # validate-setup
+    sub.add_parser("validate-setup", help="Run all Phase 0 setup checks with diagnostic output")
+
     return parser
 
 
@@ -1187,6 +1429,7 @@ DISPATCH = {
     "log-progress": cmd_log_progress,
     "init-taskmaster": cmd_init_taskmaster,
     "detect-capabilities": cmd_detect_capabilities,
+    "validate-setup": cmd_validate_setup,
 }
 
 
