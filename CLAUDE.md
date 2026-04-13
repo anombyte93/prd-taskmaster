@@ -21,7 +21,7 @@ When in doubt, run `git worktree list`. Never commit v4 work to master.
 
 ## v4 architecture: 5-phase pipeline
 
-The skill is a thin orchestrator that reads phase files and executes them. SKILL.md defines the gates between phases; each phase's procedure lives in its own file under `phases/`.
+The skill is a thin orchestrator that reads phase files and executes them. SKILL.md defines the gates between phases; each phase's procedure lives in its own file under `phases/`. Trigger phrases live in `SKILL.md`'s YAML frontmatter `description` field — editing when the skill activates means editing that block.
 
 ```
 Phase 0: SETUP       → phases/SETUP.md      Verify TaskMaster installed, project initialized, AI pipeline works
@@ -49,13 +49,13 @@ If a v3 pattern shows up in a PR, the bar to bring it back is "TaskMaster genuin
 
 Strict split — preserve when editing:
 
-- **`SKILL.md`** (131 lines) — AI judgment only. Phase gates, when to ask vs proceed, what counts as "ready". No file I/O, no calculations.
-- **`script.py`** (1132 lines) — All deterministic operations. **Every subcommand outputs JSON on stdout** so SKILL.md can parse it predictably.
+- **`SKILL.md`** — AI judgment only. Phase gates, when to ask vs proceed, what counts as "ready". No file I/O, no calculations.
+- **`script.py`** — All deterministic operations. **Every subcommand outputs JSON on stdout** so SKILL.md can parse it predictably.
 - **`phases/*.md`** — Procedural recipes the AI follows once SKILL.md tells it to Read them. These contain decision trees, prompt templates, tool-call sequences.
 
 If an operation doesn't require AI interpretation, it belongs in `script.py`. If it does, it belongs in a phase file. SKILL.md should stay short — it's the index, not the content.
 
-`script.py` subcommands: `preflight`, `detect-taskmaster`, `detect-capabilities`, `load-template`, `validate-prd`, `calc-tasks`, `gen-test-tasks`, `gen-scripts`, `backup-prd`, `read-state`, `log-progress`, `init-taskmaster`.
+Run `python3 script.py --help` for the current subcommand list. Note: `calc-tasks` is context-aware — it accepts `--team-size`, `--scope-phase` (greenfield/brownfield/final_phase), and `--thematic-groups` alongside `--requirements`. Phase files pass these; don't call it with just `--requirements` unless you've already gathered the context upstream.
 
 ## Companion skills
 
@@ -65,7 +65,7 @@ If an operation doesn't require AI interpretation, it belongs in `script.py`. If
 
 Tests in `tests/` were originally written against v3 and ported into v4. **Critical convention** (from `tests/conftest.py`): fixtures create REAL files in temp directories — there is no mocking. Tests invoke `script.py` as a real subprocess and parse its JSON output. Preserve this; mocks would invalidate the JSON contract being tested.
 
-Some `test_user_e2e.py` and `test_critical_paths.py` tests target the v3 12-step shape and may need updating for the 5-phase architecture. The codification-contract tests (`test_script.py`, `test_contract.py`, `test_install.py`, `test_expand_tasks.py`, `test_edge_cases.py`) target script-level behavior and should largely pass unchanged — verify before assuming.
+Test files split into two groups: **script-contract** (`test_script.py`, `test_contract.py`, `test_install.py`, `test_expand_tasks.py`, `test_edge_cases.py`) — pin subcommand JSON shapes and should stay green through v4 changes; **workflow-shape** (`test_user_e2e.py`, `test_critical_paths.py`) — were written against the v3 12-step flow and partially ported. Run the full suite before editing either group; don't assume a failing workflow test means broken code without checking the assertion against the 5-phase intent.
 
 ```bash
 pytest                                       # Full suite
