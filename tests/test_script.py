@@ -966,3 +966,84 @@ class TestAppendWorkflow:
         assert out["action"] == "would_appended"
         assert target.read_text() == original  # unchanged
         assert "BEGIN prd-taskmaster-v2 workflow" in out["content_preview"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DEBRIEF — closes the debrief asymmetry (docs/v4-release/dogfood-shade-20260413.md §6)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestDebrief:
+    """Scaffolds a success-case debrief from tasks.json + complexity + PRD."""
+
+    def _write_artifacts(self, tmp_path):
+        tasks = tmp_path / "tasks.json"
+        tasks.write_text(json.dumps({
+            "master": {"tasks": [
+                {"id": 1, "title": "Setup n8n", "priority": "high", "dependencies": []},
+                {"id": 2, "title": "Build workflow", "priority": "high", "dependencies": [1]},
+                {"id": 3, "title": "Polish docs", "priority": "low", "dependencies": []},
+            ]}
+        }))
+        complexity = tmp_path / "complexity.json"
+        complexity.write_text(json.dumps({
+            "meta": {"thresholdScore": 5},
+            "complexityAnalysis": [
+                {"taskId": 1, "taskTitle": "Setup n8n", "complexityScore": 4},
+                {"taskId": 2, "taskTitle": "Build workflow", "complexityScore": 7},
+                {"taskId": 3, "taskTitle": "Polish docs", "complexityScore": 2},
+            ],
+        }))
+        prd = tmp_path / "prd.md"
+        prd.write_text("# My Project PRD\n\nBuild a nice thing that does X, Y, and Z reliably.\n\n## Next section\n")
+        return tasks, complexity, prd
+
+    def test_scaffold_includes_mechanical_stats_and_todo_placeholders(self, tmp_path):
+        tasks, complexity, prd = self._write_artifacts(tmp_path)
+        out_dir = tmp_path / "docs"
+        rc, out = run_script(SCRIPT_PY, [
+            "debrief",
+            "--from-tasks", str(tasks),
+            "--complexity-report", str(complexity),
+            "--prd", str(prd),
+            "--slug", "demo",
+            "--output-dir", str(out_dir),
+            "--grade", "EXCELLENT 50/51",
+        ])
+        assert rc == 0 and out["ok"] is True
+        assert out["task_count"] == 3
+        assert out["tasks_with_deps"] == 1
+        assert out["priority_distribution"] == {"high": 2, "medium": 0, "low": 1}
+        assert out["complexity_stats"]["above_threshold"] == 1
+        output_path = Path(out["output_path"])
+        assert output_path.exists()
+        body = output_path.read_text()
+        # Mechanical sections filled
+        assert "Tasks generated:** 3" in body
+        assert "EXCELLENT 50/51" in body
+        assert "Build workflow" in body  # top complexity row
+        assert "Build a nice thing that does X, Y, and Z" in body  # goal extracted from PRD
+        # Judgment sections still TODO
+        assert body.count("TODO") >= 4  # worked/broke/comparison/meta + maybe more
+
+    def test_missing_tasks_json_fails_loudly(self, tmp_path):
+        rc, out = run_script(SCRIPT_PY, [
+            "debrief",
+            "--from-tasks", str(tmp_path / "nope.json"),
+            "--slug", "x",
+            "--output-dir", str(tmp_path),
+        ])
+        assert rc != 0
+
+    def test_force_required_to_overwrite(self, tmp_path):
+        tasks, complexity, prd = self._write_artifacts(tmp_path)
+        out_dir = tmp_path / "out"
+        args = ["debrief", "--from-tasks", str(tasks),
+                "--complexity-report", str(complexity), "--prd", str(prd),
+                "--slug", "demo", "--output-dir", str(out_dir)]
+        rc, _ = run_script(SCRIPT_PY, args)
+        assert rc == 0
+        rc2, _ = run_script(SCRIPT_PY, args)  # second run without --force
+        assert rc2 != 0
+        rc3, _ = run_script(SCRIPT_PY, args + ["--force"])
+        assert rc3 == 0

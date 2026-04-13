@@ -1018,6 +1018,166 @@ def cmd_append_workflow_section(args: argparse.Namespace) -> None:
           "backup_path": backup_path, "dry_run": False})
 
 
+def cmd_debrief(args: argparse.Namespace) -> None:
+    """Emit a dogfood-run debrief skeleton from deterministic artifacts.
+
+    Closes the debrief asymmetry documented in docs/v4-release/
+    dogfood-shade-20260413.md: failed runs prompt authorship, successful
+    runs leave only artifacts. This subcommand makes success-case debrief
+    authorship a single deterministic command.
+
+    Reads tasks.json + complexity-report + optional PRD and emits a
+    markdown skeleton with the mechanically-derivable sections filled and
+    the judgment-requiring sections (what worked / what broke / meta)
+    left as TODO placeholders for a human.
+    """
+    tasks_path = Path(args.tasks_json)
+    complexity_path = Path(args.complexity_report)
+    prd_path = Path(args.prd) if args.prd else None
+    output_dir = Path(args.output_dir)
+    slug = args.slug
+    date_stamp = datetime.now().strftime("%Y%m%d")
+
+    if not tasks_path.is_file():
+        fail(f"tasks.json not found: {tasks_path}")
+
+    tasks_data = json.loads(tasks_path.read_text())
+    # tasks.json has two shapes: {"master": {"tasks": [...]}} or {"tasks": [...]}
+    tasks_root = tasks_data.get("master", tasks_data) if isinstance(tasks_data, dict) else {}
+    tasks = tasks_root.get("tasks", []) if isinstance(tasks_root, dict) else []
+    if not isinstance(tasks, list):
+        fail("tasks.json has unexpected shape — expected a list under .master.tasks or .tasks")
+
+    task_count = len(tasks)
+    with_deps = sum(1 for t in tasks if t.get("dependencies"))
+    dep_coverage_pct = round(100 * with_deps / task_count, 1) if task_count else 0
+    priorities = {p: sum(1 for t in tasks if t.get("priority") == p)
+                  for p in ("high", "medium", "low")}
+
+    complexity_rows = []
+    complexity_stats = None
+    if complexity_path.is_file():
+        comp_data = json.loads(complexity_path.read_text())
+        analysis = comp_data.get("complexityAnalysis", []) if isinstance(comp_data, dict) else []
+        if analysis:
+            scores = [a.get("complexityScore", 0) for a in analysis]
+            threshold = comp_data.get("meta", {}).get("thresholdScore", 5)
+            complexity_stats = {
+                "threshold": threshold,
+                "avg": round(sum(scores) / len(scores), 2),
+                "min": min(scores), "max": max(scores),
+                "above_threshold": sum(1 for s in scores if s >= threshold),
+            }
+            complexity_rows = sorted(analysis, key=lambda a: -a.get("complexityScore", 0))[:5]
+
+    goal_line = ""
+    if prd_path and prd_path.is_file():
+        prd_text = prd_path.read_text()
+        # Scan the first ~60 lines for the first sentence-like paragraph.
+        # Skip headings, frontmatter metadata (**Key:** value lines), and horizontal rules.
+        # Covers both PRD shapes we see: (a) goal in preamble before first ##,
+        # (b) goal in an "Executive Summary" section after a metadata block.
+        head = "\n".join(prd_text.splitlines()[:60])
+        for para in re.split(r"\n\s*\n", head):
+            para = para.strip()
+            if not para or para.startswith("#") or para.startswith("---"):
+                continue
+            # A paragraph that's only metadata lines (every line starts with `**`) is frontmatter.
+            non_meta_lines = [ln for ln in para.split("\n")
+                              if ln.strip() and not ln.strip().startswith("**")]
+            if not non_meta_lines:
+                continue
+            goal_line = non_meta_lines[0].strip().lstrip("> ")[:300]
+            break
+
+    top_rows = "\n".join(
+        f"| {r.get('taskId')} | {r.get('taskTitle','').strip()} | {r.get('complexityScore')} |"
+        for r in complexity_rows
+    ) or "| — | (no complexity report found) | — |"
+
+    prio_line = " / ".join(f"{k}:{v}" for k, v in priorities.items())
+    complexity_line = (
+        f"threshold {complexity_stats['threshold']}, avg {complexity_stats['avg']}, "
+        f"range [{complexity_stats['min']}, {complexity_stats['max']}]"
+        if complexity_stats else "(no complexity report)"
+    )
+    grade_line = f"**Validation grade:** {args.grade}" if args.grade else \
+                 "**Validation grade:** TODO — re-run `validate-prd` and fill in (e.g. `EXCELLENT 56/57`)"
+
+    skeleton = f"""# Dogfood Run: {slug}
+
+**Date:** {datetime.now().strftime("%Y-%m-%d")}
+**Target project:** {slug}
+**Artifacts:**
+- PRD: `{prd_path or 'TODO'}`
+- Tasks: `{tasks_path}`
+- Complexity: `{complexity_path if complexity_path.is_file() else 'TODO — not found at ' + str(complexity_path)}`
+
+---
+
+## 1. Goal that went in
+
+{goal_line or 'TODO — summarise the user-facing goal (extract from PRD executive summary).'}
+
+## 2. What v4 produced (mechanical)
+
+- **Tasks generated:** {task_count}
+- **Tasks with dependencies:** {with_deps} ({dep_coverage_pct}%)
+- **Priority distribution:** {prio_line}
+- **Complexity:** {complexity_line}
+- {grade_line}
+
+### Top complexity tasks
+
+| ID | Title | Score |
+|---|---|---|
+{top_rows}
+
+## 3. What worked
+
+TODO — one or two paragraphs. Look for: zero-config behaviour, domain fit,
+requirement traceability, non-goal enforcement, validation pass.
+
+## 4. What broke
+
+TODO — one or two paragraphs. Look for: anything the user / operator had
+to work around, hook conflicts, session retirement, flags that didn't
+work, naming mismatches. If the run was clean, say so explicitly and
+note what you tried to break.
+
+## 5. Comparison / context
+
+TODO — reference related runs (self-dogfood, sibling projects). What does
+this run tell you that the others didn't?
+
+## 6. Meta-findings
+
+TODO — patterns worth capturing for next time. Leave blank if none.
+
+---
+
+_Scaffolded by `script.py debrief --from-tasks` on {datetime.now().strftime("%Y-%m-%d %H:%M")}. TODO sections need human authorship — the mechanical sections are load-bearing; the judgment sections are what you actually have to write._
+"""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"dogfood-{slug}-{date_stamp}.md"
+    if output_path.exists() and not args.force:
+        fail(f"{output_path} exists. Pass --force to overwrite.")
+    output_path.write_text(skeleton)
+
+    placeholders = skeleton.count("TODO")
+    emit({
+        "ok": True,
+        "output_path": str(output_path),
+        "task_count": task_count,
+        "tasks_with_deps": with_deps,
+        "priority_distribution": priorities,
+        "complexity_stats": complexity_stats,
+        "placeholders_remaining": placeholders,
+        "mechanical_sections_filled": placeholders < 8,
+    })
+
+
 def cmd_read_state(args: argparse.Namespace) -> None:
     """Read crash recovery state."""
     state = _read_execution_state()
@@ -1795,6 +1955,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--content-file", required=True, help="Path to content to append")
     p.add_argument("--dry-run", action="store_true", help="Preview without writing")
 
+    # debrief
+    p = sub.add_parser("debrief",
+                       help="Scaffold a dogfood-run debrief from tasks.json + complexity + prd")
+    p.add_argument("--from-tasks", dest="tasks_json",
+                   default=".taskmaster/tasks/tasks.json",
+                   help="Path to tasks.json (default: .taskmaster/tasks/tasks.json)")
+    p.add_argument("--complexity-report",
+                   default=".taskmaster/reports/task-complexity-report.json",
+                   help="Path to complexity report")
+    p.add_argument("--prd", default=".taskmaster/docs/prd.md",
+                   help="Path to source PRD (for goal extraction)")
+    p.add_argument("--slug", required=True,
+                   help="Project slug for filename (e.g. 'shade', 'atlas-nig')")
+    p.add_argument("--output-dir", default="docs/v4-release",
+                   help="Output directory for the debrief skeleton")
+    p.add_argument("--grade", default=None,
+                   help="Optional validate-prd grade to embed (e.g. 'EXCELLENT 56/57')")
+    p.add_argument("--force", action="store_true",
+                   help="Overwrite if the output file already exists")
+
     return parser
 
 
@@ -1813,6 +1993,7 @@ DISPATCH = {
     "detect-capabilities": cmd_detect_capabilities,
     "validate-setup": cmd_validate_setup,
     "append-workflow": cmd_append_workflow_section,
+    "debrief": cmd_debrief,
 }
 
 
