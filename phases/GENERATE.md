@@ -119,29 +119,75 @@ Do not try to parse the stdout table — it's colour-coded ASCII and will break.
 
 Every task MUST be expanded into subtasks before execution begins. Subtasks are verifiable checkpoints --- without them, tasks are black boxes that either pass or fail with no intermediate proof.
 
-**For each task:**
-**MCP (preferred)**: `mcp__task-master-ai__expand_task(id=<task_id>)`
-**MCP fallback**: `mcp__prd-taskmaster__tm_expand(task_id=<task_id>)`
-**CLI**: `task-master expand --id=<task_id>`
+### Use `task-master expand --all`, not per-id parallel calls
 
-If research provider is available, add `--research` flag for richer expansion.
-If no research provider, expand WITHOUT research --- structural decomposition alone is valuable.
+Per-id parallel calls (e.g. `task-master expand --id=1 & task-master expand --id=2 &`) hit a non-atomic **read-modify-write race** on `.taskmaster/tasks/tasks.json`: every parallel writer reads the same starting snapshot, adds its own subtasks, and writes the whole file back. The last writer wins and earlier writes are silently lost — the AI call reports success, the subtasks were generated, but they never landed on disk. Detected in the v4 Shade dogfood 2026-04-13 (LEARNING #8).
 
-**DO NOT skip this step.** A task with 0 subtasks cannot be verified incrementally. The execution loop relies on subtasks as checkpoints.
+`task-master expand --all` is the correct path. It is internally serial (one task at a time, one file write at a time) and therefore atomic across the whole batch.
 
-After expansion, verify:
+**Invocation:**
+
+**CLI (required path)**:
 ```bash
-task-master list --format json | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-tasks = data.get('tasks', data) if isinstance(data, dict) else data
-no_subtasks = [t['id'] for t in tasks if not t.get('subtasks')]
-if no_subtasks:
-    print(f'WARNING: Tasks {no_subtasks} have no subtasks. Expand them.')
+# Preferred: research-enriched expansion (when a research provider is configured)
+task-master expand --all --research
+
+# Fallback: structural-only (still valuable; always available)
+task-master expand --all
+```
+
+**MCP**: task-master's MCP currently exposes `expand_task(id=...)` per-task only. Do **not** call it in parallel. Either call it serially for every task, or shell out to `task-master expand --all` via Bash. If a future task-master MCP version adds a batch tool, prefer that.
+
+### Patience under slow providers
+
+Under `claude-code` (Claude Max rate-limited) or local `ollama`, `--all` can run for 5-15 minutes on a 12-task project. Do **not** time out aggressively. Use `.taskmaster/tasks/tasks.json` mtime as the liveness signal:
+
+- **mtime updated within last 60s** → work is landing, keep waiting
+- **mtime stale for 120s+** → investigate (rate limit, provider crash, network)
+- **Never conclude STUCK from a single capture** — always compare two snapshots 30-60s apart
+
+### Verify coverage (read tasks.json DIRECTLY, not `task-master list`)
+
+`task-master list --format json` has been observed to return a different top-level schema from `tasks.json`, causing a consumer to report 0/N coverage even when all tasks have subtasks on disk (LEARNING #15, v4 dogfood). Always read the canonical file directly:
+
+```bash
+python3 -c "
+import json
+d = json.load(open('.taskmaster/tasks/tasks.json'))
+# tasks.json is tag-grouped (master, defaults, feature branches) — walk all tags
+all_tasks = []
+if 'master' in d and isinstance(d['master'], dict):
+    all_tasks = d['master'].get('tasks', [])
+elif 'tasks' in d:
+    all_tasks = d['tasks']
 else:
-    print(f'OK: All {len(tasks)} tasks have subtasks.')
+    for v in d.values():
+        if isinstance(v, dict) and 'tasks' in v:
+            all_tasks.extend(v['tasks'])
+
+counts = [len(t.get('subtasks', [])) for t in all_tasks]
+covered = sum(1 for c in counts if c > 0)
+total = len(all_tasks)
+no_subs = [t['id'] for t in all_tasks if not t.get('subtasks')]
+
+if no_subs:
+    print(f'WARNING: {covered}/{total} tasks expanded. Missing: {no_subs}. Re-run task-master expand --all.')
+else:
+    print(f'OK: All {total} tasks expanded ({sum(counts)} subtasks total).')
 "
 ```
+
+### Idempotent recovery
+
+If any task still shows 0 subtasks after `--all` completes (rate-limit hiccup, provider timeout, partial run), **re-run the same command**:
+
+```bash
+task-master expand --all --research
+```
+
+`--all` only re-expands tasks that are still in `pending` state with 0 subtasks, so a second invocation is safe and recovers gracefully. Do **not** work around it with parallel per-id calls — that is the exact pattern that causes silent data loss.
+
+**DO NOT skip this step.** A task with 0 subtasks cannot be verified incrementally. The execution loop relies on subtasks as checkpoints.
 
 ## Evidence Gate
 
