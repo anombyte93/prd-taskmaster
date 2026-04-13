@@ -205,6 +205,26 @@ The skill's deterministic layer exposes `python3 script.py handoff-gate --recomm
 
 **DO NOT** say "Ready to proceed with Mode X? (or type 'options')" as your only gate. That is a prose prompt the model can skip or satisfy with a fake affirmative. The v4 dogfood (LEARNING #16 → #20) surfaced this exact pattern as a user-agency hole. The dual-tool-call is the fix.
 
+## Step 6: Auto-scaffold dogfood debrief (closes the authorship asymmetry)
+
+Successful runs used to leave only artifacts (PRD, tasks.json, complexity report) and no debrief — see `docs/v4-release/dogfood-shade-20260413.md §6` for why that was a real problem. Every successful HANDOFF now calls the deterministic debrief scaffolder as its final act.
+
+```bash
+SLUG="$(basename "$PWD")"
+python3 "$SKILL_DIR/script.py" debrief \
+  --slug "$SLUG" \
+  --grade "$VALIDATION_GRADE" \
+  --output-dir docs/v4-release 2>/dev/null || true
+```
+
+- Uses the project's directory name as slug (stable, matches human convention).
+- Embeds the validation grade captured in Step 4's summary (`EXCELLENT 56/57`, etc.).
+- Defaults to `.taskmaster/{tasks/tasks.json, reports/task-complexity-report.json, docs/prd.md}` — no path flags needed from the common case.
+- Silently tolerates failure (`|| true`) — a missing complexity report or gitignored `docs/v4-release/` must never block a handoff that otherwise succeeded.
+- Output path is returned as `output_path` in the JSON response; surface it to the user as "Debrief scaffolded at: <path>. Judgment sections (worked / broke / meta) left as TODO — fill them in before the memory fades."
+
+If `docs/v4-release/` doesn't exist in the target project (most projects won't have it — this is a prd-taskmaster convention), skip the call or let it fail silently. The scaffold is only useful for projects that retain it.
+
 ## Evidence Gate
 
-**Gate: User chose a mode, CLAUDE.md updated, handoff instructions delivered. Skill complete.**
+**Gate: User chose a mode, CLAUDE.md updated, handoff instructions delivered, debrief scaffolded. Skill complete.**
