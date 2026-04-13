@@ -63,6 +63,45 @@ class TestPreflight:
         assert out["crash_state"]["mode"] == "sequential"
         assert out["crash_state"]["checkpoint"] == "2"
 
+    # Closes ship-blocker #4 — recommended_action disambiguates state.
+    def test_recommended_action_run_setup(self, tmp_path):
+        rc, out = run_script(SCRIPT_PY, ["preflight"], cwd=str(tmp_path))
+        assert rc == 0 and out["recommended_action"] == "run_setup"
+
+    def test_recommended_action_generate_prd(self, tmp_path):
+        (tmp_path / ".taskmaster" / "docs").mkdir(parents=True)
+        (tmp_path / ".taskmaster" / "tasks").mkdir(parents=True)
+        rc, out = run_script(SCRIPT_PY, ["preflight"], cwd=str(tmp_path))
+        assert rc == 0 and out["recommended_action"] == "generate_prd"
+
+    def test_recommended_action_parse_prd_when_prd_but_no_tasks(self, tmp_path):
+        """The original ambiguous row — prd exists, task_count == 0."""
+        docs = tmp_path / ".taskmaster" / "docs"
+        docs.mkdir(parents=True)
+        (tmp_path / ".taskmaster" / "tasks").mkdir(parents=True)
+        (docs / "prd.md").write_text("# stub\n")
+        rc, out = run_script(SCRIPT_PY, ["preflight"], cwd=str(tmp_path))
+        assert rc == 0 and out["recommended_action"] == "parse_prd"
+
+    def test_recommended_action_resume_when_tasks_pending(self, tmp_path):
+        docs = tmp_path / ".taskmaster" / "docs"
+        tasks = tmp_path / ".taskmaster" / "tasks"
+        docs.mkdir(parents=True); tasks.mkdir(parents=True)
+        (docs / "prd.md").write_text("# stub\n")
+        (tasks / "tasks.json").write_text(
+            '{"tasks":[{"id":1,"status":"pending"},{"id":2,"status":"done"}]}')
+        rc, out = run_script(SCRIPT_PY, ["preflight"], cwd=str(tmp_path))
+        assert rc == 0 and out["recommended_action"] == "resume"
+
+    def test_recommended_action_complete_when_no_pending(self, tmp_path):
+        docs = tmp_path / ".taskmaster" / "docs"
+        tasks = tmp_path / ".taskmaster" / "tasks"
+        docs.mkdir(parents=True); tasks.mkdir(parents=True)
+        (docs / "prd.md").write_text("# stub\n")
+        (tasks / "tasks.json").write_text('{"tasks":[{"id":1,"status":"done"}]}')
+        rc, out = run_script(SCRIPT_PY, ["preflight"], cwd=str(tmp_path))
+        assert rc == 0 and out["recommended_action"] == "complete"
+
     def test_preflight_detects_claude_md(self, tmp_project):
         """Detects CLAUDE.md in project root."""
         (tmp_project / "CLAUDE.md").write_text("# Project guide")

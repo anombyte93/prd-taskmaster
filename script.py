@@ -154,6 +154,24 @@ def cmd_preflight(args: argparse.Namespace) -> None:
 
     # Check crash state
     crash_state = _read_execution_state()
+    has_crash = crash_state.get("has_incomplete", False)
+
+    # Decision table — single authoritative mapping of state -> next action.
+    # Closes ship-blocker #4: callers no longer have to assemble the 4-way
+    # ambiguity (prd×tasks) themselves. Order matters: crash recovery wins,
+    # then setup gap, then the prd/tasks axis.
+    if has_crash:
+        recommended_action = "recover"
+    elif not has_taskmaster:
+        recommended_action = "run_setup"
+    elif prd_path is None:
+        recommended_action = "generate_prd"
+    elif task_count == 0:
+        recommended_action = "parse_prd"
+    elif tasks_pending > 0:
+        recommended_action = "resume"
+    else:
+        recommended_action = "complete"
 
     emit({
         "ok": True,
@@ -164,8 +182,9 @@ def cmd_preflight(args: argparse.Namespace) -> None:
         "tasks_pending": tasks_pending,
         "taskmaster_method": tm_method["method"],
         "has_claude_md": has_claude_md,
-        "has_crash_state": crash_state.get("has_incomplete", False),
-        "crash_state": crash_state if crash_state.get("has_incomplete") else None,
+        "has_crash_state": has_crash,
+        "crash_state": crash_state if has_crash else None,
+        "recommended_action": recommended_action,
     })
 
 
