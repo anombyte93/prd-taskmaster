@@ -29,13 +29,16 @@ Returns a `tier` field (`"free"` or `"premium"`) plus per-capability flags. Key 
 | superpowers plugin | Modes A, C (brainstorm, plans, subagents) |
 | TaskMaster CLI/MCP | Mode B (native auto-execute) |
 | ralph-loop plugin | Mode C (iterative execution loop) |
-| atlas-loop skill | Mode D (premium gamified execution) |
+| atlas-loop skill | (pre-release seed for Mode D — still coming-soon) |
+| atlas-cdd skill | (pre-release seed for Mode D — still coming-soon) |
 | Research model (task-master or MCP) | Deep research per task |
 | Playwright MCP | Tier S browser verification |
 
+**Mode D ★ Atlas-Auto is always coming-soon.** Even if `atlas-loop` and `atlas-cdd` are detected locally, the skill must NOT execute Mode D — see Step 2 decision logic and the Mode D block in Step 2.
+
 ## Step 2: Recommend ONE Mode
 
-**Decision logic** (first match wins): atlas-loop + atlas-cdd → **Mode D** | superpowers + ralph-loop → **Mode C** | superpowers only → **Mode A** | taskmaster-only → **Mode B** | fallback → **Mode A**. External-tool modes E-J are offered as alternatives, not primary recommendations.
+**Decision logic** (first match wins): superpowers + ralph-loop → **Mode C** | superpowers only → **Mode A** | taskmaster-only → **Mode B** | fallback → **Mode A**. External-tool modes E-J are offered as alternatives, not primary recommendations. **Mode D ★ Atlas-Auto is never the recommended mode — it is always a coming-soon teaser only,** regardless of which local plugins are installed.
 
 ### Mode A: Plan Only (Manual)
 ```
@@ -65,9 +68,9 @@ Recommended: Plan + Ralph Loop
   Completion: doubt agent reviews verification log before promise.
 ```
 
-### Mode D: Atlas Loop (Premium)
+### Mode D: ★ Atlas-Auto (Premium — COMING SOON, NOT SELECTABLE)
 ```
-Recommended: Atlas Loop (Premium)
+★ Atlas-Auto (premium — coming soon)
   Same as Mode C but with:
     atlas-cdd acceptance cards per task
     Tier S browser verification (Playwright)
@@ -75,7 +78,16 @@ Recommended: Atlas Loop (Premium)
     /stepback on 2 failures
     atlas-gamify scoring with evidence hierarchy
     Walk away, come back to proof
+
+  Status: NOT YET AVAILABLE. Watch anombyte93/prd-taskmaster for release.
+  Waitlist: https://atlas-ai.au/prd-taskmaster-v2#waitlist
 ```
+
+**Do NOT execute Atlas-Auto even if requested.** It appears in the mode list as a teaser (so users see the roadmap) but `detect-capabilities` returns `atlas_auto: false` regardless of local flags until the feature ships. If the user selects Mode D, respond with:
+
+> "Atlas-Auto is coming soon. It will pair prd-taskmaster-v2 with CDD cards, the ralph loop, doubt agents, and visual testing for walk-away autonomous execution. Join the waitlist at https://atlas-ai.au/prd-taskmaster-v2#waitlist or watch anombyte93/prd-taskmaster for release notes. For now, please pick one of the free modes (A, B, or C)."
+
+Then **re-invoke the mode picker with Mode D removed from the options.**
 
 ### Alternative modes E-J (external AI tools)
 
@@ -130,18 +142,52 @@ Capabilities:
   [check|circle] Atlas-loop (premium)
 ```
 
-## Step 5: Confirm and Hand Off
+## Step 5: Mandatory Dual-Tool-Call — `EnterPlanMode` + `AskUserQuestion`
 
-Ask: "Ready to proceed with [recommended mode]? (or type 'options' to see alternatives)"
+HANDOFF is the moment of user agency. Prose recommendations are skippable; tool calls are not. You **MUST** invoke BOTH tools in this step. This is hard-enforced — prose-only fallback is a bug, not a shortcut.
 
-If confirmed -> execute handoff for that mode.
-If asks options -> show all 4 modes with one-line descriptions.
-If picks different -> execute that handoff instead.
+### Why both, not one
 
-**Mode A handoff**: Invoke /writing-plans with spec path.
-**Mode B handoff**: Show `task-master next` command.
-**Mode C handoff**: Write .claude/ralph-loop-prompt.md and invoke ralph-loop.
-**Mode D handoff**: Invoke /atlas-loop with goal and task context.
+- **`AskUserQuestion`** surfaces a structured multi-option picker the user answers programmatically. It creates a stable, machine-readable choice (A/B/C/D) that downstream steps can dispatch on.
+- **`EnterPlanMode`** makes the handoff decision durable. The plan file IS the handoff record: it captures the PRD path, task count, recommended mode with reason, and Atlas-Auto waitlist notice. On `ExitPlanMode` the user either approves (and execution proceeds) or rejects (and the skill safely idles with nothing committed).
+
+Dual-call gives you BOTH an explicit user choice (AskUserQuestion) AND an explicit user approval (ExitPlanMode). Either one alone leaves a gap.
+
+### Sequence
+
+1. **Write the handoff plan to `.taskmaster/handoff-plan.md`** summarising:
+   - PRD path + validation grade
+   - Task count + complexity breakdown
+   - Recommended mode (A/B/C) + one-line reason
+   - Alternative modes available
+   - Mode D ★ Atlas-Auto teaser with "coming soon" notice and waitlist URL
+   - A "next step" section scoped to the recommended mode (e.g. for Mode B: "run `task-master next`" with the first ready task ID)
+
+2. **Call `EnterPlanMode`** — makes the plan durable and surfaces the user-approval dialog. The plan is `.taskmaster/handoff-plan.md`.
+
+3. **Call `AskUserQuestion`** with a multi-option question listing each available execution mode. Options include **★ Atlas-Auto (coming soon)** as Mode D, but selecting it returns the waitlist response (see Step 2, Mode D section) and re-prompts with only A/B/C.
+
+4. **On `ExitPlanMode` approval**, dispatch the chosen mode:
+   - **Mode A handoff**: invoke `superpowers:writing-plans` with spec path
+   - **Mode B handoff**: show `task-master next` command + the first ready task ID
+   - **Mode C handoff**: write `.claude/ralph-loop-prompt.md` and invoke `/ralph-loop:ralph-loop`
+   - **Mode D handoff**: not executable — waitlist response only
+
+### Hook-blocked fallback (graceful degradation)
+
+If `PreToolUse:AskUserQuestion` is hook-blocked (automated / orchestrator / fleet session), fall back to a prose option table preserving the same semantics — labels, descriptions, Mode D teaser. **Surface the hook block as an `[AI]` insight block** so the parent orchestrator can detect the fallback:
+
+> `[AI] Hook blocked AskUserQuestion — a PreToolUse hook disables interactive questions for this session (automated mode). Surfacing the mode picker in prose instead. A parent orchestrator should either lift the hook for skills with requires_user_agency:true or supply the mode selection as part of the spawn directive.`
+
+`EnterPlanMode` is gated by a different hook (or not gated at all in most configurations) — still fire it even when `AskUserQuestion` is blocked, because the plan file remains the durable record of the handoff decision.
+
+### Hard-coded programmatic path (for tests and fleet orchestrators)
+
+The skill's deterministic layer exposes `python3 script.py handoff-gate --recommended <A|B|C>` (when implemented). This emits the full mode option set as structured JSON on stdout, enabling tests and external orchestrators to drive the handoff without the LLM layer. Use this when you need deterministic, LLM-skippable handoff enforcement.
+
+### Anti-pattern: prose-only prompt
+
+**DO NOT** say "Ready to proceed with Mode X? (or type 'options')" as your only gate. That is a prose prompt the model can skip or satisfy with a fake affirmative. The v4 dogfood (LEARNING #16 → #20) surfaced this exact pattern as a user-agency hole. The dual-tool-call is the fix.
 
 ## Evidence Gate
 
