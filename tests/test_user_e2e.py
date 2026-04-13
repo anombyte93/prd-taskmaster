@@ -84,11 +84,17 @@ class TestUserWorkflowE2E:
         num_reqs = int(num_match.group(1)) if num_match else 5
         rc, calc = run_script(SCRIPT_PY, ["calc-tasks", "--requirements", str(num_reqs)])
         assert rc == 0
-        assert calc["recommended"] >= 10
+        # v4.1 calc-tasks floor is 3 (was 10). Recommended is context-aware
+        # and clamped to [3, 25]. For an e2e test that doesn't pin team/scope,
+        # assert the value is within the clamp window.
+        assert 3 <= calc["recommended"] <= 25
 
-        # Step 9: Generate test checkpoints
+        # gen-test-tasks needs at least 5 tasks to produce a checkpoint
+        # (inserts a USER-TEST every 5 tasks). Use max(5, recommended) so
+        # the downstream step still has something to assert on.
+        total_for_checkpoints = max(5, calc["recommended"])
         rc, checkpoints = run_script(SCRIPT_PY, [
-            "gen-test-tasks", "--total", str(calc["recommended"])
+            "gen-test-tasks", "--total", str(total_for_checkpoints)
         ])
         assert rc == 0
         assert checkpoints["test_tasks_generated"] >= 1

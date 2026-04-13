@@ -296,9 +296,12 @@ class TestIntegration:
         rc, calc = run_script(SCRIPT_PY, ["calc-tasks", "--requirements", "6"])
         assert rc == 0
 
-        # Step 4: Generate test tasks
+        # Step 4: Generate test tasks — gen-test-tasks inserts a checkpoint
+        # every 5 tasks, so we need >= 5. v4.1 calc-tasks may recommend
+        # fewer than 5 for small PRDs (floor is 3, not 10), so use max.
+        total_for_checkpoints = max(5, calc["recommended"])
         rc, test_tasks = run_script(SCRIPT_PY, [
-            "gen-test-tasks", "--total", str(calc["recommended"])
+            "gen-test-tasks", "--total", str(total_for_checkpoints)
         ])
         assert rc == 0
         assert test_tasks["test_tasks_generated"] > 0
