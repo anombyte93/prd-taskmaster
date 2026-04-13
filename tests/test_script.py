@@ -859,3 +859,71 @@ class TestHelpers:
         result = self.mod.now_iso()
         assert "T" in result
         assert "+" in result or "Z" in result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# APPEND-WORKFLOW — ship-blocker #15 (CLAUDE.md safe-append)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestAppendWorkflow:
+    """Closes ship-readiness issue #15: HANDOFF's raw append had no backup,
+    no dry-run, and only exact-string idempotency. Exercise all four branches.
+    """
+
+    def _content(self, tmp_path):
+        c = tmp_path / "section.md"
+        c.write_text("## Task Execution Workflow (prd-taskmaster-v2)\nline one\n")
+        return c
+
+    def test_created_when_target_absent(self, tmp_path):
+        target = tmp_path / "CLAUDE.md"
+        rc, out = run_script(SCRIPT_PY, [
+            "append-workflow", "--target", str(target),
+            "--content-file", str(self._content(tmp_path)),
+        ])
+        assert rc == 0 and out["action"] == "created"
+        body = target.read_text()
+        assert "BEGIN prd-taskmaster-v2 workflow" in body
+        assert "END prd-taskmaster-v2 workflow" in body
+
+    def test_appended_preserves_existing_and_backs_up(self, tmp_path):
+        target = tmp_path / "CLAUDE.md"
+        original = "# User CLAUDE.md\n\nmy own stuff\n"
+        target.write_text(original)
+        rc, out = run_script(SCRIPT_PY, [
+            "append-workflow", "--target", str(target),
+            "--content-file", str(self._content(tmp_path)),
+        ])
+        assert rc == 0 and out["action"] == "appended"
+        assert out["backup_path"] is not None
+        assert Path(out["backup_path"]).read_text() == original
+        assert target.read_text().startswith(original)
+        assert "BEGIN prd-taskmaster-v2 workflow" in target.read_text()
+
+    def test_skipped_when_markers_present(self, tmp_path):
+        target = tmp_path / "CLAUDE.md"
+        target.write_text("# Existing\n<!-- BEGIN prd-taskmaster-v2 workflow -->\n"
+                          "old\n<!-- END prd-taskmaster-v2 workflow -->\n")
+        before = target.read_text()
+        rc, out = run_script(SCRIPT_PY, [
+            "append-workflow", "--target", str(target),
+            "--content-file", str(self._content(tmp_path)),
+        ])
+        assert rc == 0 and out["action"] == "skipped"
+        assert out["reason"] == "markers_present"
+        assert target.read_text() == before  # byte-identical
+
+    def test_dry_run_writes_nothing(self, tmp_path):
+        target = tmp_path / "CLAUDE.md"
+        original = "# Existing\n"
+        target.write_text(original)
+        rc, out = run_script(SCRIPT_PY, [
+            "append-workflow", "--target", str(target),
+            "--content-file", str(self._content(tmp_path)),
+            "--dry-run",
+        ])
+        assert rc == 0 and out["dry_run"] is True
+        assert out["action"] == "would_appended"
+        assert target.read_text() == original  # unchanged
+        assert "BEGIN prd-taskmaster-v2 workflow" in out["content_preview"]

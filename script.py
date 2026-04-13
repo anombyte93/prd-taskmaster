@@ -945,6 +945,60 @@ def cmd_backup_prd(args: argparse.Namespace) -> None:
     })
 
 
+WORKFLOW_BEGIN_MARKER = "<!-- BEGIN prd-taskmaster-v2 workflow -->"
+WORKFLOW_END_MARKER = "<!-- END prd-taskmaster-v2 workflow -->"
+
+
+def cmd_append_workflow_section(args: argparse.Namespace) -> None:
+    """Idempotently append the task-execution workflow section to a CLAUDE.md.
+
+    Contract:
+      - If target missing: create it with marker-wrapped content. action=created.
+      - If markers already present: no write. action=skipped.
+      - Else: backup to CLAUDE.md.prd-taskmaster-backup-<ts>.md, then append
+        marker-wrapped content. action=appended.
+      - --dry-run: emit the planned action and content, do not write.
+
+    Replaces the raw Read+Edit flow in phases/HANDOFF.md Step 3, which had no
+    backup, no conflict detection beyond exact-string match, and no dry-run.
+    """
+    target = Path(args.target)
+    content_path = Path(args.content_file)
+    if not content_path.is_file():
+        fail(f"Content file not found: {args.content_file}")
+    content = content_path.read_text()
+
+    wrapped = f"\n{WORKFLOW_BEGIN_MARKER}\n{content.rstrip()}\n{WORKFLOW_END_MARKER}\n"
+
+    if not target.exists():
+        action, backup_path = "created", None
+    else:
+        existing = target.read_text()
+        if WORKFLOW_BEGIN_MARKER in existing:
+            emit({"ok": True, "action": "skipped", "reason": "markers_present",
+                  "target": str(target), "backup_path": None})
+            return
+        action = "appended"
+        backup_path = None
+        if not args.dry_run:
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup_path = str(target.parent / f"{target.name}.prd-taskmaster-backup-{ts}")
+            shutil.copy2(str(target), backup_path)
+
+    if args.dry_run:
+        emit({"ok": True, "action": f"would_{action}", "target": str(target),
+              "content_preview": wrapped, "backup_path": None, "dry_run": True})
+        return
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    mode = "w" if action == "created" else "a"
+    with open(target, mode) as f:
+        f.write(wrapped)
+
+    emit({"ok": True, "action": action, "target": str(target),
+          "backup_path": backup_path, "dry_run": False})
+
+
 def cmd_read_state(args: argparse.Namespace) -> None:
     """Read crash recovery state."""
     state = _read_execution_state()
@@ -1715,6 +1769,13 @@ def build_parser() -> argparse.ArgumentParser:
     # validate-setup
     sub.add_parser("validate-setup", help="Run all Phase 0 setup checks with diagnostic output")
 
+    # append-workflow
+    p = sub.add_parser("append-workflow",
+                       help="Idempotent, backup-safe append of workflow section to CLAUDE.md")
+    p.add_argument("--target", required=True, help="Path to CLAUDE.md")
+    p.add_argument("--content-file", required=True, help="Path to content to append")
+    p.add_argument("--dry-run", action="store_true", help="Preview without writing")
+
     return parser
 
 
@@ -1732,6 +1793,7 @@ DISPATCH = {
     "init-taskmaster": cmd_init_taskmaster,
     "detect-capabilities": cmd_detect_capabilities,
     "validate-setup": cmd_validate_setup,
+    "append-workflow": cmd_append_workflow_section,
 }
 
 

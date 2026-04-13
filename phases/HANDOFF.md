@@ -104,26 +104,42 @@ Then **re-invoke the mode picker with Mode D removed from the options.**
 
 ## Step 3: Append Task Workflow to CLAUDE.md
 
-Read the project's `./CLAUDE.md`. Append this section (if not already present):
+Use the deterministic subcommand — do **not** do raw Read+Edit. This path is idempotent, takes a timestamped backup when modifying an existing file, and uses HTML-comment sentinels so re-runs are no-ops.
 
-```markdown
-## Task Execution Workflow (prd-taskmaster-v2)
+1. Write the workflow content to a tempfile (it is the same content every run):
 
-When implementing tasks, prefer task-master-ai MCP tools over the CLI:
-1. `mcp__task-master-ai__next_task()` or `task-master next` -- get next ready task
-2. `set_task_status(id, "in-progress")` -- note hyphen; underscore is rejected
-3. Implement the task (follow the plan step linked to this task)
-4. `set_task_status(id, "done")` -- mark complete
-5. Update TodoWrite with progress
-6. Repeat from step 1
+   ```markdown
+   ## Task Execution Workflow (prd-taskmaster-v2)
 
-Valid statuses: `pending`, `in-progress`, `done`, `review`, `blocked`, `deferred`, `cancelled`.
+   When implementing tasks, prefer task-master-ai MCP tools over the CLI:
+   1. `mcp__task-master-ai__next_task()` or `task-master next` -- get next ready task
+   2. `set_task_status(id, "in-progress")` -- note hyphen; underscore is rejected
+   3. Implement the task (follow the plan step linked to this task)
+   4. `set_task_status(id, "done")` -- mark complete
+   5. Update TodoWrite with progress
+   6. Repeat from step 1
 
-### Progress Tracking
-- Update TodoWrite BEFORE and AFTER each task
-- Cannot proceed to next task without updating TodoWrite
-- TodoWrite = user visibility. TaskMaster = source of truth.
-```
+   Valid statuses: `pending`, `in-progress`, `done`, `review`, `blocked`, `deferred`, `cancelled`.
+
+   ### Progress Tracking
+   - Update TodoWrite BEFORE and AFTER each task
+   - Cannot proceed to next task without updating TodoWrite
+   - TodoWrite = user visibility. TaskMaster = source of truth.
+   ```
+
+2. **Preview first** with `--dry-run` so the user (in plan mode) can see what would be written:
+
+   ```bash
+   python3 $SKILL_DIR/script.py append-workflow \
+     --target ./CLAUDE.md \
+     --content-file /tmp/pdtm-workflow-section.md \
+     --dry-run
+   ```
+
+3. After `ExitPlanMode` approval in Step 5, run the real write (same command without `--dry-run`). The JSON response reports one of:
+   - `action: "created"` — no prior CLAUDE.md, fresh file with markers
+   - `action: "skipped"` (reason: `markers_present`) — already wired, no-op
+   - `action: "appended"` — existing CLAUDE.md untouched except for the appended marker block; `backup_path` points at `CLAUDE.md.prd-taskmaster-backup-<ts>`
 
 ## Step 4: Display Summary
 
