@@ -42,13 +42,24 @@ task-master init --yes
 
 **If exists**: Continue silently.
 
-## Step 3: Configure Provider
+## Step 3: Configure Provider (DETECT FIRST, MUTATE ONLY IF EMPTY)
 
 ```bash
 task-master models
 ```
 
-Check the output for an active main model provider.
+**READ the output carefully before running any `--set-*` commands.** If Main, Research, and Fallback slots are already populated with a supported provider, **SKIP the rest of this step entirely and proceed to Step 4 (probe test).** The user already has a working config and we must not overwrite it.
+
+### How to decide: mutate or skip?
+
+| `task-master models` output | Action |
+|---|---|
+| Main/Research/Fallback all show a provider + model ID | **SKIP** — config is valid, do not mutate. Go to Step 4. |
+| Main is set but Research/Fallback are empty | **Partial mutate** — only set the missing roles, never overwrite what exists. |
+| All three empty, no config file, fresh install | **Full configure** — use the recommended stack below. |
+| Provider name shown but flagged as "unsupported" or "deprecated" | **Ask the user before mutating.** Do not silently swap. |
+
+This detect-first rule exists because v4 dogfood (2026-04-13) surfaced LEARNING #9: the skill blindly overrode an existing `gemini-cli / gemini-3-pro-preview` config with `claude-code / sonnet` because the prose documentation made the child think "I should configure this." That was a scope violation. **A user whose config already works wants the skill to leave them alone in that dimension.**
 
 **Important:** TaskMaster's CLI uses a two-argument model syntax: `--set-main <model-id> --<provider-flag>`. The model ID is NOT the provider name.
 
