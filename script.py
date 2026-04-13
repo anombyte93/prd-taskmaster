@@ -741,15 +741,94 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
 
 
 def cmd_calc_tasks(args: argparse.Namespace) -> None:
-    """Calculate recommended task count: requirements * 1.5, clamped 10-40."""
-    raw = math.ceil(args.requirements * 1.5)
-    recommended = max(10, min(40, raw))
+    """Context-aware task count recommendation.
+
+    v4 dogfood (LEARNING #11) proved the old formula — ceil(reqs * 1.5)
+    clamped [10, 40] — was monotonic and context-blind: 32 requirements
+    returned 40 for a solo operator working on the final phase of a
+    4-thematic-group brownfield project where 12 was the right answer
+    (child correctly overrode to 12 based on domain reasoning).
+
+    New formula considers four inputs:
+      - requirements_count (required): how many REQs the PRD lists
+      - team_size (default 1): solo vs team changes task granularity
+      - scope_phase (default greenfield): new build vs. brownfield vs.
+        final phase — greenfield needs MORE decomposition because nothing
+        exists to lean on
+      - thematic_groups (optional): if the scope decomposes into natural
+        parent groups (e.g. n8n / Ollama / HTB / UI polish = 4 groups),
+        each group gets ~3 parent tasks
+
+    Formula (the strongest signal is thematic groups):
+      if thematic_groups > 0:
+          base = thematic_groups * 3   # ~3 parent tasks per natural group
+      else:
+          base = max(1, ceil(reqs / 4))   # ~1 task per 4 requirements
+      scope_adjust = {greenfield: 1.2, brownfield: 1.0, final_phase: 1.0}[phase]
+      team_multiplier = 1 + (team_size - 1) / 10
+      raw = base * scope_adjust * team_multiplier
+      recommended = clamp(round(raw), 3, 25)
+
+    The Shade validation case (32 reqs, solo, final_phase, 4 groups):
+      base = 4 * 3 = 12; adjust = 1.0; mult = 1.0; raw = 12; recommended = 12 ✓
+
+    The new floor is 3 (not 10) so quick-mode tasks are possible later,
+    and the new ceiling is 25 (not 40) because 30+ tasks on a single
+    scope is almost always over-decomposition.
+    """
+    reqs = args.requirements
+    team_size = max(1, args.team_size)
+    scope_phase = args.scope_phase
+    thematic_groups = args.thematic_groups if args.thematic_groups is not None else 0
+
+    if thematic_groups > 0:
+        base = thematic_groups * 3
+        base_source = f"{thematic_groups} thematic groups * 3 tasks/group"
+    else:
+        base = max(1, math.ceil(reqs / 4))
+        base_source = f"ceil({reqs} requirements / 4) = {math.ceil(reqs / 4)}"
+
+    scope_adjust_map = {
+        "greenfield": 1.2,
+        "brownfield": 1.0,
+        "final_phase": 1.0,
+    }
+    scope_adjust = scope_adjust_map.get(scope_phase, 1.2)
+
+    team_multiplier = 1 + (team_size - 1) / 10
+
+    raw = base * scope_adjust * team_multiplier
+    recommended = max(3, min(25, round(raw)))
+
+    reasoning_parts = [
+        f"Base: {base} ({base_source}).",
+        f"Scope phase '{scope_phase}' multiplier: {scope_adjust}.",
+        f"Team size {team_size} multiplier: {round(team_multiplier, 2)}.",
+        f"Raw: {round(raw, 2)} -> rounded + clamped to [3, 25]: {recommended}.",
+    ]
+
     emit({
         "ok": True,
-        "requirements_count": args.requirements,
-        "raw_calculation": raw,
+        "inputs": {
+            "requirements_count": reqs,
+            "team_size": team_size,
+            "scope_phase": scope_phase,
+            "thematic_groups": thematic_groups,
+        },
+        "calculation": {
+            "base": base,
+            "scope_adjust": scope_adjust,
+            "team_multiplier": round(team_multiplier, 2),
+            "raw": round(raw, 2),
+        },
         "recommended": recommended,
-        "formula": "ceil(requirements * 1.5), clamped [10, 40]",
+        "reasoning": " ".join(reasoning_parts),
+        "formula": (
+            "base = (thematic_groups * 3) if thematic_groups > 0 else max(1, ceil(reqs/4)); "
+            "raw = base * scope_adjust[phase] * (1 + (team_size-1)/10); "
+            "recommended = clamp(round(raw), 3, 25)"
+        ),
+        "scope_adjust_map": scope_adjust_map,
     })
 
 
@@ -1581,8 +1660,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # calc-tasks
-    p = sub.add_parser("calc-tasks", help="Calculate recommended task count")
+    p = sub.add_parser("calc-tasks", help="Calculate recommended task count (context-aware)")
     p.add_argument("--requirements", required=True, type=int, help="Number of functional requirements")
+    p.add_argument(
+        "--team-size",
+        type=int,
+        default=1,
+        help="Number of engineers who will work on the tasks (default 1, solo operator)",
+    )
+    p.add_argument(
+        "--scope-phase",
+        choices=["greenfield", "brownfield", "final_phase"],
+        default="greenfield",
+        help="Project stage: greenfield=new build, brownfield=adding to existing, final_phase=completion work (default greenfield)",
+    )
+    p.add_argument(
+        "--thematic-groups",
+        type=int,
+        default=None,
+        help="Number of natural parent groups the scope decomposes into (e.g. 4 for n8n/Ollama/HTB/UI). Optional; informs the base.",
+    )
 
     # gen-test-tasks
     p = sub.add_parser("gen-test-tasks", help="Generate USER-TEST task specs")

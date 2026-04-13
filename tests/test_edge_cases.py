@@ -218,20 +218,21 @@ class TestSectionExtractionEdges:
 
 
 class TestCalcTasksEdges:
-    """Edge cases for task count calculation."""
+    """Edge cases for task count calculation under the v4.1 formula."""
 
     def test_negative_requirements_clamps(self):
-        """Negative input still clamps to minimum."""
+        """Negative input still clamps to minimum (floor 3)."""
         rc, out = run_script(SCRIPT_PY, ["calc-tasks", "--requirements", "-5"])
-        # argparse accepts negative ints
         assert rc == 0
-        assert out["recommended"] == 10  # clamped to min
+        # base = max(1, ceil(-5/4)) = 1, adjust = 1.2 → raw 1.2 → clamped to 3
+        assert out["recommended"] == 3
 
     def test_very_large_requirements(self):
-        """Very large number clamps to 40."""
+        """Very large number clamps to ceiling 25."""
         rc, out = run_script(SCRIPT_PY, ["calc-tasks", "--requirements", "1000"])
         assert rc == 0
-        assert out["recommended"] == 40
+        # base = ceil(1000/4) = 250, adjust 1.2 → raw 300 → clamped to 25
+        assert out["recommended"] == 25
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -274,20 +274,21 @@ As a user I want to register.
 
 
 class TestCalcTasksRawCalculation:
-    """Verify raw_calculation field for edge cases."""
+    """Verify calculation fields for edge cases under the v4.1 formula."""
 
     def test_negative_raw_calculation(self):
-        """Negative input produces negative raw calculation but clamped recommended."""
+        """Negative input still clamps recommended to floor 3."""
         rc, out = run_script(SCRIPT_PY, ["calc-tasks", "--requirements", "-5"])
         assert rc == 0
-        assert out["raw_calculation"] == -7  # ceil(-5 * 1.5) = ceil(-7.5) = -7
-        assert out["recommended"] == 10  # clamped to minimum
+        # base = max(1, ceil(-5/4)) = max(1, -1) = 1
+        # adjust = 1.2, mult = 1.0 → raw = 1.2 → clamped to 3
+        assert out["recommended"] == 3
 
     def test_raw_vs_recommended_divergence(self):
-        """Large inputs show divergence between raw and recommended."""
+        """Large inputs show divergence between raw and clamped recommended."""
         rc, out = run_script(SCRIPT_PY, ["calc-tasks", "--requirements", "100"])
         assert rc == 0
-        assert out["raw_calculation"] == 150
-        assert out["recommended"] == 40
-        # The divergence should be clear
-        assert out["raw_calculation"] > out["recommended"]
+        # base = ceil(100/4) = 25; adjust 1.2 → raw = 30; clamped to 25
+        assert out["calculation"]["raw"] == 30.0
+        assert out["recommended"] == 25
+        assert out["calculation"]["raw"] > out["recommended"]

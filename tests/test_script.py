@@ -342,58 +342,121 @@ class TestValidatePrd:
 
 
 class TestCalcTasks:
-    """Test cmd_calc_tasks — task count calculation."""
+    """Test cmd_calc_tasks — context-aware task count calculation (v4.1)."""
 
-    def test_calc_tasks_formula(self):
-        """Verify formula: ceil(requirements * 1.5), clamped [10, 40]."""
-        rc, out = run_script(SCRIPT_PY, ["calc-tasks", "--requirements", "15"])
+    def test_calc_tasks_solo_greenfield_default(self):
+        """Default inputs: solo, greenfield, no thematic groups.
+
+        32 reqs → base = ceil(32/4) = 8; adjust = 1.2; mult = 1.0 →
+        raw = 9.6 → recommended = 10.
+        """
+        rc, out = run_script(SCRIPT_PY, ["calc-tasks", "--requirements", "32"])
         assert rc == 0
         assert out["ok"] is True
-        assert out["requirements_count"] == 15
-        assert out["raw_calculation"] == 23  # ceil(15 * 1.5) = 23
-        assert out["recommended"] == 23
+        assert out["inputs"]["requirements_count"] == 32
+        assert out["inputs"]["team_size"] == 1
+        assert out["inputs"]["scope_phase"] == "greenfield"
+        assert out["calculation"]["base"] == 8
+        assert out["calculation"]["scope_adjust"] == 1.2
+        assert out["recommended"] == 10
 
-    def test_calc_tasks_minimum_clamp(self):
-        """Small requirement count clamps to minimum 10."""
-        rc, out = run_script(SCRIPT_PY, ["calc-tasks", "--requirements", "3"])
+    def test_calc_tasks_shade_validation_case(self):
+        """The exact case that surfaced LEARNING #11 in the v4 dogfood.
+
+        Shade Phase 5: 32 requirements, solo operator, final_phase,
+        4 thematic groups (n8n / Ollama / HTB / UI polish). Old formula
+        returned 40 (max clamp). The child correctly overrode to 12.
+        v4.1 formula must return 12.
+        """
+        rc, out = run_script(SCRIPT_PY, [
+            "calc-tasks",
+            "--requirements", "32",
+            "--team-size", "1",
+            "--scope-phase", "final_phase",
+            "--thematic-groups", "4",
+        ])
         assert rc == 0
-        assert out["raw_calculation"] == 5  # ceil(3 * 1.5) = 5
-        assert out["recommended"] == 10  # clamped to minimum
+        assert out["recommended"] == 12
+        # base = 4 thematic groups * 3 = 12
+        assert out["calculation"]["base"] == 12
+        # final_phase scope adjustment is 1.0 (no reduction — final phase
+        # still needs per-group decomposition)
+        assert out["calculation"]["scope_adjust"] == 1.0
 
-    def test_calc_tasks_maximum_clamp(self):
-        """Large requirement count clamps to maximum 40."""
-        rc, out = run_script(SCRIPT_PY, ["calc-tasks", "--requirements", "50"])
+    def test_calc_tasks_brownfield_solo_no_groups(self):
+        """20 reqs, solo, brownfield, no groups.
+
+        base = ceil(20/4) = 5; adjust = 1.0; mult = 1.0; raw = 5;
+        clamped to floor 3 not needed, recommended = 5.
+        """
+        rc, out = run_script(SCRIPT_PY, [
+            "calc-tasks",
+            "--requirements", "20",
+            "--scope-phase", "brownfield",
+        ])
         assert rc == 0
-        assert out["raw_calculation"] == 75  # ceil(50 * 1.5) = 75
-        assert out["recommended"] == 40  # clamped to maximum
+        assert out["recommended"] == 5
 
-    def test_calc_tasks_exact_boundary_10(self):
-        """Requirements that produce exactly 10 tasks."""
-        # ceil(7 * 1.5) = ceil(10.5) = 11, ceil(6 * 1.5) = 9 -> clamp to 10
-        rc, out = run_script(SCRIPT_PY, ["calc-tasks", "--requirements", "6"])
+    def test_calc_tasks_team_multiplier(self):
+        """Team of 5 on 20 req greenfield.
+
+        base = ceil(20/4) = 5; adjust = 1.2; mult = 1.4; raw = 8.4;
+        recommended = 8.
+        """
+        rc, out = run_script(SCRIPT_PY, [
+            "calc-tasks",
+            "--requirements", "20",
+            "--team-size", "5",
+            "--scope-phase", "greenfield",
+        ])
         assert rc == 0
-        assert out["recommended"] == 10  # 9 clamped to 10
+        assert out["calculation"]["team_multiplier"] == 1.4
+        assert out["recommended"] == 8
 
-    def test_calc_tasks_exact_boundary_40(self):
-        """Requirements that produce exactly 40 tasks."""
-        # ceil(27 * 1.5) = ceil(40.5) = 41 -> clamp to 40
-        # ceil(26 * 1.5) = 39
-        rc, out = run_script(SCRIPT_PY, ["calc-tasks", "--requirements", "26"])
-        assert rc == 0
-        assert out["recommended"] == 39  # just under clamp
+    def test_calc_tasks_floor_clamp(self):
+        """Tiny input hits floor of 3.
 
-    def test_calc_tasks_zero_requirements(self):
-        """Zero requirements clamps to minimum."""
-        rc, out = run_script(SCRIPT_PY, ["calc-tasks", "--requirements", "0"])
-        assert rc == 0
-        assert out["recommended"] == 10  # clamped
-
-    def test_calc_tasks_one_requirement(self):
-        """Single requirement clamps to minimum."""
+        1 req, solo, greenfield, no groups. base = 1; adjust = 1.2;
+        raw = 1.2 → clamped to floor 3.
+        """
         rc, out = run_script(SCRIPT_PY, ["calc-tasks", "--requirements", "1"])
         assert rc == 0
-        assert out["raw_calculation"] == 2  # ceil(1.5) = 2
-        assert out["recommended"] == 10
+        assert out["recommended"] == 3  # clamped to floor
+
+    def test_calc_tasks_ceiling_clamp(self):
+        """Large input hits ceiling of 25.
+
+        200 reqs, solo, greenfield. base = 50; adjust = 1.2; raw = 60;
+        clamped to ceiling 25.
+        """
+        rc, out = run_script(SCRIPT_PY, [
+            "calc-tasks", "--requirements", "200", "--scope-phase", "greenfield",
+        ])
+        assert rc == 0
+        assert out["recommended"] == 25  # clamped to ceiling
+
+    def test_calc_tasks_thematic_groups_drives_base(self):
+        """When thematic_groups is set, it drives base via N*3 rule.
+
+        4 reqs, 8 thematic groups → base = 8*3 = 24 (not ceil(4/4)=1).
+        """
+        rc, out = run_script(SCRIPT_PY, [
+            "calc-tasks",
+            "--requirements", "4",
+            "--thematic-groups", "8",
+            "--scope-phase", "brownfield",
+        ])
+        assert rc == 0
+        assert out["calculation"]["base"] == 24
+        assert out["recommended"] == 24  # base 24, adjust 1.0, mult 1.0
+
+    def test_calc_tasks_reasoning_field_present(self):
+        """Output must include a reasoning field so users see the 'why'."""
+        rc, out = run_script(SCRIPT_PY, ["calc-tasks", "--requirements", "15"])
+        assert rc == 0
+        assert "reasoning" in out
+        assert "base" in out["reasoning"].lower()
+        assert "15" in out["reasoning"]  # references the input
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
