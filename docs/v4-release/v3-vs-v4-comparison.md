@@ -74,7 +74,7 @@ regression guard.
 | AI review fallback | n/a | graceful: if task-master missing, returns deterministic-only with warning (never hard-fails) |
 
 **The `--ai` flag is the only AI augmentation v4 adds to script.py.** Per the
-architecture research conducted during this session (six-query Perplexity
+architecture research conducted during this session (six-query parallel
 batch on "should scripts embed AI decisions?"), the finding was unanimous:
 **deterministic core + optional AI augmentation flag is the correct pattern**,
 not "AI sprinkling" across every subcommand. The other 12 subcommands stay

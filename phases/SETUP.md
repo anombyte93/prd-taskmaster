@@ -64,12 +64,13 @@ task-master models --set-fallback gemini-3-flash-preview --gemini-cli
 
 Why this stack: Gemini is 113× more token-efficient than sonnet for parse-prd (measured 6K vs 684K tokens on the same PRD), free via any Google account, no subscription, no API key. One provider, three roles, zero cost.
 
-**Research note on Perplexity:** if you want web-grounded research with live citations, two separate paths exist and they are NOT interchangeable:
+**Research role is provider-agnostic.** The default uses Gemini CLI for the research role (free, same provider as main/fallback). If you want a different research backend you have three options, in order of simplicity:
 
-1. **`task-master models --set-research sonar-pro --perplexity`** — task-master shells out to Perplexity's paid API directly. Requires `PERPLEXITY_API_KEY` in your environment. **Only use this if you already have a paid Perplexity API key.**
-2. **`mcp__perplexity-api-free__*` MCP tools** — free Perplexity access exposed as Claude Code MCP tools (`perplexity_search`, `perplexity_reason`, `perplexity_batch`). **Works only inside a Claude Code session, not from the task-master CLI.** Use this for interactive `/question`-style research from Claude. This is the recommended free path.
+1. **Any task-master provider**: pick any of the 12 supported provider families for the research role — `task-master models --set-research <model_id> --<provider-flag>`. Works for OpenAI, Anthropic, OpenRouter, Ollama, Bedrock, Vertex, etc.
+2. **Your own MCP research tool**: if you have an MCP server that exposes research-style tools (search/ask/reason), register it in `~/.claude.json` `mcpServers` block. Claude Code will make those tools available during the DISCOVER phase. The skill does not hard-code any specific MCP — it uses whatever's available.
+3. **Web-grounded research via paid API**: task-master supports Perplexity via `--perplexity` when `PERPLEXITY_API_KEY` is set. Only use this path if you already have a paid key — it is not the recommended default.
 
-**Default recommendation:** use Gemini for task-master's research role, and use the `perplexity-api-free` MCP tools for interactive research inside Claude. You do NOT need a paid Perplexity API key.
+**Default recommendation:** Gemini CLI for all three task-master roles. Zero keys, zero setup, one provider, free.
 
 ### Alternative: Claude Max
 

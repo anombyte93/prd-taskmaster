@@ -30,7 +30,7 @@ Returns a `tier` field (`"free"` or `"premium"`) plus per-capability flags. Key 
 | TaskMaster CLI/MCP | Mode B (native auto-execute) |
 | ralph-loop plugin | Mode C (iterative execution loop) |
 | atlas-loop skill | Mode D (premium gamified execution) |
-| Perplexity MCP/API | Deep research per task |
+| Research model (task-master or MCP) | Deep research per task |
 | Playwright MCP | Tier S browser verification |
 
 ## Step 2: Recommend ONE Mode

@@ -52,12 +52,12 @@ All use Vercel AI SDK's generateText()/generateObject() with Handlebars templati
 - calc-tasks heuristic
 - Handoff mode selection (detecting ralph-loop, CDD, etc.)
 
-### 6. perplexity-api-free MCP Architecture Mapped
-**Server at**: `~/.claude/mcp-servers/perplexity-mcp/index.js` (232 lines, single file)
-**6 tools**: perplexity_ask, perplexity_search, perplexity_reason, perplexity_research, perplexity_batch, perplexity_pro_search
-**Architecture**: Declarative TOOLS array, switch/case handler, `query()` function calls `{BASE_URL}/chat/completions`
-**Adding a tool**: Add to TOOLS array + add case in handler + call query()
-**perplexity_taskmaster concept**: A tool that accepts TaskMaster research queries, formats them for Perplexity, returns results in TaskMaster's expected format
+### 6. {REDACTED: private research MCP architecture notes}
+Notes about a private research-provider MCP server architecture were here.
+This content has been redacted because it describes internal Atlas infrastructure
+that is not part of the public v4 release. v4's research pipeline is
+provider-agnostic — see `README.md` and `phases/SETUP.md` for the supported
+configuration paths.
 
 ### 7. TaskMaster Research Provider Architecture
 - Uses Vercel AI SDK (`ai` v5.0.51) with `@ai-sdk/perplexity`

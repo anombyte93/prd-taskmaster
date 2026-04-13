@@ -1,5 +1,7 @@
-# prd-taskmaster v4.0 Spec — "The TaskMaster On-Ramp"
+# prd-taskmaster v4.0 Spec — "The TaskMaster On-Ramp" (ARCHIVED)
 
+> **ARCHIVED PRE-V4 PLANNING DOCUMENT.** This spec was written before the v4 ship cycle and contains references to private Atlas infrastructure (local research proxies, private MCP tool names) that are NOT part of the public v4 release. The shipped v4 is **provider-agnostic** — it uses whatever research model or MCP is configured by the user via `task-master models --set-research` or `~/.claude.json`. Do not treat references in this archived spec as configuration recommendations for public users. See `docs/v4-release/` and the repo's `README.md` for the authoritative v4 setup.
+>
 > Strip to core. Compose everything else. The moat is the verification pipeline.
 
 ## Vision
@@ -211,7 +213,7 @@ Hard gate: Tasks exist in tasks.json. Proceed to HANDOFF.
 
 ### What auto-detects
 - Anthropic API key (Claude Code has it)
-- Perplexity MCP (check if `mcp__perplexity-api-free__*` tools exist)
+- Perplexity MCP (check if `mcp__{redacted-research-provider}__*` tools exist)
 - TaskMaster MCP (check config files at correct paths)
 - Superpowers plugin (check skill list)
 - Premium skills (check each by name)
@@ -244,7 +246,7 @@ Resolution: config `baseURL` → `PERPLEXITY_BASE_URL` env var → default API.
 {
   "models": {
     "main": { "provider": "anthropic", "modelId": "claude-sonnet-4-5", "maxTokens": 64000 },
-    "research": { "provider": "perplexity", "modelId": "sonar-pro", "baseURL": "http://localhost:8765" },
+    "research": { "provider": "perplexity", "modelId": "sonar-pro", "baseURL": "http://localhost:{redacted-proxy-port}" },
     "fallback": { "provider": "anthropic", "modelId": "claude-haiku-4-5", "maxTokens": 32000 }
   }
 }

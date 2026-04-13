@@ -24,7 +24,7 @@ The orchestrator handshake mentioned "5 stale prd-taskmaster copies." A filesyst
 
 ### Left alone (not stale top-level copies)
 
-- `~/Projects/projects/Deployed - Internal/perplexity-api-free/prd-taskmaster` — nested checkout inside a different project's repo, not a stand-alone prd-taskmaster copy.
+- `~/Projects/projects/Deployed - Internal/{redacted-project}/prd-taskmaster` — nested checkout inside a different (private) project's repo, not a stand-alone prd-taskmaster copy.
 - `~/.claude/skills/prd-taskmaster-v2/` — live skill install, kept (deployed by `install.sh`).
 - `~/.codex/skills/prd-taskmaster-v2/` and `~/.agents/skills/prd-taskmaster-v2/` — alternate-runtime skill installs, kept.
 - `~/.claude/archive/skills/prd-taskmaster` — explicit archive, kept.

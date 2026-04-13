@@ -79,7 +79,7 @@ Resolution: config `baseURL` → `PERPLEXITY_BASE_URL` env var → default API.
 {
   "models": {
     "main": { "provider": "anthropic", "modelId": "claude-sonnet-4-5", "maxTokens": 64000 },
-    "research": { "provider": "perplexity", "modelId": "sonar-pro", "baseURL": "http://localhost:8765" },
+    "research": { "provider": "perplexity", "modelId": "sonar-pro", "baseURL": "http://localhost:{redacted-proxy-port}" },
     "fallback": { "provider": "anthropic", "modelId": "claude-haiku-4-5", "maxTokens": 32000 }
   }
 }

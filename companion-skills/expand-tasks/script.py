@@ -162,7 +162,7 @@ DESCRIPTION:
 {dep_context}
 {prd_context}
 
-Research these questions using Perplexity MCP tools (perplexity_batch preferred, perplexity_search as fallback):
+Research these questions using whichever research tools are available in this Claude Code session — task-master research, any registered MCP research tool (search/ask/reason/batch), or WebSearch as a last resort. Prefer structured research tools with citations over raw web scraping:
 
 {chr(10).join(f"{i+1}. {q}" for i, q in enumerate(research_questions))}
 

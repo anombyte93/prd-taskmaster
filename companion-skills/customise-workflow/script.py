@@ -195,9 +195,9 @@ def cmd_list_questions(args: argparse.Namespace) -> None:
             "key": "provider.research",
             "category": "provider",
             "prompt": "Which provider for research calls? (used by --research flags and validate-prd --ai)",
-            "explainer": "Perplexity is web-grounded and best for up-to-date research but requires PERPLEXITY_API_KEY. Gemini is free but uses training-data knowledge only.",
+            "explainer": "Gemini (default) is free and uses training-data knowledge — good enough for most task expansion. If you have a paid API key for a web-grounded provider (e.g. Perplexity sonar-pro), pick that instead. Or pick any task-master provider family you already have credentials for.",
             "options": ALLOWED["provider.research"],
-            "default": "perplexity",
+            "default": "gemini-cli",
         },
         {
             "id": "q4_validation_strictness",

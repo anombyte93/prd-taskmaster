@@ -15,7 +15,7 @@
 
 **What v4 changes:**
 - **Tool-agnostic** — v4 is a model/tool-agnostic plugin. Works with Claude Code (Max or API), **Gemini CLI, Codex CLI, Cursor, RooCode, CodeRabbit, Aider, Continue**. Any tool task-master supports (12 providers) as the model, any external AI tool as the executor. Swap providers with 3 CLI commands, zero code changes.
-- **New default provider stack**: Gemini (main) + Perplexity (research) + Gemini Flash (fallback). Claude Code remains a first-class alternative. See [Provider comparison](docs/v4-release/provider-comparison.md) — Gemini used **113x fewer tokens than sonnet** for parse-prd in head-to-head testing, same quality output.
+- **New default provider stack**: Gemini CLI across main, research, and fallback roles — one provider, three roles, zero API keys, free via Google account. Claude Code remains a first-class alternative. See [Provider comparison](docs/v4-release/provider-comparison.md) — Gemini used **113x fewer tokens than sonnet** for parse-prd in head-to-head testing, same quality output. Swap to any of task-master's 12 provider families with a single CLI command.
 - **Customisation via `/customise-workflow`** — new companion skill. AI asks 10 curated questions about your preferred provider, validation strictness, execution mode, template choice, etc. Writes your preferences to `.taskmaster/config/user-workflow.json`. You never manually edit JSON — the AI does it for you.
 - **Install story rewrite** — v4 ships as a **Claude Code plugin** (primary) and an **npm package** (secondary). Legacy `curl | bash` stays available as an optional path.
 - 5 phases with explicit gates (SETUP → PREFLIGHT → DISCOVER → GENERATE → HANDOFF) instead of v3's 12-step linear workflow
@@ -108,7 +108,13 @@ v4 is a **model/tool-agnostic plugin.** The skill generates PRDs and parses task
 | Codex CLI | ✅ ChatGPT subscription | `--set-main gpt-5-codex --codex-cli` |
 | OpenAI / Anthropic / OpenRouter / Ollama / Bedrock / Vertex / etc. | varies | `task-master models --help` |
 
-**Research note:** the v4 default uses Gemini for task-master's research role (free, same provider as main/fallback). For web-grounded interactive research from inside Claude Code, use the `mcp__perplexity-api-free__*` MCP tools (free, zero setup). These two paths are distinct — task-master's `--perplexity` provider flag requires a paid API key and is **not recommended** unless you already have one.
+**Bring your own research provider.** v4's research role is provider-agnostic. The documented default is Gemini CLI (free, same provider as main/fallback, zero setup). If you prefer a different research backend:
+
+- **Any task-master provider**: `task-master models --set-research <model_id> --<provider-flag>` — swap in OpenAI, Anthropic, OpenRouter, Ollama, or any other supported provider.
+- **Your own MCP research tool**: if you have an MCP server that exposes a research-style tool (e.g. `yourservice_search`, `yourservice_ask`), register it in your `~/.claude.json` `mcpServers` block and call it directly from Claude Code during the DISCOVER phase. v4 does not hard-wire any specific MCP server — the skill uses whatever MCP research tools your Claude Code session has access to.
+- **Web-grounded research with your own API key**: task-master supports Perplexity via `--perplexity` when you have `PERPLEXITY_API_KEY` set. Not recommended unless you already hold a paid key.
+
+The skill treats research as a capability, not a product. Plug in whatever you have.
 
 **Execution tools** (drives which AI runs the parsed tasks):
 
@@ -292,7 +298,7 @@ python3 ~/.claude/skills/prd-taskmaster-v2/script.py validate-prd \
 
 ### Companion skill: `expand-tasks`
 
-`companion-skills/expand-tasks/` ships alongside the main skill and launches parallel Perplexity research agents per task. Run it after PRD parsing, before implementation, to enrich each task with domain research.
+`companion-skills/expand-tasks/` ships alongside the main skill and launches parallel research agents per task using whatever research provider you have configured in task-master (Gemini by default). Run it after PRD parsing, before implementation, to enrich each task with domain research. Provider-agnostic — the skill calls `task-master` which delegates to your configured research model, whatever that is.
 
 ---
 
@@ -352,7 +358,7 @@ pytest tests/test_script.py::test_name -v  # one test
   - Handoff recommends **one** execution mode based on `detect-capabilities`, not four equal choices
   - Discovery via `superpowers:brainstorming` — one question at a time, adaptive, domain-agnostic
   - Phase files (`phases/*.md`) are Read explicitly to minimise context cost
-  - Companion skill `expand-tasks/` for parallel Perplexity research per task
+  - Companion skill `expand-tasks/` for parallel research-model expansion per task (provider-agnostic)
 
 - **v3.0** (2025-02-12) — Codification refactor
   - Extracted deterministic operations into `script.py`
