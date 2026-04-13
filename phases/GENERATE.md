@@ -58,7 +58,19 @@ When writing the spec, use domain-neutral terms unless the domain is known:
 
 If the domain IS software, use software terms. The neutral terms are for non-software goals.
 
-Key rule: Every `[placeholder]`, `{{variable}}`, `[TBD]`, `[TODO]` must be replaced or removed.
+Key rule: Every `[placeholder]`, `{{variable}}`, `[TBD]`, `[TODO]` must be either (a) replaced with real content, (b) removed, or (c) **paired with a `reason:` explanation** on the same line or the next line documenting why the decision is deferred.
+
+**Deferred decisions** (per the v4 spec): placeholders with `reason:` attribution are allowed and surfaced in the validation output as `deferred_decisions`. A bare placeholder is a validation failure; an attributed one is a known deferred decision with accountability.
+
+Examples:
+
+```
+# BAD — bare placeholder, fails check 14:
+Target latency: {{TBD}}
+
+# GOOD — attributed, passes check 14 and appears in deferred_decisions:
+Target latency: {{TBD}} reason: awaiting load-test results scheduled 2026-04-20
+```
 
 ## Step 3: Validate Spec Quality
 

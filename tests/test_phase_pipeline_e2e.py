@@ -150,9 +150,59 @@ def test_validate_prd_on_comprehensive_template():
         assert validate.get("ok") is True
         assert "grade" in validate
         assert "checks" in validate
-        assert len(validate["checks"]) == 13
+        # v4 added check 14 (placeholder reason attribution, per inbox 1559)
+        assert len(validate["checks"]) == 14
     finally:
         Path(tmp_prd_path).unlink(missing_ok=True)
+
+
+def test_validate_prd_check_14_rejects_bare_placeholders(tmp_path):
+    """REGRESSION for inbox 1559 (Hayden directive): placeholders without
+    `reason:` attribution must fail check 14. This converts placeholders
+    from 'technical debt smell' into 'intentional deferred decisions with
+    attribution'.
+    """
+    prd = tmp_path / "prd.md"
+    prd.write_text(
+        "# PRD\n\n## Executive Summary\nT\n\n## Problem Statement\n"
+        "User impact: x. Business impact: y.\n\n## Goals\nMetric: {{TBD_VALUE}}\n\n"
+        "## User Stories\n### Story 1: X\n- [ ] a\n- [ ] b\n- [ ] c\n\n"
+        "## Functional Requirements\nREQ-001: Must have thing.\n\n"
+        "## Technical Considerations\nArchitecture: x.\n\n## Out of Scope\nNothing.\n"
+    )
+    rc, payload = run("validate-prd", "--input", str(prd))
+    assert rc == 0
+    check_14 = next((c for c in payload["checks"] if c["id"] == 14), None)
+    assert check_14 is not None, "Check 14 missing from validate-prd output"
+    assert check_14["passed"] is False, \
+        "Bare placeholder should have failed check 14"
+    assert payload["bare_placeholders_count"] >= 1
+    assert payload["deferred_decisions_count"] == 0
+
+
+def test_validate_prd_check_14_accepts_attributed_placeholders(tmp_path):
+    """REGRESSION for inbox 1559: placeholders WITH `reason:` attribution
+    must pass check 14 and be surfaced as deferred_decisions in output.
+    """
+    prd = tmp_path / "prd.md"
+    prd.write_text(
+        "# PRD\n\n## Executive Summary\nT\n\n## Problem Statement\n"
+        "User impact: x. Business impact: y.\n\n## Goals\n"
+        "Metric: {{TBD_VALUE}} reason: awaiting analytics baseline from Q2\n\n"
+        "## User Stories\n### Story 1: X\n- [ ] a\n- [ ] b\n- [ ] c\n\n"
+        "## Functional Requirements\nREQ-001: Must have thing.\n\n"
+        "## Technical Considerations\nArchitecture: x.\n\n## Out of Scope\nNothing.\n"
+    )
+    rc, payload = run("validate-prd", "--input", str(prd))
+    assert rc == 0
+    check_14 = next((c for c in payload["checks"] if c["id"] == 14), None)
+    assert check_14 is not None
+    assert check_14["passed"] is True, \
+        "Attributed placeholder should have passed check 14"
+    assert payload["bare_placeholders_count"] == 0
+    assert payload["deferred_decisions_count"] == 1
+    assert len(payload["deferred_decisions"]) == 1
+    assert payload["deferred_decisions"][0]["placeholder"] == "{{TBD_VALUE}}"
 
 
 def test_validate_prd_ai_flag_degrades_gracefully_when_task_master_missing(monkeypatch, tmp_path):

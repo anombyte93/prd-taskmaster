@@ -54,20 +54,22 @@ Check the output for an active main model provider.
 
 ### Recommended stack (v4 default)
 
-**Gemini + Perplexity** is the documented default as of v4:
+**Gemini CLI across all three roles** is the documented default as of v4:
 
 ```bash
 task-master models --set-main gemini-3-pro-preview --gemini-cli
-task-master models --set-research sonar-pro --perplexity   # requires PERPLEXITY_API_KEY
+task-master models --set-research gemini-3-pro-preview --gemini-cli
 task-master models --set-fallback gemini-3-flash-preview --gemini-cli
 ```
 
-Why this stack: Gemini is 113× more token-efficient than sonnet for parse-prd (measured 6K vs 684K tokens on the same PRD), free via any Google account, no subscription. Perplexity's `sonar-pro` model is web-grounded so research calls return up-to-date citations instead of stale training data.
+Why this stack: Gemini is 113× more token-efficient than sonnet for parse-prd (measured 6K vs 684K tokens on the same PRD), free via any Google account, no subscription, no API key. One provider, three roles, zero cost.
 
-**If PERPLEXITY_API_KEY is not set**, research falls back to Gemini:
-```bash
-task-master models --set-research gemini-3-pro-preview --gemini-cli
-```
+**Research note on Perplexity:** if you want web-grounded research with live citations, two separate paths exist and they are NOT interchangeable:
+
+1. **`task-master models --set-research sonar-pro --perplexity`** — task-master shells out to Perplexity's paid API directly. Requires `PERPLEXITY_API_KEY` in your environment. **Only use this if you already have a paid Perplexity API key.**
+2. **`mcp__perplexity-api-free__*` MCP tools** — free Perplexity access exposed as Claude Code MCP tools (`perplexity_search`, `perplexity_reason`, `perplexity_batch`). **Works only inside a Claude Code session, not from the task-master CLI.** Use this for interactive `/question`-style research from Claude. This is the recommended free path.
+
+**Default recommendation:** use Gemini for task-master's research role, and use the `perplexity-api-free` MCP tools for interactive research inside Claude. You do NOT need a paid Perplexity API key.
 
 ### Alternative: Claude Max
 

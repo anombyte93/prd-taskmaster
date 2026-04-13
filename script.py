@@ -612,6 +612,63 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
         "points": 3,
     })
 
+    # ─── Placeholder scan with reason attribution (per inbox 1559) ───────
+    # Philosophy: placeholders are not technical debt if they're intentional.
+    # A placeholder paired with `reason: <explanation>` is a DEFERRED DECISION
+    # — explicitly acknowledged and attributed. A bare placeholder is a bug.
+    #
+    # Patterns considered placeholders:
+    #   {{mustache}}, [TBD], [TODO], [FIXME], [PLACEHOLDER]
+    # A placeholder is "attributed" if the same line (or the line immediately
+    # after) contains `reason:` or `defer:` (case-insensitive).
+    PLACEHOLDER_RE = re.compile(
+        r'(\{\{[^}]+\}\}|\[TBD\]|\[TODO\]|\[FIXME\]|\[PLACEHOLDER\])',
+        re.IGNORECASE,
+    )
+    lines = text.splitlines()
+    bare_placeholders = []
+    deferred_decisions = []
+    for i, line in enumerate(lines):
+        for match in PLACEHOLDER_RE.finditer(line):
+            # Look for reason: on the same line or the next line
+            same_line = line.lower()
+            next_line = lines[i + 1].lower() if i + 1 < len(lines) else ""
+            has_reason = (
+                "reason:" in same_line
+                or "defer:" in same_line
+                or "reason:" in next_line[:200]  # only check start of next line
+                or "defer:" in next_line[:200]
+            )
+            entry = {
+                "placeholder": match.group(1),
+                "line_number": i + 1,
+                "line_text": line.strip()[:200],
+            }
+            if has_reason:
+                deferred_decisions.append(entry)
+            else:
+                bare_placeholders.append(entry)
+
+    # Check 14: Bare placeholders (no reason attribution) — ADDED per inbox 1559
+    checks.append({
+        "id": 14,
+        "category": "required",
+        "name": "Placeholders have `reason:` attribution (no bare placeholders)",
+        "passed": len(bare_placeholders) == 0,
+        "detail": (
+            f"{len(bare_placeholders)} bare placeholder(s) found — must have `reason:` explaining why deferred"
+            if bare_placeholders
+            else (
+                f"All {len(deferred_decisions)} placeholders have reason attribution"
+                if deferred_decisions
+                else "No placeholders — clean"
+            )
+        ),
+        "points": 5,
+        "bare_placeholders": bare_placeholders[:10],  # cap output for display
+        "deferred_decisions_count": len(deferred_decisions),
+    })
+
     # ─── Vague language warnings ─────────────────────────────────────────
     all_vague = VAGUE_PATTERN.findall(text)
     vague_penalty = min(len(all_vague), 5)
@@ -659,6 +716,12 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
         "checks": checks,
         "warnings": warnings,
         "vague_penalty": vague_penalty,
+        # Deferred-decisions attribution (inbox 1559): placeholders ARE allowed
+        # if they have reason: attribution — they become known deferred decisions
+        # rather than technical debt smell. Surfaced in PRD summary.
+        "deferred_decisions": deferred_decisions,
+        "deferred_decisions_count": len(deferred_decisions),
+        "bare_placeholders_count": len(bare_placeholders),
     }
 
     # Optional AI-augmented review — opt-in only. Runs after the deterministic

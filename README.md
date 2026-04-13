@@ -105,9 +105,10 @@ v4 is a **model/tool-agnostic plugin.** The skill generates PRDs and parses task
 |---|---|---|
 | **Gemini CLI** (v4 default) | ✅ Google account | `task-master models --set-main gemini-3-pro-preview --gemini-cli` |
 | **Claude Code** | ✅ Claude Max | `task-master models --set-main sonnet --claude-code` |
-| **Perplexity** (best for research role) | requires `PERPLEXITY_API_KEY` | `task-master models --set-research sonar-pro --perplexity` |
 | Codex CLI | ✅ ChatGPT subscription | `--set-main gpt-5-codex --codex-cli` |
 | OpenAI / Anthropic / OpenRouter / Ollama / Bedrock / Vertex / etc. | varies | `task-master models --help` |
+
+**Research note:** the v4 default uses Gemini for task-master's research role (free, same provider as main/fallback). For web-grounded interactive research from inside Claude Code, use the `mcp__perplexity-api-free__*` MCP tools (free, zero setup). These two paths are distinct — task-master's `--perplexity` provider flag requires a paid API key and is **not recommended** unless you already have one.
 
 **Execution tools** (drives which AI runs the parsed tasks):
 

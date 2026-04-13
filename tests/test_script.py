@@ -168,17 +168,21 @@ class TestLoadTemplate:
 
 
 class TestValidatePrd:
-    """Test cmd_validate_prd — the 13-check quality validation."""
+    """Test cmd_validate_prd — the 14-check quality validation.
+
+    v4 added check 14 (placeholder reason attribution) per inbox 1559.
+    Max score = 9*5 (required) + 4*3 (taskmaster-specific) + 1*5 (check 14) = 62.
+    """
 
     def test_validate_comprehensive_prd(self, sample_prd):
         """Well-crafted PRD scores EXCELLENT."""
         rc, out = run_script(SCRIPT_PY, ["validate-prd", "--input", str(sample_prd)])
         assert rc == 0
         assert out["ok"] is True
-        assert out["checks_total"] == 13
+        assert out["checks_total"] == 14  # v4: added check 14
         assert out["grade"] in ("EXCELLENT", "GOOD")
         assert out["score"] > 0
-        assert out["max_score"] == 57  # 9*5 + 4*3
+        assert out["max_score"] == 62  # 9*5 + 4*3 + 1*5
 
     def test_validate_checks_executive_summary(self, sample_prd):
         """Check 1: Executive summary exists and has appropriate length."""
@@ -305,9 +309,13 @@ class TestValidatePrd:
         rc, out = run_script(SCRIPT_PY, ["validate-prd", "--input", str(empty_prd)])
         assert rc == 0
         assert out["grade"] == "NEEDS_WORK"
-        # 3 checks pass vacuously (no stories=pass, no vague reqs=pass, no NFR section=pass)
-        assert out["checks_passed"] == 3
-        assert out["score"] == 13  # 5 + 5 + 3
+        # 4 checks pass vacuously on empty PRD:
+        #   ch 5: no stories found → pass
+        #   ch 6: no vague reqs → pass
+        #   ch 10: no NFR section → pass
+        #   ch 14: no placeholders → pass (v4 addition)
+        assert out["checks_passed"] == 4
+        assert out["score"] == 18  # 5 + 5 + 3 + 5
 
     def test_validate_grade_boundaries(self, tmp_project):
         """Verify grade boundary calculations match documented thresholds."""
