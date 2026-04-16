@@ -8,16 +8,9 @@ This repo **is** the `prd-taskmaster-v2` Claude Code skill — not a consumer of
 
 You are working on the **v4 5-phase rewrite** on the `handoff-overhaul` branch — the canonical line. The `master` branch is the obsolete v3 12-step architecture; do not port code from it without checking against the rewrite's intent.
 
-## Critical: branch and worktree layout
+## Branch layout
 
-This repo has two git worktrees on the same `.git`:
-
-| Worktree | Branch | Status |
-|---|---|---|
-| `prd-taskmaster-v2` (folder named "v2" but really v3) | `master` | **Stale.** v3 12-step. Kept only for reference / git history. |
-| `prd-taskmaster-v2-handoff-overhaul` (this folder) | `handoff-overhaul` | **Canonical.** v4 5-phase. All new work happens here. |
-
-When in doubt, run `git worktree list`. Never commit v4 work to master.
+The canonical branch is `main`. The `master` branch (`origin/master`) is the obsolete v3 12-step architecture — kept for git history only, do not commit to it. Run `git worktree list` to verify.
 
 ## v4 architecture: 5-phase pipeline
 
@@ -59,7 +52,10 @@ Run `python3 script.py --help` for the current subcommand list. Note: `calc-task
 
 ## Companion skills
 
-`companion-skills/expand-tasks/` ships alongside the main skill (same SKILL.md + script.py codification). It reads `tasks.json` and launches parallel Perplexity research agents per task. Use after PRD parsing, before implementation.
+`companion-skills/` ships alongside the main skill (same SKILL.md + script.py codification pattern):
+
+- **`expand-tasks/`** — Reads `tasks.json` and launches parallel Perplexity research agents per task. Use after PRD parsing, before implementation.
+- **`customise-workflow/`** — Post-handoff workflow customisation for the chosen execution mode.
 
 ## Testing
 
@@ -79,18 +75,24 @@ pytest --collect-only -q                     # Discovery only (sanity check)
 
 ```bash
 python3 script.py <subcommand> [args]        # Every command emits JSON
-python3 script.py preflight                  # Detect environment state
+python3 script.py preflight                  # Detect environment state (includes recommended_action)
 python3 script.py validate-prd --input .taskmaster/docs/prd.md
 python3 script.py detect-capabilities        # Scan for skills/tools/plugins
+python3 script.py append-workflow --target ./CLAUDE.md --content-file /tmp/wf.md  # Idempotent, backup-safe
+python3 script.py debrief --slug my-project --grade "EXCELLENT 56/57"  # Scaffold dogfood debrief
 ```
 
 Pipe through `jq` when debugging — never add human-readable output that would break the SKILL.md parsing contract.
 
-## Install / update flow
+`preflight` returns a `recommended_action` field with one of: `recover | run_setup | generate_prd | parse_prd | resume | complete` — this is the decision table that replaced ambiguous raw-field interpretation.
+
+## Install / update / uninstall flow
 
 `install.sh` is the public entry point (`curl | bash`). It clones/updates into `~/.claude/skills/prd-taskmaster-v2/` and supports `--check-update`. The script writes all status output to **stderr** (not stdout) so it remains visible when invoked via a pipe — preserve this when editing logging.
 
-When changing install behavior, update `tests/test_install.py` in the same change.
+`uninstall.sh` removes `~/.claude/skills/prd-taskmaster-v2/` and prunes the updates.json entry. It explicitly leaves downstream `.taskmaster/` artifacts untouched. Supports `--yes`, `--dry-run`, `--help`.
+
+When changing install/uninstall behavior, update `tests/test_install.py` in the same change.
 
 ## Editing guidelines specific to this repo
 
@@ -113,6 +115,16 @@ atlas-start → prd-taskmaster-v2 → atlas-plan → atlas-loop → atlas-sync
 ```
 
 It also works standalone — input is any goal, output is `prd.md` + `tasks.json` in `.taskmaster/`. When editing handoff behavior, remember both consumers exist: the next pipeline stage (atlas-plan) and a human running the skill on its own.
+
+## v4-release docs
+
+`docs/v4-release/` contains ship-readiness audits, dogfood debrief docs, and release notes. Key files:
+
+- `ship-readiness-discovery.md` — 20 ship-blockers found during Apr 13 dogfood run
+- `ship-readiness-AUDIT-20260414.md` — Re-audit of #1-10 with grep/runtime evidence (10/10 CLOSED)
+- `dogfood-shade-20260413.md` — Retroactive debrief from the atlas-shade dogfood run
+
+These are development artifacts, not shipped with the skill.
 
 ## Session-context convention
 
