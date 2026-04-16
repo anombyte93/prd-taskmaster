@@ -2015,7 +2015,7 @@ This directory is managed by @atlas-ai/prd-taskmaster. Files here layer on top o
 - `references/` — Captured reference heatmap
 - `debrief/` — Dogfood debriefs
 - `config/atlas.json` — Your workflow preferences (from customise-workflow skill)
-- `ship-check.py` — Deterministic completion check used by ralph-loop
+- `ship-check.py` — Deterministic completion check used by /atlas-ralph-loop:ralph-loop (Hayden's patched fork of /ralph-loop)
 
 ## Reset
 Delete this directory to start fresh. Backup first if you care about the state.
@@ -2096,7 +2096,9 @@ def test_ship_check_passes_on_all_gates_green(tmp_path, monkeypatch):
 ```python
 #!/usr/bin/env python3
 """Deterministic ship-check. Emits SHIP_CHECK_OK to stdout ONLY when all gates pass.
-Referenced by ralph-loop --completion-promise SHIP_CHECK_OK per spec §11.8."""
+Referenced by /atlas-ralph-loop:ralph-loop --completion-promise SHIP_CHECK_OK per spec §11.8.
+(atlas-ralph-loop is Hayden's patched+improved fork of /ralph-loop — prefer it; legacy
+/ralph-loop:ralph-loop remains fallback only.)"""
 from __future__ import annotations
 
 import json
@@ -2139,7 +2141,7 @@ def check() -> tuple[bool, list[str]]:
 
     # Gate 5: ralph-loop-prompt.md exists (per spec §11.9)
     if not (atlas / "ralph-loop-prompt.md").exists():
-        failures.append(".atlas-ai/ralph-loop-prompt.md missing (ralph-loop will fail with empty prompt)")
+        failures.append(".atlas-ai/ralph-loop-prompt.md missing (/atlas-ralph-loop:ralph-loop will fail with empty prompt)")
 
     return len(failures) == 0, failures
 

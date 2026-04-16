@@ -898,15 +898,20 @@ Ralph-loop prompt instructs the AI: *"At end of each iteration, run `python3 .at
 
 ### 11.9 Shell-Escaping Mitigation
 
-The ralph-loop invocation CANNOT contain `()`, `!`, `$`, em-dash, smart quotes, or unicode. These break `eval` in ralph's plugin.
+The ralph-loop invocation CANNOT contain `()`, `!`, `$`, em-dash, smart quotes, or unicode. These break `eval` inside the plugin's setup shell script. The patched fork `atlas-ralph-loop` tightens some of these cases but the shape of the invocation must still be ASCII-only and flags-outside-quoted-prompt. Treat ASCII-only as the contract, not the implementation detail of any one plugin version.
 
 **Pattern:**
 ```bash
 # Invocation (short, ASCII-only):
-/ralph-loop:ralph-loop \
+/atlas-ralph-loop:ralph-loop \
   --max-iterations 100 \
   --completion-promise SHIP_CHECK_OK \
   "See .atlas-ai/ralph-loop-prompt.md"
+
+# NOTE: /atlas-ralph-loop is Hayden's patched+improved fork of /ralph-loop
+# (better eval safety, richer completion-promise matching, cleaner stop-hook
+# handshake). Prefer /atlas-ralph-loop:ralph-loop everywhere in the plugin —
+# the legacy /ralph-loop:ralph-loop remains a fallback only.
 
 # All detail lives in the file:
 .atlas-ai/ralph-loop-prompt.md
@@ -1175,7 +1180,17 @@ Our spec repeatedly says "CDD-native verification". For non-software domains (pe
 
 This is a framing change, not an implementation change. Makes the plugin's domain-agnostic claim actually hold.
 
-### 14b.9 (Reserved) — Additional updates discovered during implementation land here.
+### 14b.9 atlas-ralph-loop (patched fork) is canonical — not base ralph-loop
+
+**Caught mid-build**: initial spec §11.9 quoted the base `/ralph-loop:ralph-loop` slash command. During execution Hayden confirmed the patched fork `/atlas-ralph-loop:ralph-loop` is the canonical invocation for this project. The fork adds (a) eval-safer arg parsing, (b) richer completion-promise matching including `.claude/ralph-done` file fallback and `<promise>...</promise>` last-line discipline, (c) cleaner stop-hook handshake that avoids re-feeding prompts after explicit cancel.
+
+**Fix applied**: §11.9 updated in-place to show the `/atlas-ralph-loop:ralph-loop` invocation and name the fork; the plan's ship-check.py docstring updated to reference it by name; base `/ralph-loop:ralph-loop` remains documented as the fallback only.
+
+**Downstream docs to align on next touch**: the user-facing README and the `.atlas-ai/README.md` skeleton should say "Install the atlas-ralph-loop plugin for Mode C" and not "Install ralph-loop". Filenames stay put — `.atlas-ai/ralph-loop-prompt.md` is a file path inside our plugin's namespace and does not refer to the fork by name.
+
+**Jobs-lens read**: this is a fix-don't-cut repair of an outdated reference. No feature was removed; the pattern (loop wrapper with deterministic promise token) is unchanged, only the preferred plugin-level implementation is clarified.
+
+### 14b.10 (Reserved) — Additional updates discovered during implementation land here.
 
 ---
 
