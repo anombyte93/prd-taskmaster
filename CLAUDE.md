@@ -122,7 +122,6 @@ It also works standalone — input is any goal, output is `prd.md` + `tasks.json
 
 - `ship-readiness-discovery.md` — 20 ship-blockers found during Apr 13 dogfood run
 - `ship-readiness-AUDIT-20260414.md` — Re-audit of #1-10 with grep/runtime evidence (10/10 CLOSED)
-- `dogfood-shade-20260413.md` — Retroactive debrief from the atlas-shade dogfood run
 
 These are development artifacts, not shipped with the skill.
 

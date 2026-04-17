@@ -54,7 +54,7 @@ def sample_prd(tmp_project):
     """Create a realistic PRD file that should pass most validation checks."""
     prd_content = """# PRD: User Authentication System
 
-**Author:** Hayden
+**Author:** Author
 **Date:** 2026-04-10
 **Status:** Draft
 **Taskmaster Optimized:** Yes

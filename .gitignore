@@ -54,3 +54,17 @@ node_modules/
 # Task files
 # tasks.json
 # tasks/ 
+
+# Session context (private orchestration state)
+session-context/
+
+# Internal docs (eggs, ashes, debriefs, archives)
+docs/eggs/
+docs/ashes/
+docs/archive/
+docs/DEBRIEF-*.md
+docs/superpowers/
+
+# Dogfood artifacts
+docs/v4-release/dogfood-*.md
+docs/v4-release/atlas-coin-*.md

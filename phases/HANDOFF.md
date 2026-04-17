@@ -80,12 +80,10 @@ Recommended: Plan + Ralph Loop
     Walk away, come back to proof
 
   Status: NOT YET AVAILABLE. Watch anombyte93/prd-taskmaster for release.
-  Waitlist: https://atlas-ai.au/prd-taskmaster-v2#waitlist
 ```
 
 **Do NOT execute Atlas-Auto even if requested.** It appears in the mode list as a teaser (so users see the roadmap) but `detect-capabilities` returns `atlas_auto: false` regardless of local flags until the feature ships. If the user selects Mode D, respond with:
 
-> "Atlas-Auto is coming soon. It will pair prd-taskmaster-v2 with CDD cards, the ralph loop, doubt agents, and visual testing for walk-away autonomous execution. Join the waitlist at https://atlas-ai.au/prd-taskmaster-v2#waitlist or watch anombyte93/prd-taskmaster for release notes. For now, please pick one of the free modes (A, B, or C)."
 
 Then **re-invoke the mode picker with Mode D removed from the options.**
 

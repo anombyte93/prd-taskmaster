@@ -157,7 +157,7 @@ def test_validate_prd_on_comprehensive_template():
 
 
 def test_validate_prd_check_14_rejects_bare_placeholders(tmp_path):
-    """REGRESSION for inbox 1559 (Hayden directive): placeholders without
+    """REGRESSION for inbox 1559 (user directive): placeholders without
     `reason:` attribution must fail check 14. This converts placeholders
     from 'technical debt smell' into 'intentional deferred decisions with
     attribution'.

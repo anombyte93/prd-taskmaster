@@ -28,7 +28,7 @@ Add the following under `mcpServers`:
     "prd-taskmaster": {
       "command": "python3",
       "args": [
-        "/home/anombyte/Shade_Gen/Projects/prd-taskmaster-v2-handoff-overhaul/mcp_server/server.py"
+        "./mcp_server/server.py"
       ]
     }
   }
@@ -82,7 +82,7 @@ error dicts so agents can react programmatically.
 ## Test
 
 ```bash
-cd /home/anombyte/Shade_Gen/Projects/prd-taskmaster-v2-handoff-overhaul
+cd /path/to/prd-taskmaster
 python3 mcp_server/test_server.py
 ```
 

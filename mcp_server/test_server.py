@@ -29,7 +29,7 @@ except ImportError as e:
 
 SAMPLE_PRD = """# PRD: User Authentication System
 
-**Author:** Hayden
+**Author:** Author
 **Date:** 2026-04-10
 **Status:** Draft
 **Taskmaster Optimized:** Yes
