@@ -25,25 +25,30 @@ echo "✅ Created subdirectories: docs/, tasks/, reports/"
 # Update .gitignore to exclude taskmaster state files
 GITIGNORE_FILE=".gitignore"
 
-if [ -f "$GITIGNORE_FILE" ]; then
-  if ! grep -q ".taskmaster/state.json" "$GITIGNORE_FILE" 2>/dev/null; then
-    echo "" >> "$GITIGNORE_FILE"
-    echo "# Taskmaster AI state files" >> "$GITIGNORE_FILE"
-    echo ".taskmaster/state.json" >> "$GITIGNORE_FILE"
-    echo ".taskmaster/tasks/" >> "$GITIGNORE_FILE"
-    echo ".taskmaster/reports/" >> "$GITIGNORE_FILE"
-    echo "✅ Updated .gitignore with taskmaster exclusions"
+add_to_gitignore() {
+  local entry="$1"
+  if [ -f "$GITIGNORE_FILE" ]; then
+    if ! grep -Fq "$entry" "$GITIGNORE_FILE" 2>/dev/null; then
+      echo "$entry" >> "$GITIGNORE_FILE"
+      echo "✅ Added $entry to .gitignore"
+    fi
   else
-    echo "ℹ️  .gitignore already configured for taskmaster"
+    echo "$entry" >> "$GITIGNORE_FILE"
   fi
-else
-  # Create .gitignore if it doesn't exist
+}
+
+if [ ! -f "$GITIGNORE_FILE" ]; then
   echo "# Taskmaster AI state files" > "$GITIGNORE_FILE"
-  echo ".taskmaster/state.json" >> "$GITIGNORE_FILE"
-  echo ".taskmaster/tasks/" >> "$GITIGNORE_FILE"
-  echo ".taskmaster/reports/" >> "$GITIGNORE_FILE"
-  echo "✅ Created .gitignore with taskmaster exclusions"
+  echo "✅ Created .gitignore"
 fi
+
+# Ensure all taskmaster paths are ignored
+add_to_gitignore ".taskmaster/state.json"
+add_to_gitignore ".taskmaster/tasks/"
+add_to_gitignore ".taskmaster/reports/"
+add_to_gitignore ".taskmaster/state/"
+add_to_gitignore "local.zsh"
+
 
 # Create placeholder README in docs/
 if [ ! -f ".taskmaster/docs/README.md" ]; then

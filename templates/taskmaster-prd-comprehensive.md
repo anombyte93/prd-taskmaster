@@ -1,3 +1,23 @@
+---
+prd_version: "1.0"
+project: "[Feature/Product Name]"
+author: "[Name]"
+date: "[YYYY-MM-DD]"
+status: "Draft"
+complexity_target: "Medium"
+requirements:
+  - id: "REQ-001"
+    title: "[Requirement 1 Title]"
+    priority: "Must"
+    dependencies: []
+    estimated_hours: 8
+  - id: "REQ-002"
+    title: "[Requirement 2 Title]"
+    priority: "Should"
+    dependencies: ["REQ-001"]
+    estimated_hours: 12
+---
+
 # PRD: [Feature/Product Name]
 
 **Author:** [Name]

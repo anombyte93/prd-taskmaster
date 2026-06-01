@@ -1,3 +1,12 @@
+---
+prd_version: "1.0"
+project: "[Feature Name]"
+requirements:
+  - id: "REQ-001"
+    title: "[Requirement 1 Title]"
+    priority: "Must"
+---
+
 # PRD: [Feature Name]
 
 **Author:** [Name]

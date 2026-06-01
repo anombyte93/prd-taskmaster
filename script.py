@@ -64,6 +64,17 @@ def count_requirements(text: str) -> int:
     return len(set(re.findall(r'REQ-\d{3}', text)))
 
 
+def strip_code_blocks(text: str) -> str:
+    """Strip markdown fenced and inline code blocks to prevent false positive linting."""
+    if not text:
+        return ""
+    # Remove fenced code blocks
+    text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
+    # Remove inline code blocks
+    text = re.sub(r'`[^`\n]+`', '', text)
+    return text
+
+
 def has_section(text: str, heading: str) -> bool:
     """Check if markdown heading exists (case-insensitive)."""
     pattern = r'^#{1,3}\s+.*' + re.escape(heading) + r'.*$'
@@ -77,17 +88,49 @@ def get_section_content(text: str, heading: str) -> str:
     level = 0
     content = []
     heading_re = re.compile(r'^(#{1,6})\s+(.*)')
+    
+    target = heading.strip().lower()
+    # Step 1: Try exact matching on cleaned headers
     for line in lines:
         heading_match = heading_re.match(line)
-        if heading_match and heading.lower() in heading_match.group(2).lower():
-            capturing = True
-            level = len(heading_match.group(1))
-            continue
-        if capturing:
-            if heading_match and len(heading_match.group(1)) <= level:
+        if heading_match:
+            h_text = heading_match.group(2).strip().lower()
+            cleaned_h_text = re.sub(r'^(?:step\s+\d+[:\s]|\d+(?:\.\d+)*[:\s]|-)\s*', '', h_text).strip()
+            if cleaned_h_text == target:
+                capturing = True
+                level = len(heading_match.group(1))
+                content = []
+                continue
+            elif capturing and len(heading_match.group(1)) <= level:
                 break
+        elif capturing:
             content.append(line)
+            
+    if content:
+        return '\n'.join(content).strip()
+        
+    # Step 2: Fallback to substring search (protecting against non-functional overlap)
+    capturing = False
+    content = []
+    for line in lines:
+        heading_match = heading_re.match(line)
+        if heading_match:
+            h_text = heading_match.group(2).strip().lower()
+            cleaned_h_text = re.sub(r'^(?:step\s+\d+[:\s]|\d+(?:\.\d+)*[:\s]|-)\s*', '', h_text).strip()
+            if target in cleaned_h_text:
+                if target == "functional requirements" and "non-functional" in cleaned_h_text:
+                    continue
+                capturing = True
+                level = len(heading_match.group(1))
+                content = []
+                continue
+            elif capturing and len(heading_match.group(1)) <= level:
+                break
+        elif capturing:
+            content.append(line)
+            
     return '\n'.join(content).strip()
+
 
 
 # ─── VAGUE_PATTERNS for validation ───────────────────────────────────────────
@@ -136,9 +179,9 @@ def cmd_preflight(args: argparse.Namespace) -> None:
                 tasks = data.get("tasks", data) if isinstance(data, dict) else data
                 if isinstance(tasks, list):
                     task_count = len(tasks)
-                    tasks_completed = sum(1 for t in tasks if t.get("status") == "done")
+                    tasks_completed = sum(1 for t in tasks if isinstance(t, dict) and t.get("status") == "done")
                     tasks_pending = task_count - tasks_completed
-            except (json.JSONDecodeError, KeyError):
+            except Exception:
                 pass
 
     # Detect taskmaster method
@@ -214,6 +257,8 @@ def _read_execution_state() -> dict:
     try:
         with open(state_file) as f:
             state = json.load(f)
+        if not isinstance(state, dict):
+            return {"has_incomplete": False}
         return {
             "has_incomplete": state.get("status") == "in_progress",
             "last_task": state.get("current_task"),
@@ -222,7 +267,7 @@ def _read_execution_state() -> dict:
             "last_updated": state.get("last_updated"),
             "checkpoint": state.get("last_checkpoint"),
         }
-    except (json.JSONDecodeError, KeyError):
+    except Exception:
         return {"has_incomplete": False}
 
 
@@ -264,9 +309,13 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
 
     # ─── Required Elements (9 checks, 5 points each = 45 points) ─────────
 
+    # Pre-process text to strip code blocks (avoids false matches in code blocks)
+    clean_text = strip_code_blocks(text)
+    clean_text_no_toc = re.sub(r'^\s*[\d\.\-]+\s*\[.*?\]\(#.*?\)\s*$', '', clean_text, flags=re.MULTILINE)
+
     # Check 1: Executive summary exists and is 50-200 words
     exec_summary = get_section_content(text, "Executive Summary")
-    wc = word_count(exec_summary)
+    wc = word_count(strip_code_blocks(exec_summary))
     checks.append({
         "id": 1,
         "category": "required",
@@ -278,8 +327,9 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
 
     # Check 2: Problem statement includes user impact
     problem = get_section_content(text, "Problem Statement")
+    clean_problem = strip_code_blocks(problem)
     has_user_impact = bool(
-        re.search(r'user\s+impact|who\s+is\s+affected|pain\s+point', problem, re.IGNORECASE)
+        re.search(r'user\s+impact|who\s+is\s+affected|pain\s+point', clean_problem, re.IGNORECASE)
         or has_section(text, "User Impact")
     )
     checks.append({
@@ -293,7 +343,7 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
 
     # Check 3: Problem statement includes business impact
     has_biz_impact = bool(
-        re.search(r'business\s+impact|revenue|cost|strategic', problem, re.IGNORECASE)
+        re.search(r'business\s+impact|revenue|cost|strategic', clean_problem, re.IGNORECASE)
         or has_section(text, "Business Impact")
     )
     checks.append({
@@ -307,9 +357,10 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
 
     # Check 4: Goals have SMART metrics
     goals_section = get_section_content(text, "Goals")
+    clean_goals = strip_code_blocks(goals_section)
     has_smart = bool(re.search(
         r'(metric|baseline|target|timeframe|measurement)',
-        goals_section, re.IGNORECASE
+        clean_goals, re.IGNORECASE
     ))
     checks.append({
         "id": 4,
@@ -322,10 +373,13 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
 
     # Check 5: User stories have acceptance criteria (min 3 per story)
     stories_section = get_section_content(text, "User Stories")
-    story_blocks = re.split(r'###\s+Story\s+\d+', stories_section)
+    clean_stories = strip_code_blocks(stories_section)
+    # Split story blocks robustly on level 3 headings
+    story_blocks = re.split(r'^###\s+.*$', clean_stories, flags=re.MULTILINE)
     ac_counts = []
     for block in story_blocks[1:]:  # skip pre-heading text
-        ac_matches = re.findall(r'- \[[ x]\]', block)
+        # Count checkboxes and lists robustly
+        ac_matches = re.findall(r'^\s*[-*+]\s+(?:\[[ x]\]\s+)?\S+|^\s*\d+\.\s+\S+', block, flags=re.MULTILINE)
         ac_counts.append(len(ac_matches))
     stories_ok = all(c >= 3 for c in ac_counts) if ac_counts else False
     checks.append({
@@ -341,7 +395,8 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
     reqs_section = get_section_content(text, "Functional Requirements")
     if not reqs_section:
         reqs_section = get_section_content(text, "Requirements")
-    vague_in_reqs = VAGUE_PATTERN.findall(reqs_section)
+    clean_reqs = strip_code_blocks(reqs_section)
+    vague_in_reqs = VAGUE_PATTERN.findall(clean_reqs)
     checks.append({
         "id": 6,
         "category": "required",
@@ -354,7 +409,7 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
     # Check 7: Each requirement has priority (Must/Should/Could or P0/P1/P2)
     has_priority = bool(re.search(
         r'(must\s+have|should\s+have|could\s+have|nice\s+to\s+have|P0|P1|P2)',
-        reqs_section, re.IGNORECASE
+        clean_reqs, re.IGNORECASE
     ))
     checks.append({
         "id": 7,
@@ -366,7 +421,7 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
     })
 
     # Check 8: Requirements are numbered (REQ-NNN)
-    req_count = count_requirements(text)
+    req_count = count_requirements(clean_text)
     checks.append({
         "id": 8,
         "category": "required",
@@ -378,9 +433,10 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
 
     # Check 9: Technical considerations address architecture
     tech_section = get_section_content(text, "Technical")
+    clean_tech = strip_code_blocks(tech_section)
     has_arch = bool(re.search(
         r'(architecture|system\s+design|component|integration|diagram)',
-        tech_section, re.IGNORECASE
+        clean_tech, re.IGNORECASE
     ))
     checks.append({
         "id": 9,
@@ -395,9 +451,10 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
 
     # Check 10: Non-functional requirements have specific targets
     nfr_section = get_section_content(text, "Non-Functional")
+    clean_nfr = strip_code_blocks(nfr_section)
     has_nfr_targets = bool(re.search(
         r'\d+\s*(ms|seconds?|minutes?|%|MB|GB|requests?/s)',
-        nfr_section, re.IGNORECASE
+        clean_nfr, re.IGNORECASE
     ))
     checks.append({
         "id": 10,
@@ -410,8 +467,8 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
 
     # Check 11: Requirements have task breakdown hints
     has_task_hints = bool(re.search(
-        r'task\s+breakdown|implementation\s+step|~\d+h',
-        text, re.IGNORECASE
+        r'~\s*\d+(?:\.\d+)?\s*[hm]\b|estimate\s*:\s*\d+|breakdown\s*:\s*\S+',
+        clean_text_no_toc, re.IGNORECASE
     ))
     checks.append({
         "id": 11,
@@ -424,8 +481,8 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
 
     # Check 12: Dependencies identified
     has_deps = bool(re.search(
-        r'(dependenc|depends\s+on|blocked\s+by|prerequisite|REQ-\d{3}.*depends)',
-        text, re.IGNORECASE
+        r'depends\s+on\s+REQ-\d{3}|blocked\s+by\s+REQ-\d{3}|prerequisite\s*:\s*REQ-\d{3}|REQ-\d{3}\s+depends\s+on',
+        clean_text_no_toc, re.IGNORECASE
     ))
     checks.append({
         "id": 12,
@@ -449,7 +506,7 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
     })
 
     # ─── Vague language warnings ─────────────────────────────────────────
-    all_vague = VAGUE_PATTERN.findall(text)
+    all_vague = VAGUE_PATTERN.findall(clean_text)
     vague_penalty = min(len(all_vague), 5)
     for match in set(all_vague):
         warnings.append({
@@ -766,9 +823,17 @@ _SCRIPT_ROLLBACK = '''#!/usr/bin/env bash
 set -euo pipefail
 
 TASK_NUM="${1:?Usage: rollback.sh <task_number>}"
-TAG="checkpoint-task-$(printf '%03d' "$TASK_NUM")"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP_BRANCH="rollback-backup-${TIMESTAMP}"
+
+# Support both padded (005) and unpadded (5) tags
+if git rev-parse "checkpoint-task-$TASK_NUM" >/dev/null 2>&1; then
+    TAG="checkpoint-task-$TASK_NUM"
+elif git rev-parse "checkpoint-task-$(printf '%03d' "$TASK_NUM")" >/dev/null 2>&1; then
+    TAG="checkpoint-task-$(printf '%03d' "$TASK_NUM")"
+else
+    TAG="checkpoint-task-$TASK_NUM"
+fi
 
 echo "Checking for checkpoint tag: $TAG"
 
@@ -776,6 +841,12 @@ if ! git rev-parse "$TAG" >/dev/null 2>&1; then
     echo "ERROR: Tag $TAG not found. Available checkpoints:"
     git tag -l 'checkpoint-task-*'
     exit 1
+fi
+
+# Check for uncommitted changes to prevent data loss
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "WARNING: You have uncommitted changes. Stashing them before rollback..."
+    git stash save "rollback-stash-${TIMESTAMP}"
 fi
 
 echo "Creating backup branch: $BACKUP_BRANCH"
