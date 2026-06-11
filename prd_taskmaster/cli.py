@@ -9,12 +9,13 @@ from prd_taskmaster.capabilities import cmd_detect_capabilities
 from prd_taskmaster.templates import cmd_load_template
 from prd_taskmaster.validation import cmd_validate_prd, cmd_validate_tasks
 from prd_taskmaster.tasks import cmd_calc_tasks, cmd_backup_prd, cmd_enrich_tasks
+from prd_taskmaster import parallel
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="prd-taskmaster-v2",
-        description="PRD-TaskMaster v2 automation: deterministic operations for the prd-taskmaster-v2 skill.",
+        prog="prd-taskmaster",
+        description="prd-taskmaster: deterministic operations for the Atlas engine (skill + plugin).",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -75,6 +76,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to tasks.json (default: .taskmaster/tasks/tasks.json)",
     )
 
+    # ─── parallel research bridge (agent-parallel research fan-out) ───────────
+    # parallel-plan
+    p = sub.add_parser("parallel-plan", help="Emit per-task research packets for parallel subagents")
+    p.add_argument("--tag")
+    p.add_argument("--missing-only", action="store_true")
+
+    # parallel-apply
+    p = sub.add_parser("parallel-apply", help="Merge parallel research results into tasks.json atomically")
+    p.add_argument("--tag")
+    p.add_argument("--input", required=True)
+    p.add_argument("--threshold", type=int, default=7)
+
+    # parallel-extract
+    p = sub.add_parser("parallel-extract", help="Flatten a tagged tasks.json for validate/enrich")
+    p.add_argument("--tag")
+    p.add_argument("--output", required=True)
+
+    # parallel-inject
+    p = sub.add_parser("parallel-inject", help="Write a validated flat tasks file back into a tag")
+    p.add_argument("--tag")
+    p.add_argument("--input", required=True)
+
     return parser
 
 
@@ -90,6 +113,10 @@ DISPATCH = {
     "backup-prd": cmd_backup_prd,
     "validate-tasks": cmd_validate_tasks,
     "enrich-tasks": cmd_enrich_tasks,
+    "parallel-plan": parallel.cmd_plan,
+    "parallel-apply": parallel.cmd_apply,
+    "parallel-extract": parallel.cmd_extract,
+    "parallel-inject": parallel.cmd_inject,
 }
 
 
