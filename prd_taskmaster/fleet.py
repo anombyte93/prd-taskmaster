@@ -45,7 +45,10 @@ DEFAULT_FLEET_CONFIG = {
     "routing": DEFAULT_ROUTING,
     "experimental_backends": False,
     "token_economy": "balanced",
+    "backend": "auto",
 }
+
+BACKEND_CHOICES = {"auto", "taskmaster", "native"}
 
 
 def load_fleet_config(path=None):
@@ -59,6 +62,7 @@ def load_fleet_config(path=None):
         "routing": dict(DEFAULT_ROUTING),
         "experimental_backends": DEFAULT_FLEET_CONFIG["experimental_backends"],
         "token_economy": DEFAULT_FLEET_CONFIG["token_economy"],
+        "backend": DEFAULT_FLEET_CONFIG["backend"],
     }
     p = Path(path) if path else FLEET_CONFIG_PATH
     if not p.is_file():
@@ -85,6 +89,10 @@ def load_fleet_config(path=None):
 
     if isinstance(raw.get("token_economy"), str):
         cfg["token_economy"] = raw["token_economy"]
+
+    backend = raw.get("backend")
+    if backend in BACKEND_CHOICES:
+        cfg["backend"] = backend
 
     escalation = raw.get("escalation")
     if isinstance(escalation, dict):

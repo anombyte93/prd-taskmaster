@@ -1,6 +1,22 @@
-"""Token economy presets and tier helpers for Atlas Fleet routing."""
+"""Token economy presets, telemetry, and tier helpers for Atlas Fleet routing."""
+
+import json
+import threading
+from pathlib import Path
 
 TIER_ORDER = ["fast", "standard", "capable", "frontier"]
+
+# These vendor IDs rot. Refresh this map when telemetry or MODEL-ECONOMY.md
+# shows the model ladder has changed.
+TIER_MODEL_IDS = {
+    "haiku": "claude-haiku-4-5-20251001",
+    "sonnet": "claude-sonnet-4-6",
+    "opus": "claude-opus-4-8",
+    "fable": "claude-fable-5",
+}
+
+TELEMETRY = Path(".atlas-ai") / "telemetry.jsonl"
+_TELEMETRY_LOCK = threading.Lock()
 
 ECONOMY_PRESETS = {
     "conservative": {
@@ -59,6 +75,18 @@ def economy_profile(cfg):
         escalation.update(user_escalation)
     profile["escalation"] = escalation
     return profile
+
+
+# ─── Telemetry append helper ─────────────────────────────────────────────────
+
+def append_telemetry(row, path=None):
+    """Append one telemetry row to JSONL using the shared in-process lock."""
+    p = Path(path) if path else TELEMETRY
+    p.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(row, default=str) + "\n"
+    with _TELEMETRY_LOCK:
+        with p.open("a") as f:
+            f.write(line)
 
 
 # ─── T7: telemetry summary (economy-report) ──────────────────────────────────

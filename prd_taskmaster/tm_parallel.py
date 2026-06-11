@@ -15,7 +15,6 @@ import os
 import re
 import shutil
 import subprocess
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -23,7 +22,13 @@ from pathlib import Path
 from typing import Any
 
 from prd_taskmaster import parallel
-from prd_taskmaster.economy import economy_profile, shift_tier
+from prd_taskmaster.economy import (
+    TELEMETRY,
+    TIER_MODEL_IDS,
+    append_telemetry,
+    economy_profile,
+    shift_tier,
+)
 from prd_taskmaster.fleet import load_fleet_config, resolve_backend
 from prd_taskmaster.lib import CommandError, atomic_write, emit, fail
 from prd_taskmaster.taskmaster import _find_binary
@@ -31,19 +36,8 @@ from prd_taskmaster.taskmaster import _find_binary
 
 TASKMASTER_MIN_VERSION = "0.43.0"
 TM_WORK = Path(".atlas-ai") / "tmwork"
-TELEMETRY = Path(".atlas-ai") / "telemetry.jsonl"
-
-# These vendor IDs rot. Refresh this map when telemetry or MODEL-ECONOMY.md
-# shows the model ladder has changed.
-TIER_MODEL_IDS = {
-    "haiku": "claude-haiku-4-5-20251001",
-    "sonnet": "claude-sonnet-4-6",
-    "opus": "claude-opus-4-8",
-    "fable": "claude-fable-5",
-}
 
 _CLI_PROVIDERS = {"claude-code", "codex-cli"}
-_TELEMETRY_LOCK = threading.Lock()
 
 
 def _now_iso() -> str:
@@ -331,12 +325,7 @@ def _default_concurrency(concurrency: int | None, workdir_count: int, fleet_conf
     return min(3, workdir_count)
 
 
-def _append_telemetry(row: dict) -> None:
-    TELEMETRY.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(row, default=str) + "\n"
-    with _TELEMETRY_LOCK:
-        with TELEMETRY.open("a") as f:
-            f.write(line)
+_append_telemetry = append_telemetry
 
 
 def _run_one_attempt(binary: str, task_id: Any, workdir: Path, timeout: float) -> tuple[Any, int, str, str]:

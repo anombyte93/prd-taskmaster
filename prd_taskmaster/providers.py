@@ -5,7 +5,7 @@ import os
 import shutil
 from pathlib import Path
 
-from prd_taskmaster.economy import economy_profile
+from prd_taskmaster.economy import TIER_MODEL_IDS, economy_profile
 from prd_taskmaster.fleet import load_fleet_config
 from prd_taskmaster.lib import (
     CommandError,
@@ -20,7 +20,6 @@ from prd_taskmaster.lib import (
     _read_taskmaster_model,
     _write_taskmaster_config,
 )
-from prd_taskmaster.tm_parallel import TIER_MODEL_IDS
 
 
 KNOWN_ENGINE_DEFAULTS = [
