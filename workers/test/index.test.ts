@@ -14,7 +14,6 @@ describe("Worker route scaffold", () => {
   });
 
   it.each([
-    "/stripe/webhook",
     "/license/refresh",
     "/telemetry"
   ])("returns 501 for POST %s until handlers are implemented", async (path) => {
