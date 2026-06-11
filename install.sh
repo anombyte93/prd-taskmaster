@@ -18,8 +18,10 @@ set -euo pipefail
 REPO_OWNER="anombyte93"
 REPO_NAME="prd-taskmaster"
 SKILL_NAME="prd-taskmaster"
-VERSION="3.0.0"
+VERSION="4.0.0"
 SKILL_DIR="${SKILL_DIR:-${HOME}/.claude/skills/${SKILL_NAME}}"
+ALIAS_NAME="atlas"
+ALIAS_DIR="${HOME}/.claude/skills/${ALIAS_NAME}"
 
 # ---------------------------------------------------------------------------
 # Internal constants
@@ -236,10 +238,24 @@ install_skill() {
     cp "${src_dir}/SKILL.md" "${SKILL_DIR}/SKILL.md"
     ok "Installed SKILL.md"
 
-    # Optional: script.py (or any .py entrypoint)
+    # Required: script.py shim + the prd_taskmaster package it imports
     if [[ -f "${src_dir}/script.py" ]]; then
         cp "${src_dir}/script.py" "${SKILL_DIR}/script.py"
         ok "Installed script.py"
+    fi
+    if [[ -d "${src_dir}/prd_taskmaster" ]]; then
+        rm -rf "${SKILL_DIR}/prd_taskmaster"
+        cp -r "${src_dir}/prd_taskmaster" "${SKILL_DIR}/prd_taskmaster"
+        # drop bytecode caches so the copy is clean
+        rm -rf "${SKILL_DIR}/prd_taskmaster/__pycache__"
+        ok "Installed prd_taskmaster/ package"
+    fi
+
+    # Optional: phases/ directory (the 4-phase runbooks)
+    if [[ -d "${src_dir}/phases" ]]; then
+        rm -rf "${SKILL_DIR}/phases"
+        cp -r "${src_dir}/phases" "${SKILL_DIR}/phases"
+        ok "Installed phases/"
     fi
 
     # Optional: templates/ directory
@@ -276,6 +292,46 @@ VEOF
     ok "Wrote .version (${VERSION}, ${timestamp})"
 
     # ------------------------------------------------------------------
+    # Install the /atlas alias skill (thin delegator to this skill)
+    # ------------------------------------------------------------------
+    mkdir -p "${ALIAS_DIR}"
+    cat > "${ALIAS_DIR}/SKILL.md" <<ALIASEOF
+---
+name: ${ALIAS_NAME}
+description: >-
+  The Atlas engine — turn any goal into a validated PRD and an executable,
+  verified task graph. Alias for the prd-taskmaster skill. Use when the user
+  invokes /atlas, says "I want to build", or asks for a PRD / task-driven build.
+allowed-tools:
+  - Read
+  - Skill
+  - Bash
+---
+
+# /atlas — the Atlas engine
+
+This is a thin alias. Immediately Read and follow the full engine skill:
+
+\`\`\`
+Read ${SKILL_DIR}/SKILL.md
+\`\`\`
+
+Then execute that skill's pipeline (Preflight -> Discovery -> Generate -> Handoff)
+exactly as written, carrying over whatever goal or arguments the user provided.
+ALIASEOF
+    ok "Installed /atlas alias skill -> ${ALIAS_DIR}"
+
+    # ------------------------------------------------------------------
+    # Deprecation: superseded standalone prd-taskmaster-v2 skill dir
+    # ------------------------------------------------------------------
+    local legacy_dir="${HOME}/.claude/skills/prd-taskmaster-v2"
+    if [[ -d "${legacy_dir}" ]]; then
+        warn "Found legacy skill dir: ${legacy_dir}"
+        warn "It is superseded by prd-taskmaster v${VERSION}. Remove it with:"
+        printf "    rm -rf %s\n" "${legacy_dir}"
+    fi
+
+    # ------------------------------------------------------------------
     # Success
     # ------------------------------------------------------------------
     printf "\n"
@@ -288,8 +344,8 @@ VEOF
     fi
 
     printf "\n"
-    info "To use this skill in Claude Code, reference it with:"
-    printf "  ${CYAN}/%s${RESET}\n" "${SKILL_NAME}"
+    info "Open any project in Claude Code and type:"
+    printf "  ${CYAN}/atlas${RESET}   (or ${CYAN}/%s${RESET}, or just say \"I want to build …\")\n" "${SKILL_NAME}"
     printf "\n"
 }
 

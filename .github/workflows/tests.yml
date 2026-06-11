@@ -1,0 +1,98 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Proves the zero-dependency promise: the package + CLI must run with NO pip
+  # installs at all (only the Python stdlib). Skill users install via curl and
+  # get exactly this.
+  stdlib-only:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Guard — package imports with no third-party deps
+        run: |
+          python -S -c "import sys; sys.path.insert(0,'.'); import prd_taskmaster, prd_taskmaster.cli, prd_taskmaster.pipeline, prd_taskmaster.shipcheck; print('stdlib-only import OK', prd_taskmaster.__version__)"
+      - name: Guard — no third-party imports anywhere in the package
+        run: |
+          python - <<'PY'
+          import ast, pathlib, sys
+          STDLIB = set(sys.stdlib_module_names)
+          allowed = STDLIB | {"prd_taskmaster"}
+          bad = []
+          for f in pathlib.Path("prd_taskmaster").rglob("*.py"):
+              tree = ast.parse(f.read_text())
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Import):
+                      mods = [n.name.split(".")[0] for n in node.names]
+                  elif isinstance(node, ast.ImportFrom):
+                      mods = [(node.module or "").split(".")[0]] if node.level == 0 else []
+                  else:
+                      continue
+                  for m in mods:
+                      if m and m not in allowed:
+                          bad.append(f"{f}: {m}")
+          if bad:
+              print("Non-stdlib imports found:"); print("\n".join(bad)); sys.exit(1)
+          print("no third-party imports in prd_taskmaster/")
+          PY
+      - name: Install pytest only (no project deps)
+        run: pip install pytest
+      - name: Core + plugin tests (stdlib path)
+        run: python -m pytest tests/core tests/plugin -q
+
+  # Full suite including the FastMCP plugin surface (needs the mcp package).
+  full:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install deps
+        run: |
+          pip install pytest
+          pip install -r mcp-server/requirements.txt
+      - name: Full test suite
+        run: python -m pytest tests/ -q
+
+  # All five version strings must agree.
+  version-agreement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Check version strings match
+        run: |
+          python - <<'PY'
+          import json, re, pathlib, sys
+          pkg = pathlib.Path("prd_taskmaster/__init__.py").read_text()
+          pkg_v = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', pkg).group(1)
+          pj = json.loads(pathlib.Path("package.json").read_text())["version"]
+          plug = json.loads(pathlib.Path(".claude-plugin/plugin.json").read_text())["version"]
+          sh = re.search(r'VERSION="([^"]+)"', pathlib.Path("install.sh").read_text()).group(1)
+          chlog = pathlib.Path("CHANGELOG.md").read_text()
+          chlog_has = "v4.0.0" in chlog or "[4.0.0]" in chlog or "4.0.0" in chlog
+          versions = {"package/__init__": pkg_v, "package.json": pj, "plugin.json": plug, "install.sh": sh}
+          print(versions, "CHANGELOG mentions 4.0.0:", chlog_has)
+          vals = set(versions.values())
+          if len(vals) != 1:
+              print("VERSION MISMATCH:", versions); sys.exit(1)
+          if not chlog_has:
+              print("CHANGELOG missing the current version entry"); sys.exit(1)
+          print("all versions agree:", vals.pop())
+          PY
