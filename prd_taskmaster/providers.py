@@ -5,6 +5,8 @@ import os
 import shutil
 from pathlib import Path
 
+from prd_taskmaster.economy import economy_profile
+from prd_taskmaster.fleet import load_fleet_config
 from prd_taskmaster.lib import (
     CommandError,
     emit,
@@ -18,9 +20,136 @@ from prd_taskmaster.lib import (
     _read_taskmaster_model,
     _write_taskmaster_config,
 )
+from prd_taskmaster.tm_parallel import TIER_MODEL_IDS
 
 
-def run_configure_providers() -> dict:
+KNOWN_ENGINE_DEFAULTS = [
+    {
+        "provider": "claude-code",
+        "modelId": "sonnet",
+        "maxTokens": 64000,
+        "temperature": 0.2,
+    },
+    {
+        "provider": "codex-cli",
+        "modelId": "gpt-5.2-codex",
+        "maxTokens": 128000,
+        "temperature": 0.2,
+    },
+    {
+        "provider": "anthropic",
+        "modelId": "claude-sonnet-4-20250514",
+        "maxTokens": 64000,
+        "temperature": 0.2,
+    },
+]
+
+_CLI_DELEGATION_PROVIDERS = {"claude-code", "codex-cli"}
+_STRUCTURED_GEN_TIER_MODELS = {
+    "fast": "haiku",
+    "standard": "sonnet",
+    "capable": "opus",
+    "frontier": "fable",
+}
+
+
+def _role_empty(value: object) -> bool:
+    return not isinstance(value, dict) or not value
+
+
+def _resolve_configure_profile(economy: str | None) -> dict:
+    cfg = load_fleet_config() if economy is None else {"token_economy": economy}
+    return economy_profile(cfg)
+
+
+def _desired_main_model(has_claude: bool, has_codex: bool, has_anthropic_key: bool) -> dict | None:
+    if has_claude:
+        return {
+            "provider": "claude-code",
+            "modelId": "sonnet",
+            "maxTokens": 64000,
+            "temperature": 0.2,
+        }
+    if has_codex:
+        return {
+            "provider": "codex-cli",
+            "modelId": "gpt-5.2-codex",
+            "maxTokens": 128000,
+            "temperature": 0.2,
+        }
+    if has_anthropic_key:
+        return {
+            "provider": "anthropic",
+            "modelId": "claude-sonnet-4-20250514",
+            "maxTokens": 64000,
+            "temperature": 0.2,
+        }
+    return None
+
+
+def _desired_fallback_model(has_claude: bool, has_codex: bool, has_anthropic_key: bool) -> dict | None:
+    if has_codex:
+        return {
+            "provider": "codex-cli",
+            "modelId": "gpt-5.2-codex",
+            "maxTokens": 128000,
+            "temperature": 0.2,
+        }
+    if has_claude:
+        return {
+            "provider": "claude-code",
+            "modelId": "sonnet",
+            "maxTokens": 64000,
+            "temperature": 0.2,
+        }
+    if has_anthropic_key:
+        return {
+            "provider": "anthropic",
+            "modelId": "claude-3-7-sonnet-20250219",
+            "maxTokens": 120000,
+            "temperature": 0.2,
+        }
+    return None
+
+
+def _main_model_for_start_tier(model: dict, tier: str) -> dict:
+    model_name = _STRUCTURED_GEN_TIER_MODELS.get(tier, tier)
+    provider = str(model.get("provider", "")).lower()
+    adjusted = dict(model)
+    if provider in _CLI_DELEGATION_PROVIDERS:
+        adjusted["modelId"] = model_name
+    elif provider == "anthropic":
+        adjusted["modelId"] = TIER_MODEL_IDS.get(model_name, model_name)
+    return adjusted
+
+
+def _has_perplexity_api_key() -> bool:
+    return bool(
+        os.environ.get("PERPLEXITY_API_KEY")
+        or _read_env_file_value(Path(".env"), "PERPLEXITY_API_KEY")
+    )
+
+
+def _perplexity_research_model(model_id: str) -> dict:
+    return {
+        "provider": "perplexity",
+        "modelId": model_id,
+        "maxTokens": 8700,
+        "temperature": 0.1,
+    }
+
+
+def _local_proxy_research_model(local_proxy_url: str) -> dict:
+    return {
+        "provider": "openai-compatible",
+        "modelId": "sonar",
+        "maxTokens": 8700,
+        "temperature": 0.1,
+        "baseURL": local_proxy_url,
+    }
+
+
+def run_configure_providers(economy: str | None = None) -> dict:
     """Configure TaskMaster for native Claude/Codex plus local Perplexity API Free when available."""
     config = _read_taskmaster_config()
     if not config:
@@ -35,64 +164,31 @@ def run_configure_providers() -> dict:
 
     models = config.setdefault("models", {})
     changed = []
+    profile = _resolve_configure_profile(economy)
+    result_extra = {}
 
     has_claude = shutil.which("claude") is not None
     has_codex = shutil.which("codex") is not None
     has_anthropic_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
-    if has_claude:
-        desired_main = {
-            "provider": "claude-code",
-            "modelId": "sonnet",
-            "maxTokens": 64000,
-            "temperature": 0.2,
-        }
-    elif has_codex:
-        desired_main = {
-            "provider": "codex-cli",
-            "modelId": "gpt-5.2-codex",
-            "maxTokens": 128000,
-            "temperature": 0.2,
-        }
-    elif has_anthropic_key:
-        desired_main = {
-            "provider": "anthropic",
-            "modelId": "claude-sonnet-4-20250514",
-            "maxTokens": 64000,
-            "temperature": 0.2,
-        }
-    else:
-        desired_main = None
+    desired_main = _desired_main_model(has_claude, has_codex, has_anthropic_key)
+    start_tier = profile.get("structured_gen_start", "standard")
+    current_main = models.get("main")
+    if _role_empty(current_main):
+        if desired_main:
+            models["main"] = _main_model_for_start_tier(desired_main, start_tier)
+            changed.append("main")
+    elif start_tier != "standard":
+        if current_main in KNOWN_ENGINE_DEFAULTS:
+            desired_tier_main = _main_model_for_start_tier(current_main, start_tier)
+            if current_main != desired_tier_main:
+                models["main"] = desired_tier_main
+                changed.append("main")
+        else:
+            result_extra["skipped_main"] = "user-configured"
 
-    if desired_main and models.get("main") != desired_main:
-        models["main"] = desired_main
-        changed.append("main")
-
-    if has_codex:
-        desired_fallback = {
-            "provider": "codex-cli",
-            "modelId": "gpt-5.2-codex",
-            "maxTokens": 128000,
-            "temperature": 0.2,
-        }
-    elif has_claude:
-        desired_fallback = {
-            "provider": "claude-code",
-            "modelId": "sonnet",
-            "maxTokens": 64000,
-            "temperature": 0.2,
-        }
-    elif has_anthropic_key:
-        desired_fallback = {
-            "provider": "anthropic",
-            "modelId": "claude-3-7-sonnet-20250219",
-            "maxTokens": 120000,
-            "temperature": 0.2,
-        }
-    else:
-        desired_fallback = None
-
-    if desired_fallback and models.get("fallback") != desired_fallback:
+    desired_fallback = _desired_fallback_model(has_claude, has_codex, has_anthropic_key)
+    if desired_fallback and _role_empty(models.get("fallback")):
         models["fallback"] = desired_fallback
         changed.append("fallback")
 
@@ -109,18 +205,22 @@ def run_configure_providers() -> dict:
         or "localhost:8765" in local_proxy_url
         or _local_port_open()
     )
-    if local_proxy_available:
-        desired_research = {
-            "provider": "openai-compatible",
-            "modelId": "sonar",
-            "maxTokens": 8700,
-            "temperature": 0.1,
-            "baseURL": local_proxy_url,
-        }
-        if models.get("research") != desired_research:
+    if _role_empty(models.get("research")):
+        desired_research = None
+        research_choice = profile.get("research_choice", "real_api_if_key")
+        has_perplexity_key = _has_perplexity_api_key()
+        if research_choice == "real_api_if_key" and has_perplexity_key:
+            desired_research = _perplexity_research_model("sonar")
+        elif research_choice == "best_available" and has_perplexity_key:
+            desired_research = _perplexity_research_model("sonar-pro")
+        elif local_proxy_available:
+            desired_research = _local_proxy_research_model(local_proxy_url)
+
+        if desired_research:
             models["research"] = desired_research
             changed.append("research")
 
+    if _is_local_perplexity_free(models.get("research", {})):
         if _ensure_env_entry(Path(".env"), "OPENAI_COMPATIBLE_API_KEY", "local-perplexity-api-free"):
             changed.append(".env:OPENAI_COMPATIBLE_API_KEY")
         if _ensure_env_entry(Path(".env"), "PERPLEXITY_API_BASE_URL", local_proxy_url):
@@ -150,6 +250,8 @@ def run_configure_providers() -> dict:
         "models": models,
         "local_perplexity_api_free": local_proxy_available,
         "local_perplexity_api_free_url": local_proxy_url if local_proxy_available else None,
+        "economy": profile["mode"],
+        **result_extra,
     }
 
 
