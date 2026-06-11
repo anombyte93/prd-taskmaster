@@ -94,9 +94,64 @@ def _safe_call(fn) -> bool:
         return False
 
 
+def _mcp_config_has_server(
+    config_path: Path,
+    server_name: str,
+    *,
+    allow_top_level: bool = False,
+) -> bool:
+    """Return True when an MCP config declares the exact server key."""
+    if not config_path.is_file():
+        return False
+
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return False
+
+    if not isinstance(config, dict):
+        return False
+
+    servers = config.get("mcpServers")
+    if isinstance(servers, dict) and server_name in servers:
+        return True
+
+    return allow_top_level and server_name in config
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+def detect_atlas_launcher() -> dict:
+    """Detect the Atlas Fleet launcher binary and MCP registration."""
+    installed = bool(
+        shutil.which("atlas-launcher")
+        or shutil.which("atlas")
+    )
+
+    config_paths: list[tuple[Path, bool]] = []
+    try:
+        config_paths.append((Path.home() / ".claude.json", False))
+    except RuntimeError:
+        pass
+    config_paths.append((Path(".mcp.json"), True))
+
+    mcp_registered = any(
+        _mcp_config_has_server(
+            config_path,
+            "atlas-launcher",
+            allow_top_level=allow_top_level,
+        )
+        for config_path, allow_top_level in config_paths
+    )
+
+    return {
+        "installed": installed,
+        "mcp_registered": mcp_registered,
+    }
+
 
 def detect_taskmaster() -> dict:
     """Detect taskmaster availability: MCP > CLI > none.
