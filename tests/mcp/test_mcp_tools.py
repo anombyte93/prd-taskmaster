@@ -1,4 +1,4 @@
-"""MCP tool contract tests — the merged server.py registers 20 tools.
+"""MCP tool contract tests — the merged server.py registers 21 tools.
 
 Retargeted from the plugin: server.py now imports from prd_taskmaster.* and
 lives at mcp-server/server.py. We add the repo root (so `prd_taskmaster` is
@@ -73,8 +73,8 @@ def test_compute_fleet_waves_tool(tmp_path, monkeypatch):
     assert set(r["routing"]) == {"1", "2", "3"} and "backends" in r
 
 
-def test_server_registers_19_tools():
-    """Verify server.py declares all 19 expected tool functions at module scope."""
+def test_server_registers_21_tools():
+    """Verify server.py declares all 21 expected tool functions at module scope."""
     import server as S
     expected = {
         "preflight", "current_phase", "advance_phase", "check_gate",
@@ -84,8 +84,9 @@ def test_server_registers_19_tools():
         "debrief", "log_progress", "read_state", "gen_scripts",
         "compute_fleet_waves",
         "engine_preflight",
+        "tm_parallel_expand",
     }
-    assert len(expected) == 20
+    assert len(expected) == 21
     public_attrs = {name for name in dir(S) if not name.startswith("_")}
     missing = expected - public_attrs
     assert not missing, f"missing tools: {sorted(missing)}"

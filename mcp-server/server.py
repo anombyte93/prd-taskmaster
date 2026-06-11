@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FastMCP server for prd-taskmaster.
 
-Registers 20 tools wrapping the sibling modules (pipeline, capabilities,
+Registers 21 tools wrapping the sibling modules (pipeline, capabilities,
 taskmaster, validation, templates) plus server-native helpers
 (calc_tasks, backup_prd, append_workflow, debrief, log_progress,
 gen_test_tasks, read_state, gen_scripts, compute_fleet_waves).
@@ -28,6 +28,7 @@ from prd_taskmaster import templates as TPL
 from prd_taskmaster import lib as LIB
 from prd_taskmaster import fleet as F
 from prd_taskmaster import batch as B
+from prd_taskmaster import tm_parallel as TMP
 
 mcp = FastMCP("prd-taskmaster")
 
@@ -106,6 +107,15 @@ def load_template(type: str = "comprehensive") -> dict:
 def compute_fleet_waves(concurrency: int = 3, tag: str = "") -> dict:
     """Compute Atlas Fleet dependency waves for the selected TaskMaster tag."""
     return F.run_fleet_waves(concurrency, tag)
+
+
+@mcp.tool()
+def tm_parallel_expand(tag: str = "", dry_run: bool = False) -> dict:
+    """Run native TaskMaster expansion in isolated parallel workdirs."""
+    try:
+        return TMP.run_tm_parallel(tag=tag or None, dry_run=dry_run)
+    except LIB.CommandError as exc:
+        return {"ok": False, "error": exc.message, **exc.extra}
 
 
 # ─── Server-native tools (8) ──────────────────────────────────────────────────

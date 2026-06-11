@@ -11,7 +11,7 @@ from prd_taskmaster.validation import cmd_validate_prd, cmd_validate_tasks
 from prd_taskmaster.tasks import cmd_calc_tasks, cmd_backup_prd, cmd_enrich_tasks
 from prd_taskmaster.taskmaster import cmd_init_taskmaster
 from prd_taskmaster.batch import cmd_engine_preflight
-from prd_taskmaster import fleet, parallel
+from prd_taskmaster import fleet, parallel, tm_parallel
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -116,6 +116,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tag")
     p.add_argument("--input", required=True)
 
+    # tm-parallel native TaskMaster expansion
+    p = sub.add_parser("tm-parallel", help="Run native TaskMaster expansion in isolated parallel workdirs")
+    p.add_argument("--tag")
+    p.add_argument("--missing-only", action="store_true", default=True)
+    p.add_argument("--concurrency", type=int, default=None)
+    p.add_argument("--timeout", type=float, default=180)
+    p.add_argument("--dry-run", action="store_true")
+
+    p = sub.add_parser("tm-plan", help="Plan isolated native TaskMaster expansion workdirs")
+    p.add_argument("--tag")
+    p.add_argument("--missing-only", action="store_true", default=True)
+
+    p = sub.add_parser("tm-run", help="Run a planned native TaskMaster expansion batch")
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--concurrency", type=int, default=None)
+    p.add_argument("--timeout", type=float, default=180)
+
+    p = sub.add_parser("tm-harvest", help="Harvest a native TaskMaster expansion batch")
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--tag")
+    p.add_argument("--threshold", type=int, default=7)
+
     # fleet-waves
     p = sub.add_parser("fleet-waves", help="Compute Atlas Fleet dependency waves")
     p.add_argument("--concurrency", type=int, default=3)
@@ -142,6 +164,10 @@ DISPATCH = {
     "parallel-apply": parallel.cmd_apply,
     "parallel-extract": parallel.cmd_extract,
     "parallel-inject": parallel.cmd_inject,
+    "tm-parallel": tm_parallel.cmd_tm_parallel,
+    "tm-plan": tm_parallel.cmd_tm_plan,
+    "tm-run": tm_parallel.cmd_tm_run,
+    "tm-harvest": tm_parallel.cmd_tm_harvest,
     "fleet-waves": fleet.cmd_fleet_waves,
 }
 
