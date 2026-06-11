@@ -86,13 +86,10 @@ def write_atomic(path, payload):
     tmp.replace(path)
 
 
-def cmd_plan(args):
-    tag = current_tag(args)
-    raw, tag_key = load_tagged(tag)
-    tasks = get_tasks(raw, tag_key)
+def build_packets(tasks, missing_only=True) -> list:
     packets = []
     for t in tasks:
-        if args.missing_only and len(t.get("subtasks") or []) >= 2:
+        if missing_only and len(t.get("subtasks") or []) >= 2:
             continue
         if str(t.get("status")) in ("done", "cancelled"):
             continue
@@ -114,6 +111,14 @@ def cmd_plan(args):
                 "object per the schema in parallel.py."
             ),
         })
+    return packets
+
+
+def cmd_plan(args):
+    tag = current_tag(args)
+    raw, tag_key = load_tagged(tag)
+    tasks = get_tasks(raw, tag_key)
+    packets = build_packets(tasks, missing_only=args.missing_only)
     out({"ok": True, "tag": tag, "count": len(packets), "packets": packets})
 
 

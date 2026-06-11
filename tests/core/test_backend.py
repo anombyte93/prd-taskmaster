@@ -104,7 +104,7 @@ def _seed_tasks(tmp_path: Path, count: int, tag: str = "master") -> None:
 
 
 def test_backend_factory_precedence_and_auto_detection(tmp_path, monkeypatch):
-    from prd_taskmaster.backend import TaskMasterBackend, get_backend
+    from prd_taskmaster.backend import NativeBackend, TaskMasterBackend, get_backend
 
     _isolate(tmp_path, monkeypatch, with_binary=False)
 
@@ -113,10 +113,12 @@ def test_backend_factory_precedence_and_auto_detection(tmp_path, monkeypatch):
     assert explicit.name == "taskmaster"
     assert explicit.detect()["available"] is False
 
-    with pytest.raises(CommandError) as exc:
-        get_backend({"backend": "auto"})
-    assert "native" in exc.value.message
-    assert "T4" in exc.value.message
+    native = get_backend({"backend": "native"})
+    assert isinstance(native, NativeBackend)
+    assert native.name == "native"
+
+    auto_fallback = get_backend({"backend": "auto"})
+    assert isinstance(auto_fallback, NativeBackend)
 
     _write_fake_taskmaster(tmp_path / "bin")
     auto = get_backend({"backend": "auto"})
