@@ -48,3 +48,45 @@ def test_route_task_unknown_complexity_defaults_standard():
     cfg = {"routing": {"standard": "claude:sonnet"}, "experimental_backends": False}
     avail = {"claude": True, "codex": False, "gemini": False}
     assert route_task({"id": 1}, cfg, avail) == "claude:sonnet"
+
+
+def test_route_task_escalates_attempts_with_balanced_ceiling():
+    cfg = {"routing": {"fast": "claude:haiku", "standard": "claude:sonnet",
+                       "capable": "claude:opus", "frontier": "claude:fable"},
+           "experimental_backends": False, "token_economy": "balanced"}
+    avail = {"claude": True, "codex": False, "gemini": False}
+    task = {"id": 1, "complexityScore": 2}
+
+    assert route_task(task, cfg, avail, attempt=1) == "claude:sonnet"
+    assert route_task(task, cfg, avail, attempt=2) == "claude:opus"
+    assert route_task(task, cfg, avail, attempt=5) == "claude:opus"
+
+
+def test_route_task_escalation_clamps_to_explicit_ceiling():
+    cfg = {"routing": {"fast": "claude:haiku", "standard": "claude:sonnet",
+                       "capable": "claude:opus", "frontier": "claude:fable"},
+           "experimental_backends": False, "token_economy": "balanced",
+           "escalation": {"max_steps": 5, "ceiling": "capable"}}
+    avail = {"claude": True, "codex": False, "gemini": False}
+
+    assert route_task({"id": 1, "complexityScore": 2}, cfg, avail, attempt=5) == "claude:opus"
+
+
+def test_conservative_code_impl_shift_lowers_medium_task_to_fast():
+    cfg = {"routing": {"fast": "claude:haiku", "standard": "claude:sonnet",
+                       "capable": "claude:opus", "frontier": "claude:fable"},
+           "experimental_backends": False, "token_economy": "conservative"}
+    avail = {"claude": True, "codex": False, "gemini": False}
+    task = {"id": 1, "phaseConfig": {"complexity": "MEDIUM"}}
+
+    assert route_task(task, cfg, avail) == "claude:haiku"
+
+
+def test_performance_code_impl_shift_floors_simple_task_at_standard():
+    cfg = {"routing": {"fast": "claude:haiku", "standard": "claude:sonnet",
+                       "capable": "claude:opus", "frontier": "claude:fable"},
+           "experimental_backends": False, "token_economy": "performance"}
+    avail = {"claude": True, "codex": False, "gemini": False}
+    task = {"id": 1, "phaseConfig": {"complexity": "SIMPLE"}}
+
+    assert route_task(task, cfg, avail) == "claude:sonnet"

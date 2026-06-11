@@ -12,6 +12,8 @@ def test_defaults_without_config_file(tmp_path, monkeypatch):
     cfg = load_fleet_config()
     assert cfg["max_concurrency"] == 3
     assert cfg["experimental_backends"] is False
+    assert cfg["token_economy"] == "balanced"
+    assert "escalation" not in cfg
     assert set(cfg["routing"]) == {"fast", "standard", "capable", "frontier"}
     assert all(v.startswith("claude:") for v in cfg["routing"].values())
 
@@ -24,10 +26,18 @@ def test_config_file_overrides(tmp_path, monkeypatch):
         "max_concurrency": 5,
         "routing": {"fast": "codex:gpt-5.2-codex"},
         "experimental_backends": True,
+        "token_economy": "conservative",
+        "escalation": {"max_steps": 1, "ceiling": "capable"},
     }))
     cfg = load_fleet_config()
     assert cfg["max_concurrency"] == 5
     assert cfg["experimental_backends"] is True
+    assert cfg["token_economy"] == "conservative"
+    assert cfg["escalation"] == {
+        "enabled": True,
+        "max_steps": 1,
+        "ceiling": "capable",
+    }
     assert cfg["routing"]["fast"] == "codex:gpt-5.2-codex"
     # unspecified tiers keep defaults
     assert cfg["routing"]["capable"].startswith("claude:")
@@ -76,11 +86,30 @@ def test_invalid_values_ignored(tmp_path, monkeypatch):
     (d / "fleet.json").write_text(json.dumps({
         "max_concurrency": 0,          # invalid (<1) -> default
         "routing": "not-a-dict",        # invalid -> default
+        "token_economy": 123,            # invalid -> default
+        "escalation": {
+            "enabled": "yes",            # invalid -> dropped
+            "max_steps": -1,             # invalid -> dropped
+            "ceiling": "slow",           # invalid -> dropped
+        },
         "unknown_key": "ignored",
     }))
     cfg = load_fleet_config()
     assert cfg["max_concurrency"] == 3
+    assert cfg["token_economy"] == "balanced"
+    assert "escalation" not in cfg
     assert isinstance(cfg["routing"], dict)
+
+
+def test_unknown_token_economy_string_is_preserved_for_profile_resolution(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    d = tmp_path / ".atlas-ai"
+    d.mkdir()
+    (d / "fleet.json").write_text(json.dumps({"token_economy": "turbo"}))
+
+    cfg = load_fleet_config()
+
+    assert cfg["token_economy"] == "turbo"
 
 
 def test_unknown_tier_resolves_to_standard():

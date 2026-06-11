@@ -8,6 +8,7 @@ import argparse
 import json
 from pathlib import Path
 
+from prd_taskmaster.economy import TIER_ORDER, economy_profile, shift_tier
 from prd_taskmaster import parallel
 from prd_taskmaster.lib import CommandError, emit, fail
 
@@ -43,6 +44,7 @@ DEFAULT_FLEET_CONFIG = {
     "max_concurrency": 3,
     "routing": DEFAULT_ROUTING,
     "experimental_backends": False,
+    "token_economy": "balanced",
 }
 
 
@@ -56,6 +58,7 @@ def load_fleet_config(path=None):
         "max_concurrency": DEFAULT_FLEET_CONFIG["max_concurrency"],
         "routing": dict(DEFAULT_ROUTING),
         "experimental_backends": DEFAULT_FLEET_CONFIG["experimental_backends"],
+        "token_economy": DEFAULT_FLEET_CONFIG["token_economy"],
     }
     p = Path(path) if path else FLEET_CONFIG_PATH
     if not p.is_file():
@@ -79,6 +82,24 @@ def load_fleet_config(path=None):
 
     if isinstance(raw.get("experimental_backends"), bool):
         cfg["experimental_backends"] = raw["experimental_backends"]
+
+    if isinstance(raw.get("token_economy"), str):
+        cfg["token_economy"] = raw["token_economy"]
+
+    escalation = raw.get("escalation")
+    if isinstance(escalation, dict):
+        resolved = {}
+        if isinstance(escalation.get("enabled"), bool):
+            resolved["enabled"] = escalation["enabled"]
+        max_steps = escalation.get("max_steps")
+        if isinstance(max_steps, int) and max_steps >= 0:
+            resolved["max_steps"] = max_steps
+        ceiling = escalation.get("ceiling")
+        if ceiling in TIER_ORDER:
+            resolved["ceiling"] = ceiling
+        if resolved:
+            resolved.setdefault("enabled", True)
+            cfg["escalation"] = resolved
 
     return cfg
 
@@ -118,13 +139,29 @@ def task_tier(task):
     return _CLASS_TIERS.get(cls, "standard")
 
 
-def route_task(task, config, backends=None):
+def _code_impl_shift_bounds(profile):
+    mode = profile.get("mode")
+    if mode == "conservative":
+        return "fast", "capable"
+    if mode == "performance":
+        return "standard", None
+    return None, None
+
+
+def route_task(task, config, backends=None, attempt=0):
     """Pick the backend:model for ONE task: complexity tier -> routing ->
     availability check. Routed backend not installed -> claude default for
     the tier (claude is the only backend with full spawn support anyway)."""
     if backends is None:
         backends = available_backends()
+    profile = economy_profile(config)
     tier = task_tier(task)
+    floor, ceiling = _code_impl_shift_bounds(profile)
+    tier = shift_tier(tier, profile.get("code_impl_shift", 0), floor=floor, ceiling=ceiling)
+    escalation = profile.get("escalation", {})
+    if attempt > 0 and escalation.get("enabled", True):
+        steps = min(attempt, escalation.get("max_steps", attempt))
+        tier = shift_tier(tier, steps, ceiling=escalation.get("ceiling"))
     target = resolve_backend(tier, config)
     backend = target.split(":", 1)[0]
     if not backends.get(backend, False):
@@ -256,6 +293,7 @@ def run_fleet_waves(concurrency=3, tag=""):
     # Smart per-task model routing: complexity tier -> fleet.json routing ->
     # installed-backend check. Dispatchers pass routing[task_id] as model=.
     cfg = load_fleet_config()
+    profile = economy_profile(cfg)
     backends = available_backends()
     routing = {
         str(_task_id(t)): route_task(t, cfg, backends)
@@ -272,6 +310,8 @@ def run_fleet_waves(concurrency=3, tag=""):
         "concurrency": concurrency,
         "routing": routing,
         "backends": backends,
+        "economy": profile["mode"],
+        "escalation": profile["escalation"],
     }
 
 
