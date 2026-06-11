@@ -65,7 +65,7 @@ def test_execute_fleet_skill_states_hard_gates():
     assert "SOLE-WRITER RULE" in content
     assert ".taskmaster/tasks/tasks.json" in content
     assert ".atlas-ai/state/pipeline.json" in content
-    assert "Never mark a task done without the CDD card" in content
+    assert "Never mark a task done without the evidence card" in content
     assert "re-queue the task ONCE" in content
     assert "second failure" in content and "BLOCKED" in content
     assert "Merge conflict" in content and "do not force" in content

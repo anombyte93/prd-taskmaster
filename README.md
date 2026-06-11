@@ -28,7 +28,7 @@ goal → discovery interview → graded PRD → dependency-ordered task graph �
 2. **Discovery** — an adaptive, one-question-at-a-time interview captures your real constraints.
 3. **Generate** — writes a PRD, scores it against deterministic quality checks (letter grade), then parses it into a task graph with complexity scores and full subtask coverage.
 4. **Handoff** — detects what you have installed and recommends one execution mode.
-5. **Execute** — a CDD-gated loop implements each task and proves it with evidence, ending in a deterministic `SHIP_CHECK_OK` token.
+5. **Execute** — an evidence-gated loop implements each task and proves it with evidence, ending in a deterministic `SHIP_CHECK_OK` token.
 
 ---
 
@@ -41,6 +41,15 @@ goal → discovery interview → graded PRD → dependency-ordered task graph �
 ```bash
 curl -fsSL https://atlas-ai.au/install | bash
 # installs the skill + prd_taskmaster package, sets up the task-master-ai peer
+```
+
+Expected finish:
+
+```text
+✓ Peer dependency: task-master-ai
+✓ Self-test: task-master-ai --version -> <version>
+Done in <Ns>.
+Installed. Try: /atlas or say "I want to build..."
 ```
 
 ### Path 2 — Claude Code plugin
@@ -57,7 +66,7 @@ npm install -g task-master-ai
 Open any project in Claude Code and type:
 
 ```
-/atlas      (or /prd-taskmaster, or just say: "I want to build …")
+/atlas      (or /prd-taskmaster, or just say: "I want to build...")
 ```
 
 Requires Python 3.11+ and Linux / macOS / WSL. The free engine needs **no paid API key** — it

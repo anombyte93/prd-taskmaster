@@ -18,16 +18,16 @@ script.py commands below are the zero-dependency fallback only.
 
 Copy into your response:
 ```
-GENERATE CHECKLIST:
-- [ ] Template loaded (comprehensive|minimal)
-- [ ] Spec written with discovery answers (no placeholders remaining)
-- [ ] Validation score: ___ / ___ (grade: ___)
-- [ ] Placeholder check: ___ placeholders found
-- [ ] Warnings addressed or acknowledged
-- [ ] Task creation mode: TaskMaster parse | manual flag
-- [ ] Tasks created: ___ tasks
-- [ ] Task validation: pass/fail
-- [ ] Tasks enriched with metadata: Y/N
+┌─ atlas ── PHASE 3/4: GENERATE ─────────────────────────────┐
+What happened: The PRD is being generated and checked.
+Evidence:
+  ○ Template loaded: waiting
+  ○ Spec written: waiting
+  ○ Validation grade: waiting
+  ○ Placeholder scan: waiting
+  ○ Tasks parsed: waiting
+  ○ Subtasks expanded: waiting
+Next: write the PRD, then render the validation scorecard.
 ```
 
 ## Step 1: Choose and Load Template
@@ -82,8 +82,22 @@ Returns: `score`, `grade`, `checks`, `warnings`, `placeholders_found`.
 
 **Grading**: EXCELLENT (91%+), GOOD (83-90%), ACCEPTABLE (75-82%), NEEDS_WORK (<75%).
 
+Render the validation scorecard:
+
+```text
+┌─ atlas ── PHASE 3/4: GENERATE ─────────────────────────────┐
+What happened: The PRD was scored and parsed into tasks.
+Evidence:
+  ✓ Grade: GOOD  ▰▰▰▰▰▰▰▰▱▱  49/57 (86%)
+  ⚠ Warnings: "<warning text>" at <section or line>
+  ✓ Placeholder scan: 0 bare placeholders named by scan
+  ✓ Tasks: <count> parsed; subtasks expanded for every task
+Gate passed: GOOD or better required — passed.
+Next: choose the execution mode in handoff.
+```
+
 **If placeholders found**: Fix before proceeding.
-**If NEEDS_WORK**: Offer auto-fix or proceed-with-risk.
+**If NEEDS_WORK**: render `Gate blocked:` with one `Fix:` action before any retry.
 **If GOOD+**: Proceed to task parsing.
 
 ## Step 4: Parse Tasks via TaskMaster
@@ -187,4 +201,4 @@ else:
 
 ## Evidence Gate
 
-**Gate: Spec validation grade is GOOD+ AND tasks created via TaskMaster parse or manual flag AND `validate-tasks` passes AND all tasks have subtasks AND `enrich-tasks` has run. In Manual Flag Path, `validate-tasks --require-phase-config` must also pass. Proceed to HANDOFF.**
+**Gate passed: GOOD or better PRD, tasks created, validation passed, every task has subtasks, and enrichment has run.**

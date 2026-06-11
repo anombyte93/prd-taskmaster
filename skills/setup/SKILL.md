@@ -21,9 +21,16 @@ Declarative phase skill. Invoked by the prd-taskmaster orchestrator when
 ## Entry gate
 
 1. Call `mcp__plugin_prd-taskmaster_go__check_gate(phase="SETUP", evidence={})`.
-   If the call returns `{gate_passed: false, violations: [...]}`, report the
-   violations and stop. The gate protects against re-entering a completed
-   phase or skipping ahead.
+   If the call returns blocked evidence, do not print the raw JSON. Render
+   one plain-English line:
+
+   ```text
+   ✗ Gate blocked: <first violation>
+   Fix: <one copy-pasteable action>
+   ```
+
+   A passed gate renders as `✓ Gate passed: <summary>`. The gate protects
+   against re-entering a completed phase or skipping ahead.
 
    **Known issue (Mum dogfood feedback [4]):** check_gate semantics are
    structurally an EXIT gate (verifies evidence sufficient to advance) but
@@ -43,9 +50,13 @@ Run `which task-master-ai`.
 If the binary is not found, report:
 
 ```
-task-master not installed. Install with:
-  npm install -g task-master-ai
-Then re-run this skill.
+┌─ atlas ── PHASE 1/4: PREFLIGHT ────────────────────────────┐
+What happened: TaskMaster is missing.
+Evidence:
+  ✗ TaskMaster CLI: command `task-master-ai` was not found
+Next: install the peer tool, then run /atlas again.
+✗ Gate blocked: TaskMaster CLI is required for local task generation.
+Fix: npm install -g task-master-ai
 ```
 
 Abort the phase. Do NOT auto-install.
@@ -66,7 +77,8 @@ no recovery path.
 This step ensures the file exists BEFORE execute-task ever runs:
 
 ```bash
-PLUGIN_SKEL="$HOME/Shade_Gen/Projects/prd-taskmaster-plugin/.atlas-ai-skel/customizations"
+SKILL_DIR="${SKILL_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+PLUGIN_SKEL="$SKILL_DIR/../../skel/customizations"
 mkdir -p .atlas-ai/customizations
 if [ ! -f .atlas-ai/customizations/system-prompt-template.md ]; then
   if [ -d "$PLUGIN_SKEL" ]; then
@@ -86,8 +98,12 @@ Also scaffold `.atlas-ai/ship-check.py` if it doesn't already exist:
 
 ```bash
 if [ ! -f .atlas-ai/ship-check.py ]; then
-  cp "$HOME/Shade_Gen/Projects/prd-taskmaster-plugin/.atlas-ai-skel/ship-check.py" .atlas-ai/ship-check.py
-  chmod +x .atlas-ai/ship-check.py
+  if [ -f "$SKILL_DIR/../../skel/ship-check.py" ]; then
+    cp "$SKILL_DIR/../../skel/ship-check.py" .atlas-ai/ship-check.py
+    chmod +x .atlas-ai/ship-check.py
+  else
+    : > .atlas-ai/ship-check.py
+  fi
 fi
 ```
 
@@ -135,16 +151,32 @@ If tasks already exist, call the MCP tool
 If no tasks exist yet (fresh project), skip the probe — Step 3's provider
 configuration is sufficient evidence the pipeline is wired.
 
-### Step 5: Status line
+### Step 5: Status block
 
-Emit a compact one-block status:
+Emit this fixed-order status block. Each check has one success criterion.
 
 ```
-Setup:
-  task-master: installed (<version>)
-  project: initialized (.taskmaster/)
-  provider: <main-provider> (main) / <research-provider> (research)
-  pipeline: verified
+┌─ atlas ── PHASE 1/4: PREFLIGHT ────────────────────────────┐
+What happened: Preflight checked the local project and tools.
+Evidence:
+  ✓ TaskMaster CLI: `task-master-ai --version` returned <version>
+  ✓ Project files: `.taskmaster/` exists or `task-master init --yes` completed
+  ✓ Provider stack: main=<main-provider>, research=<research-provider>
+  ○ Probe run: skipped for a fresh project with no tasks yet
+Gate passed: setup evidence is ready for discovery.
+Next: start discovery and capture the goal constraints.
+```
+
+Blocked example:
+
+```text
+┌─ atlas ── PHASE 1/4: PREFLIGHT ────────────────────────────┐
+What happened: Preflight found a missing peer tool.
+Evidence:
+  ✗ TaskMaster CLI: `task-master-ai` was not found
+Gate blocked: TaskMaster CLI is required before discovery can run.
+Fix: npm install -g task-master-ai
+Next: run /atlas again after the install completes.
 ```
 
 ## Exit gate

@@ -3,7 +3,7 @@ name: execute-fleet
 description: >-
   Phase execution skill for licensed Atlas Fleet runs. Use when HANDOFF has
   selected Atlas Fleet and the project should be executed across isolated
-  launcher worktrees with inbox-based result collection, verified CDD cards,
+  launcher worktrees with inbox-based result collection, verified evidence cards,
   sequential integration merges, and one final PR.
 user-invocable: false
 allowed-tools:
@@ -64,7 +64,7 @@ Repeat until no runnable tasks remain:
      `Exit status N` line.
    - The branch changed only its own worktree scope and did not edit
      `.taskmaster/tasks/tasks.json` or `.atlas-ai/state/pipeline.json`.
-7. Never mark a task done without the CDD card. Missing card means the worker
+7. Never mark a task done without the evidence card. Missing card means the worker
    did not satisfy the contract, regardless of any `DONE` message.
 8. Merge verified worker branches into `fleet-integration` sequentially, one
    at a time. After each merge, run the checker/build gate expected for the
@@ -93,11 +93,11 @@ worktree: <WORKTREE_PATH>
 branch: <WORKER_BRANCH>
 
 WORKER_CONTRACT_CDD_CARD
-Before reporting any terminal status, write this CDD card in your worktree: .atlas-ai/cdd/task-<id>.json. The card must list the checks you ran and the evidence paths that prove them. Evidence files under .atlas-ai/evidence/ must contain the FINAL verification run ONLY (one green run, one exit-status line) — intermediate TDD red runs go to .atlas-ai/logs/, never evidence/ (ship-check Gate 5 reads every Exit status line in evidence/ as final-state proof).
+Before reporting any terminal status, write this evidence card in your worktree: .atlas-ai/cdd/task-<id>.json. The card must list the checks you ran and the evidence paths that prove them. Evidence files under .atlas-ai/evidence/ must contain the FINAL verification run ONLY (one green run, one exit-status line) — intermediate TDD red runs go to .atlas-ai/logs/, never evidence/ (ship-check Gate 5 reads every Exit status line in evidence/ as final-state proof).
 
 WORKER_CONTRACT_TERMINAL_STATUS
 End with exactly one terminal status: DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED.
-Report it via mcp__atlas-launcher__inbox_send(target_session=<REPORT_TO_SESSION>, message_type="task_handoff", payload=<JSON string with at least {"task_id": <id>, "status": "<terminal status>", "branch": "<worktree branch>", "cdd_card": ".atlas-ai/cdd/task-<id>.json"}>, sender_session=<your session name>). The launcher message_type allowlist is task_handoff | notification | data | request | heartbeat — terminal reports use task_handoff; the status lives INSIDE the payload JSON.
+Report it via mcp__atlas-launcher__inbox_send(target_session=<REPORT_TO_SESSION>, message_type="task_handoff", payload=<JSON string with at least {"task_id": <id>, "status": "<terminal status>", "branch": "<worktree branch>", "evidence_card": ".atlas-ai/cdd/task-<id>.json"}>, sender_session=<your session name>). The launcher message_type allowlist is task_handoff | notification | data | request | heartbeat — terminal reports use task_handoff; the status lives INSIDE the payload JSON.
 
 WORKER_CONTRACT_HARD_RULES
 Hard rules: never edit .taskmaster/tasks/tasks.json or .atlas-ai/state/pipeline.json; never git push; commit only in your own worktree branch.
@@ -120,7 +120,7 @@ Ask questions before building if context is missing: use mcp__atlas-launcher__in
 - Merge conflict: do not force. Do not resolve by guessing. Create a fix task
   that captures the conflict and continue with remaining non-conflicting work.
 - Evidence failure: do not merge, do not mark done, and do not rewrite the
-  worker's CDD card on their behalf.
+  worker's evidence card on their behalf.
 
 ## Status Rendering
 

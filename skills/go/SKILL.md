@@ -3,7 +3,7 @@ name: go
 description: >-
   Zero-config goal-to-tasks engine. Takes any goal (software, pentest, business, learning),
   runs adaptive discovery, generates a validated spec, parses into TaskMaster tasks, creates an
-  implementation plan, and executes with built-in CDD verification. Use when user says "PRD",
+  implementation plan, and executes with built-in verified execution. Use when user says "PRD",
   "product requirements", "I want to build", or any goal-driven phrase.
 user-invocable: true
 allowed-tools:

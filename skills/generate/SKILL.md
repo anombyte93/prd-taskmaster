@@ -27,9 +27,16 @@ into tasks, expand every task into subtasks. Quality over speed.**
 ## Entry gate
 
 1. Call `mcp__plugin_prd-taskmaster_go__check_gate(phase="GENERATE", evidence={})`.
-   If the call returns `{gate_passed: false, violations: [...]}`, report the
-   violations and stop. The gate protects against re-entering a completed
-   phase or skipping ahead from DISCOVER.
+   If the call returns blocked evidence, do not print the raw JSON. Render
+   one plain-English line:
+
+   ```text
+   ✗ Gate blocked: <first violation>
+   Fix: <one copy-pasteable action>
+   ```
+
+   A passed gate renders as `✓ Gate passed: <summary>`. The gate protects
+   against re-entering a completed phase or skipping ahead from DISCOVER.
 
    **Known issue (Mum dogfood feedback [10] — WORST):** check_gate(GENERATE)
    currently checks `task_count > 0`, `subtask_coverage >= 1.0`, and
@@ -165,6 +172,27 @@ path — downstream tools read from here.
 
 Returns: `score`, `grade`, `checks`, `warnings`, `placeholders_found`.
 
+Render the validation result as the moment-3 scorecard:
+
+```text
+┌─ atlas ── PHASE 3/4: GENERATE ─────────────────────────────┐
+What happened: The PRD was scored and parsed into tasks.
+Evidence:
+  ✓ Grade: <GOOD|EXCELLENT>  ▰▰▰▰▰▰▰▰▱▱  <score>/<max> (<percent>%)
+  ⚠ Warnings: "<warning text>" at <section or line>; quote every warning
+  ✓ Placeholder scan: 0 bare placeholders named by scan
+  ✓ Tasks: <count> parsed; subtasks expanded for every task
+Gate passed: GOOD or better required — passed.
+Next: choose the execution mode in handoff.
+```
+
+If the grade is below GOOD, render the same block with `✗ Grade:` and:
+
+```text
+Gate blocked: GOOD or better is required before task parsing.
+Fix: repair the named warnings and rerun validate-prd.
+```
+
 **Optional AI-augmented review** (opt-in): pass `--ai` (CLI) or `ai=True` (MCP)
 to additionally invoke TaskMaster's configured main model for a holistic
 quality review. The deterministic regex checks always run first — AI review
@@ -180,7 +208,8 @@ is additive, never a replacement.
 **Decision rules:**
 
 - If `placeholders_found > 0` (bare placeholders, not `reason:`-attributed):
-  fix before proceeding. No exceptions.
+  print the exact placeholder names and locations, then fix before proceeding.
+  No exceptions.
 - If grade is NEEDS_WORK: offer auto-fix or proceed-with-risk — do not silently
   advance. Surface the decision.
 - If grade is ACCEPTABLE or better AND placeholders_found == 0: proceed to

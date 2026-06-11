@@ -2,13 +2,13 @@
 name: handoff
 description: >-
   Phase 3 of the prd-taskmaster pipeline: smart mode selection and user
-  handoff. Detects installed capabilities (superpowers, ralph-loop,
+  handoff. Detects installed capabilities (superpowers, loop runner,
   task-master-ai, playwright, research providers), recommends ONE execution
   mode (A/B/C) with reasoned justification, appends the task-execution
   workflow to CLAUDE.md, surfaces a structured AskUserQuestion multi-option
-  picker for user agency, and dispatches the chosen mode. Mode D (Atlas Fleet)
+  picker for user agency, and dispatches the chosen mode. Atlas Fleet
   is selectable only when detect_capabilities returns tier=premium (licensed
-  atlas-launcher detected); otherwise it is a locked Atlas Pro teaser.
+  atlas-launcher detected); otherwise it is a locked Atlas Pro ($29/mo) teaser.
   Plan Mode is NOT used (spec section 13.5): AskUserQuestion is the sole
   user-agency mechanism. Declares HANDOFF complete so EXECUTE can follow.
 user-invocable: false
@@ -23,15 +23,23 @@ allowed-tools:
 Declarative phase skill. Invoked by the prd-taskmaster orchestrator when
 `current_phase` is `HANDOFF`. Never called directly by a user.
 
-The one rule: **detect what the user has, recommend ONE mode, give the user a
-structured choice, dispatch the chosen mode. Mode D executes only on tier=premium; otherwise it is a locked teaser.**
+The one rule: **detect what the user has, recommend ONE free mode by default,
+give the user a structured choice, dispatch the chosen mode. Atlas Fleet
+executes only on tier=premium; otherwise it is a locked teaser.**
 
 ## Entry gate
 
 1. Call `mcp__plugin_prd-taskmaster_go__check_gate(phase="HANDOFF", evidence={})`.
-   If the call returns `{gate_passed: false, violations: [...]}`, report the
-   violations and stop. The gate protects against re-entering a completed
-   phase or skipping ahead from GENERATE.
+   If the call returns blocked evidence, do not print the raw JSON. Render
+   one plain-English line:
+
+   ```text
+   ✗ Gate blocked: <first violation>
+   Fix: <one copy-pasteable action>
+   ```
+
+   A passed gate renders as `✓ Gate passed: <summary>`. The gate protects
+   against re-entering a completed phase or skipping ahead from GENERATE.
 
    **Known issue (Mum dogfood feedback [4]/[10]):** check_gate(HANDOFF)
    requires `user_mode_choice` and `plan_file_exists` — both produced by
@@ -53,7 +61,7 @@ HANDOFF CHECKLIST:
 - [ ] Summary displayed (spec location, task count, capabilities)
 - [ ] CLAUDE.md task workflow appended (idempotent)
 - [ ] AskUserQuestion mode picker surfaced (or prose fallback if hook-blocked)
-- [ ] User choice dispatched (Mode A / B / C, or D when tier=premium)
+- [ ] User choice dispatched (Plan & Drive / Auto-Execute / Verified Loop, or Atlas Fleet when tier=premium)
 - [ ] Debrief scaffold emitted (optional, silently tolerated)
 - [ ] Handoff complete
 ```
@@ -71,46 +79,46 @@ Key signals:
 |------------|----------------|
 | superpowers plugin | Modes A, C (brainstorm, plans, subagents) |
 | task-master-ai (CLI or MCP) | Mode B (native auto-execute loop) |
-| ralph-loop plugin | Mode C (iterative execution loop) |
-| atlas-launcher MCP (licensed) | Mode D — Atlas Fleet (tier=premium) |
-| atlas-loop / atlas-cdd skills | legacy Mode-D seeds — superseded by atlas-launcher detection |
+| loop runner (`ralph-loop` capability key) | Verified Loop, the evidence-gated single-session loop |
+| atlas-launcher MCP (licensed) | Atlas Fleet, selectable only on tier=premium |
+| atlas-loop / atlas-cdd skills | legacy internal seeds — superseded by atlas-launcher detection |
 | Research model (task-master or MCP) | Deep research per task |
 | Playwright MCP | Tier S browser verification |
 
-**Mode D (Atlas Fleet) unlocks on `tier: "premium"` only** — i.e. a licensed
+**Atlas Fleet unlocks on `tier: "premium"` only** — i.e. a licensed
 `atlas-launcher` MCP registration detected by `detect_atlas_launcher()`. Local
-`atlas-loop`/`atlas-cdd` skills do NOT unlock it. See Step 2 and the Mode D
+`atlas-loop`/`atlas-cdd` skills do NOT unlock it. See Step 2 and the Atlas Fleet
 section below.
 
 ## Step 2: Recommend ONE mode
 
 Decision logic (first match wins):
 
-- `superpowers` + `ralph-loop` present → **Mode C** (recommended free)
-- `superpowers` only → **Mode A** (plan-only, manual drive)
-- `task-master-ai` only → **Mode B** (native auto-execute)
-- Fallback → **Mode A**
+- `superpowers` + loop runner present → **Verified Loop** (recommended free)
+- `superpowers` only → **Plan & Drive** (free, manual drive)
+- `task-master-ai` only → **Auto-Execute** (free, native TaskMaster loop)
+- Fallback → **Plan & Drive** (free)
 
 External-tool modes (E–J: Cursor, RooCode, Codex, Gemini, CodeRabbit, Aider)
 are offered as alternatives via the `alternative_modes` field, not primary
-recommendations. **Mode D is recommended iff `tier == "premium"` AND the task
+recommendations. **Atlas Fleet is recommended iff `tier == "premium"` AND the task
 graph parallelizes (>= 2 independent dependency chains — check `fleet-waves`
 output: any wave with >= 2 chunks). Premium + serial graph: recommend the best
 free mode and say why ("your tasks form a single dependency chain — Verified
 Loop is the right tool here"); Fleet stays selectable but not default. Free
-tier: Mode D is a locked Atlas Pro teaser, never selectable, regardless of
+tier: Atlas Fleet is a locked Atlas Pro ($29/mo) teaser, never selectable, regardless of
 which local plugins are installed.**
 
-### Mode A: Plan Only (Manual)
+### Plan & Drive (internal Mode A)
 
 ```
-Recommended: Plan Only
+Recommended: Plan & Drive
   superpowers:writing-plans creates your implementation plan
   Plan references TaskMaster task IDs from tasks.json
   You drive execution manually
 ```
 
-### Mode B: TaskMaster Auto-Execute
+### Auto-Execute (internal Mode B)
 
 ```
 Recommended: TaskMaster Auto-Execute
@@ -119,12 +127,12 @@ Recommended: TaskMaster Auto-Execute
   Native TaskMaster execution loop (no external orchestrator required)
 ```
 
-### Mode C: Plan + Ralph Loop (Recommended Free)
+### Verified Loop (internal Mode C, recommended free)
 
 ```
-Recommended: Plan + Ralph Loop
+Recommended: Verified Loop
   superpowers:writing-plans → implementation plan referencing tasks.json IDs
-  ralph-loop wraps each task:
+  loop runner wraps each task:
     next_task → set_task_status("in-progress") → research if <80% confident
     → subagent-driven-development → execution gate (Tier A+ evidence)
     → post-doubt check → log to .claude/verification-log.md
@@ -132,7 +140,7 @@ Recommended: Plan + Ralph Loop
   Completion: doubt agent reviews verification log before promise satisfied.
 ```
 
-### Mode D: Atlas Fleet (selectable on tier=premium; 🔒 locked teaser on free)
+### Atlas Fleet (internal D; selectable on tier=premium; 🔒 locked teaser on free)
 
 Use `detect_capabilities.license_status` with `tier` when rendering this mode.
 `tier=premium` means atlas-launcher is registered and the saved license is
@@ -145,42 +153,43 @@ an expired license stays `tier=free` and renders the locked Atlas Pro teaser.
     your task graph split into dependency waves of isolated git worktrees
     checker-gated merges into one integration branch, one final PR
     durable inbox result collection (verified, not narrated)
-    CDD evidence card per task; one SHIP_CHECK_OK at the end
+    evidence card per task; one SHIP_CHECK_OK at the end
     Walk away, come back to proof.
 
   Unlock: https://atlas-ai.au/pro   (the free modes above stay free forever)
 ```
 
-**When `tier == "premium"` and `license_status.status == "active"`**: Mode D is
+**When `tier == "premium"` and `license_status.status == "active"`**: Atlas Fleet is
 a real, selectable mode — dispatching it invokes
 `/prd-taskmaster:execute-fleet` (the wave orchestrator skill). Show the
 unlocked card:
 
 ```
 ▸ Atlas Fleet                     ★ Pro · license active
-  <N> waves · est. from your dependency graph · walk-away
+  <N> waves · estimate from your dependency graph (actual time varies) · walk-away
 ```
 
-**When `tier == "premium"` and `license_status.status == "grace"`**: Mode D is
+**When `tier == "premium"` and `license_status.status == "grace"`**: Atlas Fleet is
 selectable, but surface the countdown from `license_status.days_remaining`:
 
 ```
 ▸ Atlas Fleet                     ★ Pro · license grace
-  <N> waves · <days> days remaining · renew at https://atlas-ai.au/pro
+  <N> waves · estimate from your dependency graph (actual time varies) · <days> days remaining · renew at https://atlas-ai.au/pro
 ```
 
-**When `tier == "free"`**: Mode D is a locked teaser — not selectable, never
+**When `tier == "free"`**: Atlas Fleet is a locked teaser — not selectable, never
 executed. If atlas-launcher is present with no license, an expired license, or
 an invalid license, keep the price and unlock URL inline. If the user selects it
 while locked, respond with:
 
 > "Atlas Fleet is part of Atlas Pro ($29/mo). On this project it would split
 > your tasks into parallel waves across isolated worktrees with checker-gated
-> merges and one final PR. Unlock at https://atlas-ai.au/pro — your spec and
+> merges and one final PR (estimate from your dependency graph — actual time
+> varies). Unlock at https://atlas-ai.au/pro — your spec and
 > tasks are saved. Meanwhile, everything else is free forever: please pick one
 > of the free modes below."
 
-Then **re-invoke the mode picker (AskUserQuestion) with Mode D removed from
+Then **re-invoke the mode picker (AskUserQuestion) with Atlas Fleet removed from
 the options.**
 
 ### Alternative modes E–J (external AI tools)
@@ -263,8 +272,8 @@ Capabilities:
   [check] TaskMaster (MCP|CLI)
   [check|circle] Playwright (browser verification)
   [check|circle] Research provider
-  [check|circle] Ralph-loop plugin
-  [check|circle] Atlas Fleet (premium: selectable · free/no license/expired license: locked)
+  [check|circle] Loop runner
+  [check|circle] Atlas Fleet (premium: selectable · free/no license/expired license: locked at $29/mo)
 ```
 
 ## Step 5: Mandatory AskUserQuestion for mode selection
@@ -283,10 +292,10 @@ natural-language affirmatives, no ambiguity.
 1. **Emit a handoff summary** covering:
    - PRD path + validation grade
    - Task count + complexity breakdown
-   - Recommended mode (A/B/C) + one-line reason
+   - Recommended free mode + one-line reason
    - Alternative modes available (E–J when detected, collapsed under "Use
      another tool…")
-   - Mode D 🔒 Atlas Fleet teaser with real `license_status`, the Atlas Pro
+   - Locked Atlas Fleet teaser with real `license_status`, the Atlas Pro
      $29/mo price, and atlas-ai.au/pro URL when locked
    - A "next step" description scoped to the recommended mode (e.g. for Mode
      B: "run `task-master next`" with the first ready task ID)
@@ -294,26 +303,29 @@ natural-language affirmatives, no ambiguity.
 2. **Call `AskUserQuestion`** with a multi-option question listing each
    available execution mode. Use the user-facing names (internal IDs in
    parentheses are for this skill only — never shown to the user):
-   - **Plan & Drive** (Mode A) — get the plan, implement it yourself
-   - **Auto-Execute** (Mode B) — TaskMaster's native loop, lighter verification
-   - **Verified Loop** (Mode C) — evidence-gated single-session loop
+   - **Plan & Drive** (internal Mode A) — get the plan, implement it yourself
+   - **Auto-Execute** (internal Mode B) — TaskMaster's native loop, lighter verification
+   - **Verified Loop** (internal Mode C) — evidence-gated single-session loop
      (recommended when superpowers + a loop runner are present)
-   - **🔒 Atlas Fleet** (Mode D) — Atlas Pro $29/mo, parallel multi-session
+   - **🔒 Atlas Fleet** (internal D) — Atlas Pro $29/mo, parallel multi-session
    - "Use another tool…" — expands the applicable alternatives from E–J
    - "Show me more detail before I decide" — loops back to Step 4 summary
 
-   Mark the recommended mode as the default (Atlas Fleet may be the default
-   only when tier=premium AND the graph parallelizes). Selecting Atlas Fleet
-   while locked (free tier) returns the upgrade response (see the Mode D block
+   Mark the recommended free mode as the default. Atlas Fleet is never default
+   while locked. Atlas Fleet may be the default only when tier=premium AND the
+   graph parallelizes. Selecting Atlas Fleet while locked (free tier) returns the upgrade response (see the Atlas Fleet block
    in Step 2) and re-prompts with only the free modes (plus any applicable
    alternatives).
 
+   **Locked default rule:** Fleet is never default while locked. The default
+   must be one of the free modes: Plan & Drive, Auto-Execute, or Verified Loop.
+
 3. **Dispatch the chosen mode:**
-   - **Mode A handoff**: invoke `superpowers:writing-plans` with spec path
+   - **Plan & Drive handoff**: invoke `superpowers:writing-plans` with spec path
      `.taskmaster/docs/prd.md`
-   - **Mode B handoff**: show the `task-master next` command + the first
+   - **Auto-Execute handoff**: show the `task-master next` command + the first
      ready task ID surfaced from `.taskmaster/tasks/tasks.json`
-   - **Mode C handoff**: write `.claude/atlas-loop-prompt.md` describing the
+   - **Verified Loop handoff**: write `.claude/atlas-loop-prompt.md` describing the
      task-execution contract, then invoke `/goal` with the condition:
 
        `"SHIP_CHECK_OK has been emitted by .atlas-ai/ship-check.py AND all tasks in .taskmaster/tasks/tasks.json show status=done AND /sync has been invoked this session"`
@@ -322,16 +334,16 @@ natural-language affirmatives, no ambiguity.
      condition. Each iteration runs the execute-task 13-step cycle and
      checks the condition after step 13. `/sync` MUST be the last action
      before SHIP_CHECK_OK is emitted (per execute-task Termination).
-     (Migrated from `/ralph-loop:ralph-loop` 2026-06-04 — Claude Code's
+     (Migrated from the legacy loop-runner invocation 2026-06-04 — Claude Code's
      built-in `/goal` evaluator structurally solves the controller-wears-
      different-hats triple-verify rot caught in the 2026-06-03 audit.)
-   - **Mode D handoff (tier=premium)**: invoke `/prd-taskmaster:execute-fleet` — it owns the wave loop, worker dispatch, verification, merges, and SHIP_CHECK_OK termination. (free tier: upgrade response only, re-prompt)
+   - **Atlas Fleet handoff (tier=premium)**: invoke `/prd-taskmaster:execute-fleet` — it owns the wave loop, worker dispatch, verification, merges, and SHIP_CHECK_OK termination. (free tier: upgrade response only, re-prompt)
 
 ### Hook-blocked fallback (graceful degradation)
 
 If `PreToolUse:AskUserQuestion` is hook-blocked (automated / orchestrator /
 fleet session), fall back to a prose option table preserving the same
-semantics — labels, descriptions, Mode D locked Atlas Pro teaser, recommended
+semantics — labels, descriptions, locked Atlas Pro teaser, recommended
 mode marked. **Surface the hook block as an `[AI]` insight block** so the
 parent orchestrator can detect the fallback:
 
@@ -403,8 +415,8 @@ Handoff:
   recommended mode: <A|B|C>
   CLAUDE.md: <created|appended|skipped>
   picker: <AskUserQuestion|prose-fallback>
-  user choice: <A|B|C|D-teased>
-  dispatched: <skill/command invoked, or "waitlist re-prompt">
+  user choice: <Plan & Drive|Auto-Execute|Verified Loop|Atlas Fleet-teased>
+  dispatched: <skill/command invoked, or "Atlas Pro re-prompt">
   debrief: <path or "skipped">
 ```
 
@@ -427,9 +439,9 @@ After the evidence gate passes:
 - "AskUserQuestion is hook-blocked so I'll just pick Mode C myself" → NO.
   Fall back to the prose option table + `[AI]` insight block. The user still
   picks; you just surface the choice in a different shape.
-- "Mode D (Atlas Fleet) is available locally because atlas-loop is installed,
-  so I'll execute it" → NO. Mode D is always a teaser. Detection returns
-  `atlas_auto: false` until the feature ships.
+- "Atlas Fleet is available locally because atlas-loop is installed,
+  so I'll execute it" → NO. Atlas Fleet requires tier=premium from
+  detect_capabilities.
 - "The CLAUDE.md append had markers already, so I'll skip Step 3 entirely"
   → NO. `action: "skipped"` is the expected idempotent outcome; emit it and
   proceed. Skipping the call means you don't know the state.
