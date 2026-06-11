@@ -178,12 +178,26 @@ always fully usable on its own.
 
 ## Parallel Research & Complexity
 
-TaskMaster's own `expand --all --research` and `analyze-complexity --research` are SEQUENTIAL
-(every call rewrites tasks.json — parallel CLI invocations clobber each other). With Perplexity API
-Free, TaskMaster's strict object-generation call can also receive prose instead of JSON even though
-the proxy itself works. Therefore the `parallel-*` commands are the default research/complexity path
-when there are ≥4 tasks, when Perplexity API Free is configured, or when any TaskMaster AI provider
-errors.
+**Decision tree for expansion + research** (token-economy aware):
+
+```
+Manual flag                        → Manual Mechanics Mode (unchanged)
+pending tasks ≤ 3                  → serial NATIVE: analyze-complexity --research, then expand per task (main dir)
+task-master ≥ 0.43 AND research
+  role is a REAL structured API    → NATIVE-PARALLEL (DEFAULT): script.py tm-parallel
+  (sonar/anthropic/openai… key)      one serial analyze-complexity, then N isolated workdirs each running
+                                     native `expand --id N --research` with an economy-tier model; ONE
+                                     atomic harvest merge. Failed packets → agent-parallel rerun.
+free local proxy / no API key /
+  TM provider errors / TM < 0.43   → AGENT-PARALLEL (fallback): parallel-plan → N subagents → parallel-apply
+```
+
+Why isolation dirs: task-master 0.43+ uses proper-lockfile + atomic writes, but its 10s lock-stale
+window vs 30–120s AI calls makes concurrent invocations in ONE directory unsafe — N isolated
+project dirs sidestep the lock entirely and double as the per-attempt model mechanism (expand has
+no --model flag; each workdir carries its own config.json). The free local Perplexity proxy returns
+prose where TaskMaster needs strict JSON — that is why the proxy keeps the agent-normalized path
+while real APIs get the native path.
 
 Pattern — the parallelism lives in the AGENT, not the script:
 

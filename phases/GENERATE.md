@@ -160,16 +160,32 @@ python3 ~/.claude/skills/prd-taskmaster/script.py validate-tasks --require-phase
 
 Every task MUST be expanded into subtasks before execution begins. Subtasks are verifiable checkpoints — without them, tasks are black boxes that either pass or fail with no intermediate proof.
 
-**For each task:**
-**MCP**: `expand_task` with id=<task_id>
-**CLI**: `task-master expand --id=<task_id>`
+**Pick the expansion path by this tree (token-economy aware):**
 
-If research provider is available, add `--research` flag for richer expansion.
-If no research provider, expand WITHOUT research — structural decomposition alone is valuable.
+```
+Manual flag                      → subtasks written by hand, validate-tasks passed (skip expansion)
+pending tasks ≤ 3                → SERIAL NATIVE in the main dir:
+                                     task-master analyze-complexity --research   (once)
+                                     task-master expand --id=<id> --research     (per task)
+task-master ≥ 0.43 AND research
+  role is a REAL structured API  → NATIVE-PARALLEL (DEFAULT):
+                                     python3 script.py tm-parallel
+                                   (serial analyze-complexity → N isolated workdirs, each running
+                                    native expand --research on an economy-tier model → ONE atomic
+                                    harvest merge. Failed packets fall back to agent-parallel.)
+free local proxy / no API key /
+  TM errors / TM < 0.43          → AGENT-PARALLEL (fallback):
+                                     parallel-plan → N research subagents → parallel-apply
+```
+
+This keeps TaskMaster's model-agnostic AI (any configured API does the expansion/research) while
+parallelizing it externally. Never run multiple `expand --id` concurrently in ONE directory — the
+10s lock-stale window vs 30–120s AI calls is a real race; isolation dirs (tm-parallel) exist for
+exactly this.
+
+If no research provider at all, expand WITHOUT research — structural decomposition alone is valuable.
 
 **DO NOT skip this step.** A task with 0 subtasks cannot be verified incrementally. The execution loop (Mode C/D) relies on subtasks as checkpoints.
-
-Skip CLI/MCP expansion only in Manual Flag Path, where subtasks were written by hand and `validate-tasks` passed.
 
 After expansion, verify:
 ```bash
