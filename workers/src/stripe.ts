@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { EmailDeliveryError, sendLicenseEmail, type LicenseEmailPlan } from "./email";
 import { signLicensePayload, type LicensePayload } from "./license-signer";
 import type { Env } from "./types";
 
@@ -11,6 +12,10 @@ interface StripeSubscriptionLike {
 
 interface StripeInvoiceLike {
   subscription?: unknown;
+  customer_email?: unknown;
+  customer_details?: {
+    email?: unknown;
+  };
   period_end?: unknown;
   lines?: {
     data?: Array<{
@@ -30,6 +35,33 @@ function stripeClient(env: Env): Stripe {
     httpClient: Stripe.createFetchHttpClient(),
     maxNetworkRetries: 1
   });
+}
+
+function queueLicenseEmail(
+  ctx: ExecutionContext,
+  env: Env,
+  message: { toEmail: string; key: string; plan: LicenseEmailPlan; lid: string }
+): void {
+  ctx.waitUntil(
+    sendLicenseEmail(message.toEmail, message.key, message.plan, env.RESEND_API_KEY, {
+      idempotencyKey: `license-${message.lid}`
+    }).catch((error: unknown) => {
+      if (error instanceof EmailDeliveryError) {
+        console.error("resend.license_email.failed", {
+          lid: message.lid,
+          attempts: error.attempts,
+          transient: error.transient,
+          status: error.status,
+          message: error.message
+        });
+        return;
+      }
+      console.error("resend.license_email.failed", {
+        lid: message.lid,
+        message: "Unexpected email delivery failure"
+      });
+    })
+  );
 }
 
 async function verifyStripeEvent(request: Request, env: Env): Promise<Stripe.Event | null> {
@@ -96,7 +128,8 @@ async function subscriptionPeriodEnd(
 
 async function handleCheckoutSessionCompleted(
   event: Stripe.Event,
-  env: Env
+  env: Env,
+  ctx: ExecutionContext
 ): Promise<Response> {
   const session = event.data.object as Stripe.Checkout.Session;
   const email = session.customer_details?.email;
@@ -131,7 +164,19 @@ async function handleCheckoutSessionCompleted(
     .run();
 
   const key = await signLicensePayload(payload, env.ED25519_PRIVATE_KEY);
+  queueLicenseEmail(ctx, env, { toEmail: email, key, plan, lid });
   return json({ ok: true, key, lid });
+}
+
+function invoiceEmail(invoice: Stripe.Invoice): string | null {
+  const invoiceLike = invoice as unknown as StripeInvoiceLike;
+  if (typeof invoiceLike.customer_email === "string") {
+    return invoiceLike.customer_email;
+  }
+  if (typeof invoiceLike.customer_details?.email === "string") {
+    return invoiceLike.customer_details.email;
+  }
+  return null;
 }
 
 function invoicePeriodEnd(invoice: Stripe.Invoice): number | null {
@@ -143,10 +188,15 @@ function invoicePeriodEnd(invoice: Stripe.Invoice): number | null {
   return Number.isInteger(linePeriodEnd) ? linePeriodEnd as number : null;
 }
 
-async function handleInvoicePaid(event: Stripe.Event, env: Env): Promise<Response> {
+async function handleInvoicePaid(
+  event: Stripe.Event,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<Response> {
   const invoice = event.data.object as Stripe.Invoice;
   const subscriptionId = objectId((invoice as unknown as StripeInvoiceLike).subscription);
   const periodEnd = invoicePeriodEnd(invoice);
+  const email = invoiceEmail(invoice);
 
   if (!subscriptionId || periodEnd === null) {
     return json({ ok: false }, 400);
@@ -182,6 +232,11 @@ async function handleInvoicePaid(event: Stripe.Event, env: Env): Promise<Respons
     },
     env.ED25519_PRIVATE_KEY
   );
+  if (email) {
+    queueLicenseEmail(ctx, env, { toEmail: email, key, plan: license.plan, lid: license.lid });
+  } else {
+    console.log("stripe.invoice_paid.email_missing", { lid: license.lid, subscriptionId });
+  }
 
   return json({ ok: true, key, lid: license.lid });
 }
@@ -214,12 +269,16 @@ async function handleSubscriptionDeleted(event: Stripe.Event, env: Env): Promise
   return json({ ok: true, cancelled: true, lid: license.lid });
 }
 
-async function dispatchStripeEvent(event: Stripe.Event, env: Env): Promise<Response> {
+async function dispatchStripeEvent(
+  event: Stripe.Event,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<Response> {
   switch (event.type) {
     case "checkout.session.completed":
-      return handleCheckoutSessionCompleted(event, env);
+      return handleCheckoutSessionCompleted(event, env, ctx);
     case "invoice.paid":
-      return handleInvoicePaid(event, env);
+      return handleInvoicePaid(event, env, ctx);
     case "customer.subscription.deleted":
       return handleSubscriptionDeleted(event, env);
     default:
@@ -240,7 +299,7 @@ async function markEventProcessed(env: Env, eventId: string): Promise<boolean> {
 export async function handleStripeWebhook(
   request: Request,
   env: Env,
-  _ctx: ExecutionContext
+  ctx: ExecutionContext
 ): Promise<Response> {
   const event = await verifyStripeEvent(request, env);
   if (!event) {
@@ -251,5 +310,5 @@ export async function handleStripeWebhook(
     return json({ ok: true, duplicate: true });
   }
 
-  return dispatchStripeEvent(event, env);
+  return dispatchStripeEvent(event, env, ctx);
 }

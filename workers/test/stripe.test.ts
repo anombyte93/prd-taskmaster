@@ -1,7 +1,7 @@
-import { createExecutionContext } from "cloudflare:test";
+import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:test";
 import Stripe from "stripe";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import {
   decodeAndVerifyAtlasKey,
@@ -9,6 +9,15 @@ import {
   signedStripeRequest,
   TEST_STRIPE_WEBHOOK_SECRET
 } from "./helpers";
+
+beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ id: "email_test" })));
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("Stripe webhook signature verification", () => {
   it.each([
@@ -161,6 +170,52 @@ describe("checkout.session.completed", () => {
       v: 1
     });
     expect(typeof decoded.payload.iat).toBe("number");
+  });
+
+  it("persists the license and returns 200 when queued email delivery fails", async () => {
+    const fetchMock = vi.fn(async () => new Response("unauthorized", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const ctx = createExecutionContext();
+    const request = await signedStripeRequest({
+      id: "evt_checkout_email_failure",
+      object: "event",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_email_failure",
+          object: "checkout.session",
+          customer: "cus_email_failure",
+          customer_details: { email: "Failure@Example.COM" },
+          metadata: { plan: "pro-monthly" },
+          subscription: {
+            id: "sub_email_failure",
+            object: "subscription",
+            current_period_end: 1_800_000_000
+          }
+        }
+      }
+    });
+
+    const response = await worker.fetch(request, makeTestEnv(), ctx);
+    const body = (await response.json()) as { ok: boolean; key: string; lid: string };
+    const row = await env.LICENSE_DB.prepare(
+      "SELECT lid FROM licenses WHERE stripe_subscription_id = ?"
+    )
+      .bind("sub_email_failure")
+      .first<{ lid: string }>();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(row?.lid).toBe(body.lid);
+
+    await waitOnExecutionContext(ctx);
+
+    const logged = JSON.stringify(errorSpy.mock.calls);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(logged).toContain(body.lid);
+    expect(logged).not.toContain("Failure@Example.COM");
+    expect(logged).not.toContain(body.key);
   });
 });
 

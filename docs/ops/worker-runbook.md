@@ -83,6 +83,48 @@ replay was skipped and recorded as blocked in `FLEET-LOG-BACKEND.md`. The local
 Vitest suite verifies signed payloads, forged signatures, idempotency, license
 issuance, invoice renewal, and cancellation against local D1.
 
+## Resend License Email Delivery
+
+The Worker sends license emails directly with `fetch` to Resend's Email API:
+`POST https://api.resend.com/emails`. The payload includes the full license key,
+CLI activation command, Claude Code `/license-activate` command, activation docs,
+and `support@atlas-ai.au`.
+
+Production setup:
+
+```sh
+cd workers
+npx wrangler secret put RESEND_API_KEY
+```
+
+Resend must have the `atlas-ai.au` sending domain verified before production
+traffic uses `Atlas AI <licenses@atlas-ai.au>`. Keep the API key scoped to email
+sending for that domain.
+
+Manual resend procedure:
+
+1. Look up the license row by `lid` in D1.
+2. Reconstruct or refresh a signed key through the Stripe webhook replay or the
+   `/license/refresh` endpoint.
+3. Send to the customer address from Stripe, not from D1, because D1 stores only
+   `sub_hash` and never the raw customer email.
+4. Confirm Resend delivery in the dashboard and record the `lid`, Resend message
+   id, and operator initials in the incident notes. Do not log raw license keys.
+
+Safe test-mode delivery, when a real `RESEND_API_KEY` exists locally:
+
+```sh
+cd workers
+# Trigger a checkout webhook through Stripe CLI with the customer email set to delivered@resend.dev.
+npm run dev -- --port 8787
+```
+
+Then confirm the Resend dashboard shows delivery comfortably inside the
+2-minute acceptance window. This environment has no `RESEND_API_KEY`, so the live
+Resend test-mode send was skipped and recorded as blocked in
+`FLEET-LOG-BACKEND.md`. The Vitest suite mocks Resend success, 5xx retries,
+retry exhaustion, 4xx fail-fast behavior, and webhook failure isolation.
+
 ## D1
 
 The Worker binds D1 as `LICENSE_DB`. Local migrations are safe to run with:

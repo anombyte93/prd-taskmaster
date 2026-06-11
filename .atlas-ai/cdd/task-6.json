@@ -1,0 +1,18 @@
+{
+  "task": 6,
+  "given": "A Stripe checkout or renewal webhook produces a signed Atlas Pro license key",
+  "when": "the Worker schedules license email delivery through Resend",
+  "then": [
+    "sendLicenseEmail posts the expected Resend payload with the full key and activation instructions",
+    "transient Resend failures retry with exponential backoff and typed failure after exhaustion",
+    "4xx Resend responses fail fast without retry",
+    "webhook handlers use ctx.waitUntil so email failure does not roll back D1 license persistence",
+    "email failure logs include the license id but not the raw email"
+  ],
+  "evidence_required": [
+    "workers/test/email.test.ts red/green output",
+    "webhook failure-isolation vitest output",
+    "Worker typecheck output",
+    "blocked Resend test-mode integration logged because RESEND_API_KEY is absent"
+  ]
+}
