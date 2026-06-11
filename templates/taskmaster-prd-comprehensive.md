@@ -641,11 +641,19 @@ CREATE INDEX idx_users_2fa_enabled ON users(two_factor_enabled);
   - Complexity: Small (3h)
   - Dependencies: None
   - Owner: Backend team
+  - Acceptance Criteria:
+    - [ ] Migration runs without errors on clean database
+    - [ ] All required columns and indexes present
+    - [ ] Rollback migration verified
 
 - [x] Task 1.2: Implement 2FA secret generation (REQ-002)
   - Complexity: Small (2h)
   - Dependencies: Task 1.1
   - Owner: Backend team
+  - Acceptance Criteria:
+    - [ ] Generates cryptographically secure TOTP secrets
+    - [ ] Unit tests cover generation and storage
+    - [ ] Secrets never logged or exposed in errors
 
 - [x] Task 1.3: Implement TOTP validation logic (REQ-003)
   - Complexity: Medium (5h)
@@ -975,6 +983,53 @@ Explicitly NOT included in this release:
 8. Deployment (25-26)
 
 **Critical path duration:** ~55 hours (~2 weeks with full-time dev)
+
+---
+
+---
+
+## Appendix: Phase-Aware Task Metadata (phaseConfig)
+
+After TaskMaster parses this PRD into tasks, run:
+
+```bash
+python3 ~/.claude/skills/prd-taskmaster/script.py enrich-tasks
+```
+
+This adds `phaseConfig` to each task in `.taskmaster/tasks/tasks.json`:
+
+```json
+{
+  "phaseConfig": {
+    "complexity": "SIMPLE | MEDIUM | COMPLEX | RESEARCH | VALIDATION",
+    "requiresCDD": true,
+    "requiresResearch": false,
+    "lifecycle": ["planning", "implementation", "testing", "review"],
+    "cddCardId": null,
+    "acceptanceCriteria": [
+      "Implementation matches requirements described in task",
+      "All automated tests pass with no regressions",
+      "Code reviewed before merge"
+    ]
+  }
+}
+```
+
+### Complexity Guidelines for This PRD
+
+When writing task descriptions, use these signals to influence auto-classification:
+
+| Complexity | Use When | Examples |
+|------------|----------|---------|
+| `SIMPLE` | Single file change, no deps, < 3h | "Add button to UI", "Update config value" |
+| `MEDIUM` | 2+ subtasks or 30+ word description | "Build API endpoint with tests" |
+| `COMPLEX` | Architecture, security, auth, migrations | "Design database schema", "Implement OAuth" |
+| `RESEARCH` | Research/investigate/evaluate keywords | "Research SMS providers", "Evaluate caching strategies" |
+| `VALIDATION` | USER-TEST checkpoints | Automatically detected |
+
+### CDD Gate
+
+Tasks with `requiresCDD: true` (MEDIUM, COMPLEX, RESEARCH) must have a CDD card defined before implementation begins. The `/phase-executor` skill enforces this gate automatically.
 
 ---
 
