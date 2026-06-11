@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Parallel research + complexity extension for prd-taskmaster-v2.
+"""Parallel research + complexity extension for prd-taskmaster.
 
 TaskMaster's own `expand --all --research` and `analyze-complexity --research`
 run SEQUENTIALLY and write tasks.json after every call, so they cannot be
@@ -160,7 +160,7 @@ def cmd_apply(args):
             "thresholdScore": args.threshold,
             "projectName": Path.cwd().name,
             "usedResearch": True,
-            "generatedBy": "prd-taskmaster-v2/parallel.py (agent-parallel research)",
+            "generatedBy": "prd-taskmaster/parallel.py (agent-parallel research)",
             "tag": tag,
         },
         "complexityAnalysis": complexity,

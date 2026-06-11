@@ -449,7 +449,7 @@ def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, requi
         "tasks_path": str(tasks_path),
         "task_count": len(tasks),
         "subtask_count": sum(len(t.get("subtasks", []) or []) for t in tasks if isinstance(t, dict)),
-        "message": "Task file is valid for manual prd-taskmaster-v2 mode",
+        "message": "Task file is valid for manual prd-taskmaster mode",
     }
 
 
