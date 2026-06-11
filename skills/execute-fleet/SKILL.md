@@ -97,12 +97,13 @@ Before reporting any terminal status, write this CDD card in your worktree: .atl
 
 WORKER_CONTRACT_TERMINAL_STATUS
 End with exactly one terminal status: DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED.
+Report it via mcp__atlas-launcher__inbox_send(target_session=<REPORT_TO_SESSION>, message_type="task_handoff", payload=<JSON string with at least {"task_id": <id>, "status": "<terminal status>", "branch": "<worktree branch>", "cdd_card": ".atlas-ai/cdd/task-<id>.json"}>, sender_session=<your session name>). The launcher message_type allowlist is task_handoff | notification | data | request | heartbeat — terminal reports use task_handoff; the status lives INSIDE the payload JSON.
 
 WORKER_CONTRACT_HARD_RULES
 Hard rules: never edit .taskmaster/tasks/tasks.json or .atlas-ai/state/pipeline.json; never git push; commit only in your own worktree branch.
 
 WORKER_CONTRACT_QUESTIONS_INBOX
-Ask questions before building if context is missing: use mcp__atlas-launcher__inbox_send(report_to=<REPORT_TO_SESSION>, message_type="question", body=<question>).
+Ask questions before building if context is missing: use mcp__atlas-launcher__inbox_send(target_session=<REPORT_TO_SESSION>, message_type="request", payload=<your question as a string>, sender_session=<your session name>). ("question"/"completion"/"blocker" are template intents, not runtime message types — see docs/INTEGRATION-prd-taskmaster.md in the atlas-launcher repo, contract v1.)
 ```
 
 ## Failure Paths
