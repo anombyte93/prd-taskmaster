@@ -9,12 +9,14 @@ import json
 from pathlib import Path
 
 import pytest
+from prd_taskmaster import license
 
 pytest.importorskip("mcp")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "mcp-server"))
+VECTORS = json.loads((REPO_ROOT / "tests" / "license" / "test_vectors.json").read_text())
 
 
 def test_load_template_comprehensive():
@@ -71,8 +73,40 @@ def test_compute_fleet_waves_tool(tmp_path, monkeypatch):
     }
 
 
-def test_server_registers_19_tools():
-    """Verify server.py declares all 19 expected tool functions at module scope."""
+def test_license_activate_tool_returns_status_and_tier(tmp_path, monkeypatch):
+    import server as S
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(license, "PUBLIC_KEY", bytes.fromhex(VECTORS["public_key_hex"]))
+    monkeypatch.setattr(
+        S.C,
+        "detect_atlas_launcher",
+        lambda: {"installed": False, "mcp_registered": True},
+    )
+    vector = VECTORS["vectors"][0]
+    now = vector["payload"]["exp"] - (7 * 24 * 60 * 60)
+    monkeypatch.setattr(license._time, "time", lambda: now)
+
+    result = S.license_activate(vector["key"])
+
+    assert result["ok"] is True
+    assert result["status"] == "grace"
+    assert result["days_remaining"] == 7
+    assert result["tier"] == "premium"
+
+
+def test_detect_capabilities_tool_exposes_license_status(tmp_path, monkeypatch):
+    import server as S
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    result = S.detect_capabilities()
+
+    assert "license_status" in result
+    assert result["license_status"]["status"] in {"active", "grace", "expired", "invalid"}
+
+
+def test_server_registers_21_tools():
+    """Verify server.py declares all 21 expected tool functions at module scope."""
     import server as S
     expected = {
         "preflight", "current_phase", "advance_phase", "check_gate",
@@ -82,8 +116,9 @@ def test_server_registers_19_tools():
         "debrief", "log_progress", "read_state", "gen_scripts",
         "compute_fleet_waves",
         "engine_preflight",
+        "license_activate",
     }
-    assert len(expected) == 20
+    assert len(expected) == 21
     public_attrs = {name for name in dir(S) if not name.startswith("_")}
     missing = expected - public_attrs
     assert not missing, f"missing tools: {sorted(missing)}"

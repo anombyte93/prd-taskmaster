@@ -134,6 +134,11 @@ Recommended: Plan + Ralph Loop
 
 ### Mode D: Atlas Fleet (selectable on tier=premium; 🔒 locked teaser on free)
 
+Use `detect_capabilities.license_status` with `tier` when rendering this mode.
+`tier=premium` means atlas-launcher is registered and the saved license is
+`active` or `grace`. Launcher present with no license, an invalid license, or
+an expired license stays `tier=free` and renders the locked Atlas Pro teaser.
+
 ```
 🔒 Atlas Fleet                                          Atlas Pro · $29/mo
   Parallel multi-session execution across Claude, Codex, and Gemini:
@@ -146,17 +151,28 @@ Recommended: Plan + Ralph Loop
   Unlock: https://atlas-ai.au/pro   (the free modes above stay free forever)
 ```
 
-**When `tier == "premium"`** (licensed `atlas-launcher` detected): Mode D is a
-real, selectable mode — dispatching it invokes `/prd-taskmaster:execute-fleet`
-(the wave orchestrator skill). Show the unlocked card:
+**When `tier == "premium"` and `license_status.status == "active"`**: Mode D is
+a real, selectable mode — dispatching it invokes
+`/prd-taskmaster:execute-fleet` (the wave orchestrator skill). Show the
+unlocked card:
 
 ```
 ▸ Atlas Fleet                     ★ Pro · license active
   <N> waves · est. from your dependency graph · walk-away
 ```
 
+**When `tier == "premium"` and `license_status.status == "grace"`**: Mode D is
+selectable, but surface the countdown from `license_status.days_remaining`:
+
+```
+▸ Atlas Fleet                     ★ Pro · license grace
+  <N> waves · <days> days remaining · renew at https://atlas-ai.au/pro
+```
+
 **When `tier == "free"`**: Mode D is a locked teaser — not selectable, never
-executed. If the user selects it while locked, respond with:
+executed. If atlas-launcher is present with no license, an expired license, or
+an invalid license, keep the price and unlock URL inline. If the user selects it
+while locked, respond with:
 
 > "Atlas Fleet is part of Atlas Pro ($29/mo). On this project it would split
 > your tasks into parallel waves across isolated worktrees with checker-gated
@@ -248,7 +264,7 @@ Capabilities:
   [check|circle] Playwright (browser verification)
   [check|circle] Research provider
   [check|circle] Ralph-loop plugin
-  [check|circle] Atlas Fleet (premium: selectable · free: locked)
+  [check|circle] Atlas Fleet (premium: selectable · free/no license/expired license: locked)
 ```
 
 ## Step 5: Mandatory AskUserQuestion for mode selection
@@ -270,7 +286,8 @@ natural-language affirmatives, no ambiguity.
    - Recommended mode (A/B/C) + one-line reason
    - Alternative modes available (E–J when detected, collapsed under "Use
      another tool…")
-   - Mode D 🔒 Atlas Fleet teaser with the Atlas Pro price and /pro URL
+   - Mode D 🔒 Atlas Fleet teaser with real `license_status`, the Atlas Pro
+     $29/mo price, and atlas-ai.au/pro URL when locked
    - A "next step" description scoped to the recommended mode (e.g. for Mode
      B: "run `task-master next`" with the first ready task ID)
 

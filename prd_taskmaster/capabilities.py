@@ -9,6 +9,7 @@ from prd_taskmaster.lib import (
     fail,
     _detect_taskmaster_method,
 )
+from prd_taskmaster import license
 from prd_taskmaster.mode_recommend import ATLAS_FLEET_REASON, detect_atlas_launcher
 
 
@@ -35,12 +36,17 @@ def run_detect_capabilities() -> dict:
     capabilities["taskmaster-cli"] = tm["method"] in ("mcp", "cli")
 
     atlas_launcher = detect_atlas_launcher()
+    license_status = license.get_status()
+    has_atlas_launcher_premium = (
+        atlas_launcher["mcp_registered"]
+        and license_status["status"] in {"active", "grace"}
+    )
 
     # Determine recommended mode — same decision logic as the handoff skill:
     # atlas-launcher MCP -> Atlas Fleet (D); superpowers + loop runner ->
     # Verified Loop (C); superpowers only -> Plan & Drive (A);
     # taskmaster only -> Auto-Execute (B); fallback -> A.
-    if atlas_launcher["mcp_registered"]:
+    if has_atlas_launcher_premium:
         recommended = "D"
         reason = ATLAS_FLEET_REASON
     elif capabilities["superpowers"] and capabilities["ralph-loop"]:
@@ -56,11 +62,12 @@ def run_detect_capabilities() -> dict:
         recommended = "A"
         reason = "Plan & Drive — universal fallback, no execution tooling detected"
 
-    tier = "premium" if atlas_launcher["mcp_registered"] else "free"
+    tier = "premium" if has_atlas_launcher_premium else "free"
 
     return {
         "ok": True,
         "tier": tier,
+        "license_status": license_status,
         "capabilities": capabilities,
         "recommended_mode": recommended,
         "recommended_reason": reason,

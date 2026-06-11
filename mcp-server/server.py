@@ -28,6 +28,7 @@ from prd_taskmaster import templates as TPL
 from prd_taskmaster import lib as LIB
 from prd_taskmaster import fleet as F
 from prd_taskmaster import batch as B
+from prd_taskmaster import license_activate as LA
 
 mcp = FastMCP("prd-taskmaster")
 
@@ -76,6 +77,18 @@ def detect_taskmaster() -> dict:
 def detect_capabilities() -> dict:
     """Scan for plugins, skills, and external AI tools; recommend a mode."""
     return C.detect_capabilities()
+
+
+@mcp.tool()
+def license_activate(key: str) -> dict:
+    """Activate an Atlas Pro license key and return status plus resulting tier."""
+    result = LA._activation_result(key)
+    capabilities = C.detect_capabilities()
+    return {
+        **result,
+        "tier": capabilities.get("tier", "free"),
+        "license_status": capabilities.get("license_status"),
+    }
 
 
 @mcp.tool()

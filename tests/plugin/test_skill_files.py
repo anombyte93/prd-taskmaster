@@ -171,6 +171,18 @@ def test_handoff_skill_ports_mode_selection_and_teaser():
     assert "sys.exit" not in content
 
 
+def test_handoff_skill_teaser_reflects_license_status():
+    content = (REPO_ROOT / "skills/handoff/SKILL.md").read_text()
+    assert "license_status" in content
+    assert "no license" in content.lower()
+    assert "expired license" in content.lower()
+    assert "$29/mo" in content
+    assert "atlas-ai.au/pro" in content
+    assert "★ Pro · license active" in content
+    assert "★ Pro · license grace" in content
+    assert "days remaining" in content
+
+
 def test_execute_task_skill_uses_standard_taskmaster_root():
     content = (REPO_ROOT / "skills/execute-task/SKILL.md").read_text()
     assert ".taskmaster/tasks/tasks.json" in content

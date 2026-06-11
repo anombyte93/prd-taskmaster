@@ -8,6 +8,8 @@ import json
 
 import pytest
 
+from prd_taskmaster import capabilities as cli_capabilities
+from prd_taskmaster import mode_recommend
 from prd_taskmaster.mode_recommend import detect_taskmaster, detect_capabilities, validate_setup
 
 
@@ -119,8 +121,8 @@ class TestDetectCapabilities:
         assert result["tier"] == "free"
         assert result["has_atlas_premium"] is False
 
-    def test_detect_capabilities_premium_tier_with_atlas_skills(self, monkeypatch, tmp_path):
-        """Reports premium tier when both atlas-loop and atlas-cdd skills exist."""
+    def test_detect_capabilities_atlas_skills_without_launcher_license_stay_free(self, monkeypatch, tmp_path):
+        """Atlas skill markers alone do not unlock licensed Atlas Fleet."""
         skills_dir = tmp_path / ".claude" / "skills"
         for skill in ("atlas-loop", "atlas-cdd"):
             skill_dir = skills_dir / skill
@@ -134,8 +136,8 @@ class TestDetectCapabilities:
         result = detect_capabilities()
 
         assert result["ok"] is True
-        assert result["tier"] == "premium"
-        assert result["has_atlas_premium"] is True
+        assert result["tier"] == "free"
+        assert result["has_atlas_premium"] is False
 
     def test_detect_capabilities_returns_recommended_mode(self, monkeypatch, tmp_path):
         """recommended_mode and recommended_reason are always present."""
@@ -147,6 +149,131 @@ class TestDetectCapabilities:
         assert "recommended_mode" in result
         assert "recommended_reason" in result
         assert result["recommended_mode"] in ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J")
+
+    def test_run_detect_capabilities_premium_requires_launcher_and_active_license(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("PATH", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            cli_capabilities,
+            "detect_atlas_launcher",
+            lambda: {"installed": False, "mcp_registered": True},
+        )
+        monkeypatch.setattr(
+            cli_capabilities.license,
+            "get_status",
+            lambda: {"status": "active", "days_remaining": None, "detail": "license active"},
+        )
+
+        result = cli_capabilities.run_detect_capabilities()
+
+        assert result["tier"] == "premium"
+        assert result["recommended_mode"] == "D"
+        assert result["license_status"]["status"] == "active"
+
+    def test_run_detect_capabilities_launcher_without_license_stays_free(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("PATH", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            cli_capabilities,
+            "detect_atlas_launcher",
+            lambda: {"installed": False, "mcp_registered": True},
+        )
+        monkeypatch.setattr(
+            cli_capabilities.license,
+            "get_status",
+            lambda: {"status": "invalid", "days_remaining": None, "detail": "no license saved"},
+        )
+
+        result = cli_capabilities.run_detect_capabilities()
+
+        assert result["tier"] == "free"
+        assert result["recommended_mode"] != "D"
+        assert result["license_status"]["status"] == "invalid"
+
+    def test_run_detect_capabilities_license_without_launcher_stays_free(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("PATH", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            cli_capabilities,
+            "detect_atlas_launcher",
+            lambda: {"installed": False, "mcp_registered": False},
+        )
+        monkeypatch.setattr(
+            cli_capabilities.license,
+            "get_status",
+            lambda: {"status": "grace", "days_remaining": 3, "detail": "license in grace"},
+        )
+
+        result = cli_capabilities.run_detect_capabilities()
+
+        assert result["tier"] == "free"
+        assert result["recommended_mode"] != "D"
+        assert result["license_status"]["status"] == "grace"
+
+    def test_mode_recommend_launcher_without_license_does_not_recommend_fleet(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("PATH", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            mode_recommend,
+            "detect_atlas_launcher",
+            lambda: {"installed": False, "mcp_registered": True},
+        )
+        monkeypatch.setattr(
+            mode_recommend.license,
+            "get_status",
+            lambda: {"status": "expired", "days_remaining": 0, "detail": "license expired"},
+        )
+
+        result = mode_recommend.detect_capabilities()
+
+        assert result["tier"] == "free"
+        assert result["recommended_mode"] != "D"
+        assert result["license_status"]["status"] == "expired"
+
+    def test_mode_recommend_launcher_with_grace_license_recommends_fleet(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("PATH", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            mode_recommend,
+            "detect_atlas_launcher",
+            lambda: {"installed": False, "mcp_registered": True},
+        )
+        monkeypatch.setattr(
+            mode_recommend.license,
+            "get_status",
+            lambda: {"status": "grace", "days_remaining": 5, "detail": "license in grace"},
+        )
+
+        result = mode_recommend.detect_capabilities()
+
+        assert result["tier"] == "premium"
+        assert result["recommended_mode"] == "D"
+        assert result["license_status"]["status"] == "grace"
 
 
 # ─── validate_setup ───────────────────────────────────────────────────────────
