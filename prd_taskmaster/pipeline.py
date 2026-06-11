@@ -30,6 +30,15 @@ LEGAL_TRANSITIONS = {
 }
 
 
+def _send_telemetry(event: str) -> None:
+    try:
+        from prd_taskmaster import telemetry
+
+        telemetry.send_event(event)
+    except Exception:
+        pass
+
+
 def _load_state() -> dict:
     if not PIPELINE_FILE.exists():
         return {"current_phase": None, "phases_completed": [], "phase_evidence": {}, "version": "5.0.0"}
@@ -81,6 +90,9 @@ def advance_phase(expected_current: Optional[str], target: str, evidence: dict) 
             f"illegal transition: {e.source} -> {e.target}",
             legal=LEGAL_TRANSITIONS.get(e.source, []),
         )
+
+    if target == "EXECUTE":
+        _send_telemetry("reach_execute")
 
     return {"ok": True, "new_phase": target, "previous": expected_current}
 
@@ -180,6 +192,8 @@ def preflight(cwd: Optional[str] = None) -> dict:
     if cwd:
         import os
         os.chdir(cwd)
+
+    _send_telemetry("atlas_invoked")
 
     state = _load_state()
     cp = state.get("current_phase")

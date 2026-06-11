@@ -6,3 +6,6 @@ PASS: Repo-local checkout contract documented in README without hardcoding live 
 
 ## BLOCKED
 Task 9 external: Stripe test-mode product/price creation, atlas-ai.au/pro Buy button wiring, /pro/success page deployment, hosted checkout E2E, webhook/email proof, and live-mode promotion are blocked because this worktree has no atlas-ai.au site repo, Stripe dashboard/API credentials, Resend credentials, or live Worker deployment. Skipped rather than fabricated.
+
+## Task 11
+PASS: Client telemetry module implemented with stable anonymous install IDs, exact four-field payloads, env/config opt-outs, daemon-thread fire-and-forget sending, and guarded pipeline/ship-check hooks. Verification: `python3 -m pytest tests/test_telemetry.py -q` exit 0 (`12 passed in 0.22s`); `python3 -m pytest tests/core/test_pipeline_state.py tests/core/test_ship_check.py tests/test_telemetry.py -q` exit 0 (`29 passed in 0.69s`); `python3 -m pytest tests/ -x -q` exit 0 (`226 passed in 61.85s`).
