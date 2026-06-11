@@ -125,6 +125,50 @@ Resend test-mode send was skipped and recorded as blocked in
 `FLEET-LOG-BACKEND.md`. The Vitest suite mocks Resend success, 5xx retries,
 retry exhaustion, 4xx fail-fast behavior, and webhook failure isolation.
 
+## License Refresh Endpoint
+
+`POST https://api.atlas-ai.au/license/refresh` accepts:
+
+```json
+{"lid":"lic_example"}
+```
+
+Responses:
+
+- `200 {"ok":true,"key":"ATLAS-..."}` when the D1 license exists and Stripe
+  reports the subscription as `active` or `trialing`.
+- `400 {"ok":false}` for invalid JSON or a missing/non-string `lid`.
+- `403 {"ok":false,"reason":"license_not_found"}` for unknown lids.
+- `403 {"ok":false,"reason":"subscription_cancelled"}` for D1-cancelled rows or
+  Stripe subscriptions outside `active`/`trialing`.
+- `429 {"ok":false,"reason":"rate_limited"}` after 10 refresh requests per lid
+  per UTC day.
+
+CORS is intentionally narrow:
+
+- `Access-Control-Allow-Origin: https://atlas-ai.au`
+- `Access-Control-Allow-Methods: POST, OPTIONS`
+- `Access-Control-Allow-Headers: content-type`
+
+Local seeded check:
+
+```sh
+cd workers
+npm run d1:migrate:local
+npx wrangler d1 execute LICENSE_DB --local --command \
+  "INSERT OR REPLACE INTO licenses (lid, sub_hash, plan, stripe_customer_id, stripe_subscription_id, issued_at, expires_at, cancelled_at) VALUES ('lic_local_refresh', 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd', 'pro-monthly', 'cus_local', 'sub_test_from_stripe', unixepoch(), unixepoch() + 3600, NULL)"
+npm run dev -- --port 8787
+curl -i -X POST http://localhost:8787/license/refresh \
+  -H 'content-type: application/json' \
+  --data '{"lid":"lic_local_refresh"}'
+```
+
+The local seeded check requires `STRIPE_API_KEY` to retrieve the test-mode
+subscription. This environment has no Stripe API key, so the seeded live Stripe
+integration was skipped and recorded as blocked in `FLEET-LOG-BACKEND.md`. The
+Vitest suite verifies active, trialing, cancelled, unknown, rate-limited, CORS,
+and method-guard behavior against local D1 with mocked Stripe responses.
+
 ## D1
 
 The Worker binds D1 as `LICENSE_DB`. Local migrations are safe to run with:

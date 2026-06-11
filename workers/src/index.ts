@@ -1,9 +1,9 @@
 import type { Env } from "./types";
+import { handleLicenseRefresh } from "./refresh";
 import { handleStripeWebhook } from "./stripe";
 
 const POST_ONLY_ROUTES = new Set([
   "/stripe/webhook",
-  "/license/refresh",
   "/telemetry"
 ]);
 
@@ -21,6 +21,10 @@ function notImplemented(): Response {
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const { pathname } = new URL(request.url);
+
+    if (pathname === "/license/refresh") {
+      return handleLicenseRefresh(request, env);
+    }
 
     if (POST_ONLY_ROUTES.has(pathname)) {
       if (request.method !== "POST") {

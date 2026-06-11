@@ -1,0 +1,19 @@
+{
+  "task": 7,
+  "given": "A client asks the Worker to silently refresh an Atlas Pro license key by lid",
+  "when": "POST /license/refresh receives invalid JSON, unknown lids, cancelled subscriptions, active subscriptions, CORS preflight, or repeated requests",
+  "then": [
+    "invalid JSON or missing lid returns 400",
+    "unknown licenses return 403 with reason license_not_found",
+    "active or trialing Stripe subscriptions return a fresh signed key with continuity of lid, sub, and plan",
+    "cancelled D1 rows or inactive Stripe subscriptions return 403 with reason subscription_cancelled",
+    "per-lid D1 rate limiting allows 10 requests per UTC day and rejects the 11th with 429",
+    "CORS responses allow https://atlas-ai.au"
+  ],
+  "evidence_required": [
+    "workers/test/refresh.test.ts red/green output",
+    "D1 migration 0002 applied locally",
+    "Worker typecheck and vitest output",
+    "blocked seeded live Stripe integration logged because Stripe credentials are absent"
+  ]
+}
