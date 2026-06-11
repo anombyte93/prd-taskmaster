@@ -1,4 +1,4 @@
-"""Atlas Fleet dependency scheduler.
+"""Atlas Fleet dependency scheduler and routing config.
 
 The scheduler core operates on a plain list of task dicts. The run_* and
 cmd_* wrappers resolve TaskMaster tags for CLI/MCP callers.
@@ -6,9 +6,79 @@ cmd_* wrappers resolve TaskMaster tags for CLI/MCP callers.
 
 import argparse
 import json
+from pathlib import Path
 
 from prd_taskmaster import parallel
 from prd_taskmaster.lib import CommandError, emit, fail
+
+# ─── REQ-010: optional .atlas-ai/fleet.json routing config ───────────────────
+
+FLEET_CONFIG_PATH = Path(".atlas-ai") / "fleet.json"
+
+DEFAULT_ROUTING = {
+    "fast": "claude:haiku",
+    "standard": "claude:sonnet",
+    "capable": "claude:opus",
+}
+
+DEFAULT_FLEET_CONFIG = {
+    "max_concurrency": 3,
+    "routing": DEFAULT_ROUTING,
+    "experimental_backends": False,
+}
+
+
+def load_fleet_config(path=None):
+    """Load .atlas-ai/fleet.json merged over defaults.
+
+    Malformed files and invalid values fall back to defaults silently —
+    a broken optional config must never block a fleet run.
+    """
+    cfg = {
+        "max_concurrency": DEFAULT_FLEET_CONFIG["max_concurrency"],
+        "routing": dict(DEFAULT_ROUTING),
+        "experimental_backends": DEFAULT_FLEET_CONFIG["experimental_backends"],
+    }
+    p = Path(path) if path else FLEET_CONFIG_PATH
+    if not p.is_file():
+        return cfg
+    try:
+        raw = json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError):
+        return cfg
+    if not isinstance(raw, dict):
+        return cfg
+
+    mc = raw.get("max_concurrency")
+    if isinstance(mc, int) and mc >= 1:
+        cfg["max_concurrency"] = mc
+
+    routing = raw.get("routing")
+    if isinstance(routing, dict):
+        for tier, target in routing.items():
+            if isinstance(tier, str) and isinstance(target, str) and ":" in target:
+                cfg["routing"][tier] = target
+
+    if isinstance(raw.get("experimental_backends"), bool):
+        cfg["experimental_backends"] = raw["experimental_backends"]
+
+    return cfg
+
+
+def resolve_backend(tier, config):
+    """Resolve a complexity tier to a backend:model string.
+
+    With experimental_backends false, every tier is forced to Claude
+    (only Claude has the full session_spawn prompt-injection path).
+    Unknown tiers resolve to the standard tier.
+    """
+    routing = config.get("routing") or {}
+    target = routing.get(tier) or routing.get("standard") or DEFAULT_ROUTING["standard"]
+    if not config.get("experimental_backends", False):
+        if not target.startswith("claude:"):
+            default = DEFAULT_ROUTING.get(tier, DEFAULT_ROUTING["standard"])
+            target = default if default.startswith("claude:") else DEFAULT_ROUTING["standard"]
+    return target
 
 
 def _task_id(task):
