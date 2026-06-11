@@ -36,11 +36,17 @@ Discovery Complete:
   Approach: [proposed solution]
   Key decisions: [list]
   Constraints: [known limitations]
-
-Proceed to generate spec? (or refine further)
 ```
 
-If user says "refine" --- ask what to change, update, re-present.
+Then ask the gate with the **AskUserQuestion tool** — never as a trailing prose question:
+- Option 1: "Approve — generate spec" (proceed to GENERATE)
+- Option 2: "Refine" (ask what to change, update, re-present this gate)
+
+This applies to EVERY decision point in the pipeline: if a message would end with
+"Proceed? / or refine / which option?", it MUST be an AskUserQuestion call instead
+(one screen, one decision).
+
+If user picks refine --- ask what to change, update, re-present.
 If user approves --- capture this as the discovery output and proceed to GENERATE.
 
 ## Smart Defaults
@@ -85,3 +91,13 @@ Pass the scale classification to GENERATE so task count is calibrated, not arbit
 ## Evidence Gate
 
 **Gate: User has approved the discovery output. Constraints extracted and listed. Scale classified. Proceed to GENERATE phase.**
+
+## After approval: go autonomous
+
+The approval at the end of discovery is the LAST interactive gate before handoff.
+Once the user approves the design:
+1. Tell the user: "Building the spec and task graph now — no more questions until
+   handoff. If permission prompts appear, shift+tab switches to auto-accept."
+2. Run GENERATE end-to-end without asking anything further (zero-question rule).
+   Validation failures are fixed silently and re-validated; only a NEEDS_WORK
+   grade that survives two fix attempts comes back to the user.

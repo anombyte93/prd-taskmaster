@@ -1,5 +1,15 @@
 # Phase: Generate & Validate — Spec Creation and Task Parsing
 
+## Tool preference (applies to every step below)
+
+The engine's deterministic operations are available as MCP tools when ANY engine
+server is registered — tool ids look like `mcp__atlas-engine__<name>` (user-scoped
+server) or `mcp__plugin_prd-taskmaster_go__<name>` (plugin install). **Always
+prefer the MCP tool over the script.py equivalent** (same names: load_template,
+validate_prd, calc_tasks, engine_preflight, compute_fleet_waves, ...). The
+script.py commands below are the zero-dependency fallback only.
+
+
 ## The One Rule
 
 **Generate the spec, validate it catches placeholders, parse it into tasks. Quality over speed.**
