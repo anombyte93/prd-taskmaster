@@ -15,11 +15,20 @@ from prd_taskmaster.lib import CommandError, emit, fail
 
 FLEET_CONFIG_PATH = Path(".atlas-ai") / "fleet.json"
 
+# Capability ladder (Hayden 2026-06-11): Fable #1 for the hardest/longest-
+# running work, then codex top tier (experimental backends only), then down
+# the cost-efficiency curve. Defaults stay all-Claude — codex/gemini need
+# experimental_backends=true (handoff-file-only delivery).
 DEFAULT_ROUTING = {
-    "fast": "claude:haiku",
-    "standard": "claude:sonnet",
-    "capable": "claude:opus",
+    "fast": "claude:haiku",        # trivial: scaffolding, docs, renames
+    "standard": "claude:sonnet",   # normal build tasks
+    "capable": "claude:opus",      # complex single tasks
+    "frontier": "claude:fable",    # hardest + longest-running (1M context)
 }
+
+# Documented experimental ladder for fleet.json when experimental_backends=true:
+#   "capable": "codex:gpt-5.5-codex"   (codex top tier slots below Fable)
+#   "standard": "gemini:pro"           (cost-efficient mid tier)
 
 DEFAULT_FLEET_CONFIG = {
     "max_concurrency": 3,
@@ -63,6 +72,56 @@ def load_fleet_config(path=None):
         cfg["experimental_backends"] = raw["experimental_backends"]
 
     return cfg
+
+
+# Complexity -> tier mapping (matches execute-task: 1-4 fast / 5-7 standard /
+# 8-10 capable; enrich-tasks classes map the same way).
+_SCORE_TIERS = ((4, "fast"), (7, "standard"), (8, "capable"), (10, "frontier"))
+_CLASS_TIERS = {
+    "SIMPLE": "fast",
+    "MEDIUM": "standard",
+    "COMPLEX": "capable",
+    "RESEARCH": "frontier",   # long-running, context-heavy
+    "VALIDATION": "standard",
+}
+
+
+def available_backends():
+    """Which agent CLIs are actually installed on this machine."""
+    import shutil
+
+    return {
+        "claude": shutil.which("claude") is not None,
+        "codex": shutil.which("codex") is not None,
+        "gemini": shutil.which("gemini") is not None,
+    }
+
+
+def task_tier(task):
+    """Resolve a task's complexity tier from its score or enrich-tasks class."""
+    score = task.get("complexityScore")
+    if isinstance(score, (int, float)):
+        for ceiling, tier in _SCORE_TIERS:
+            if score <= ceiling:
+                return tier
+        return "frontier"
+    cls = str((task.get("phaseConfig") or {}).get("complexity", "")).upper()
+    return _CLASS_TIERS.get(cls, "standard")
+
+
+def route_task(task, config, backends=None):
+    """Pick the backend:model for ONE task: complexity tier -> routing ->
+    availability check. Routed backend not installed -> claude default for
+    the tier (claude is the only backend with full spawn support anyway)."""
+    if backends is None:
+        backends = available_backends()
+    tier = task_tier(task)
+    target = resolve_backend(tier, config)
+    backend = target.split(":", 1)[0]
+    if not backends.get(backend, False):
+        default = DEFAULT_ROUTING.get(tier, DEFAULT_ROUTING["standard"])
+        target = default if backends.get("claude", True) else target
+    return target
 
 
 def resolve_backend(tier, config):
@@ -185,6 +244,15 @@ def run_fleet_waves(concurrency=3, tag=""):
         ) from exc
 
     waves = compute_waves(tasks, concurrency)
+    # Smart per-task model routing: complexity tier -> fleet.json routing ->
+    # installed-backend check. Dispatchers pass routing[task_id] as model=.
+    cfg = load_fleet_config()
+    backends = available_backends()
+    routing = {
+        str(_task_id(t)): route_task(t, cfg, backends)
+        for t in tasks
+        if _is_pending(t)
+    }
     return {
         "ok": True,
         "tag": resolved_tag,
@@ -193,6 +261,8 @@ def run_fleet_waves(concurrency=3, tag=""):
         "deadlocked": waves["deadlocked"],
         "ready": ready_set(tasks),
         "concurrency": concurrency,
+        "routing": routing,
+        "backends": backends,
     }
 
 

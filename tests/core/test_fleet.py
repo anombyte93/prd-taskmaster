@@ -73,7 +73,7 @@ def test_fleet_waves_cli_uses_current_tag(tmp_path):
 
     assert code == 0, err
     data = json.loads(out)
-    assert data == {
+    expected = {
         "ok": True,
         "tag": "alpha",
         "waves": [[1], [2]],
@@ -82,6 +82,8 @@ def test_fleet_waves_cli_uses_current_tag(tmp_path):
         "ready": [1],
         "concurrency": 3,
     }
+    assert expected.items() <= data.items()
+    assert set(data["routing"]) == {"1", "2"} and "backends" in data
 
 
 def test_fleet_waves_cli_supports_flat_tasks_with_tag(tmp_path):

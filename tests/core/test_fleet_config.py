@@ -12,7 +12,7 @@ def test_defaults_without_config_file(tmp_path, monkeypatch):
     cfg = load_fleet_config()
     assert cfg["max_concurrency"] == 3
     assert cfg["experimental_backends"] is False
-    assert set(cfg["routing"]) == {"fast", "standard", "capable"}
+    assert set(cfg["routing"]) == {"fast", "standard", "capable", "frontier"}
     assert all(v.startswith("claude:") for v in cfg["routing"].values())
 
 

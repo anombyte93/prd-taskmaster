@@ -45,7 +45,12 @@ Repeat until no runnable tasks remain:
    deadlock, render status, mark the blocked set, and stop dispatching those
    tasks.
 2. For each chunk in the current wave, spawn exactly one worker:
-   `mcp__atlas-launcher__session_spawn(isolation="worktree", report_to=<this session>, prompt=<worker prompt>)`.
+   `mcp__atlas-launcher__session_spawn(isolation="worktree", report_to=<this session>, model=<routing[task_id] model part>, prompt=<worker prompt>)`.
+   **Model is NEVER left default**: `compute_fleet_waves` returns a `routing`
+   map (task id -> backend:model) from the capability ladder — Fable for the
+   hardest/longest-running (frontier tier), down the cost-efficiency curve to
+   haiku for trivial tasks. Pass the model part explicitly; non-claude backends
+   require experimental_backends=true and the launcher backend param.
    The prompt must include the full task JSON inline; never tell workers to
    read shared `tasks.json`.
 3. Inspect the spawn result. If `prompt_injected` is false, re-kick once with

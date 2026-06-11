@@ -60,7 +60,7 @@ def test_compute_fleet_waves_tool(tmp_path, monkeypatch):
 
     r = S.compute_fleet_waves(concurrency=2, tag="alpha")
 
-    assert r == {
+    expected = {
         "ok": True,
         "tag": "alpha",
         "waves": [[1, 2], [3]],
@@ -69,6 +69,8 @@ def test_compute_fleet_waves_tool(tmp_path, monkeypatch):
         "ready": [1, 2],
         "concurrency": 2,
     }
+    assert expected.items() <= r.items()
+    assert set(r["routing"]) == {"1", "2", "3"} and "backends" in r
 
 
 def test_server_registers_19_tools():
