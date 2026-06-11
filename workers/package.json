@@ -1,0 +1,24 @@
+{
+  "name": "@atlas-ai/worker-backend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "XDG_CONFIG_HOME=.wrangler/xdg-config WRANGLER_LOG_PATH=.wrangler/logs vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "dev": "XDG_CONFIG_HOME=.wrangler/xdg-config WRANGLER_LOG_PATH=.wrangler/logs wrangler dev",
+    "deploy:dry-run": "XDG_CONFIG_HOME=.wrangler/xdg-config WRANGLER_LOG_PATH=.wrangler/logs wrangler deploy --dry-run --outdir dist",
+    "d1:migrate:local": "XDG_CONFIG_HOME=.wrangler/xdg-config WRANGLER_LOG_PATH=.wrangler/logs wrangler d1 migrations apply LICENSE_DB --local"
+  },
+  "dependencies": {
+    "stripe": "^19.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8.69",
+    "@cloudflare/workers-types": "^4.20260610.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.20.0"
+  }
+}

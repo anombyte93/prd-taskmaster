@@ -1,0 +1,18 @@
+{
+  "task": 4,
+  "given": "A greenfield Worker backend for Atlas Pro billing and telemetry",
+  "when": "the Worker project is scaffolded with D1, route skeletons, local tests, deployment guardrails, and secret hygiene",
+  "then": [
+    "unknown routes return 404",
+    "the LICENSE_DB D1 binding and migrations create license and webhook idempotency tables",
+    "the public route contracts exist for /stripe/webhook, /license/refresh, and /telemetry",
+    "deployment and secret-scanning procedures are documented and locally verifiable without committing secrets"
+  ],
+  "evidence_required": [
+    "npm test Worker vitest output",
+    "wrangler d1 migrations apply LICENSE_DB --local output",
+    "wrangler deploy --dry-run output or credential-aware blocked log",
+    "secret scan output",
+    "FLEET-LOG-BACKEND.md PASS/BLOCKED line"
+  ]
+}

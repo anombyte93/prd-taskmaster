@@ -1,0 +1,3 @@
+STRIPE_WEBHOOK_SECRET=<stripe-cli-or-dashboard-webhook-secret>
+ED25519_PRIVATE_KEY=<32-byte-ed25519-seed-hex>
+RESEND_API_KEY=<resend-api-key>
