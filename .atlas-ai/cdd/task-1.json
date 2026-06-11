@@ -1,0 +1,18 @@
+{
+  "task": 1,
+  "given": "Atlas Pro needs portable license keys signed with Ed25519 and verified without private-key material in the repo",
+  "when": "the Python CLI, TypeScript worker signer, committed vectors, and documentation are exercised",
+  "then": [
+    "license keys use ATLAS-<base64url(payload)>.<base64url(sig)> with canonical JSON payload bytes",
+    "payloads contain lid, sub, plan, iat, exp, and v fields with v equal to 1",
+    "Ed25519 signing and verification pass RFC 8032 vectors",
+    "valid, expired, tampered-payload, and signature-mismatch fixtures produce their expected verdicts",
+    "Python and TypeScript signers produce byte-identical keys for fixture payloads",
+    "private signing material is ignored and repository scanning fails on committed private-key material"
+  ],
+  "evidence_required": [
+    "python3 -m pytest tests/license/ -q",
+    "python3 -m pytest tests/ -q",
+    "git diff --cached --name-only before commit includes forced .atlas-ai/cdd/task-1.json"
+  ]
+}

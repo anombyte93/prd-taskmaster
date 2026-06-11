@@ -60,3 +60,8 @@ CLAUDE.md
 # Task files
 # tasks.json
 # tasks/ 
+
+# License signing key material
+*.key
+*.pem
+license-signing*
