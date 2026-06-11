@@ -93,7 +93,7 @@ worktree: <WORKTREE_PATH>
 branch: <WORKER_BRANCH>
 
 WORKER_CONTRACT_CDD_CARD
-Before reporting any terminal status, write this CDD card in your worktree: .atlas-ai/cdd/task-<id>.json. The card must list the checks you ran and the evidence paths that prove them.
+Before reporting any terminal status, write this CDD card in your worktree: .atlas-ai/cdd/task-<id>.json. The card must list the checks you ran and the evidence paths that prove them. Evidence files under .atlas-ai/evidence/ must contain the FINAL verification run ONLY (one green run, one exit-status line) — intermediate TDD red runs go to .atlas-ai/logs/, never evidence/ (ship-check Gate 5 reads every Exit status line in evidence/ as final-state proof).
 
 WORKER_CONTRACT_TERMINAL_STATUS
 End with exactly one terminal status: DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED.
