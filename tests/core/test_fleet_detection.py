@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from prd_taskmaster import license as license_module
 from prd_taskmaster.capabilities import run_detect_capabilities
 from prd_taskmaster.mode_recommend import detect_atlas_launcher, detect_capabilities
 
@@ -148,6 +149,12 @@ def test_detect_capabilities_flips_both_paths_to_premium_with_launcher_mcp(
     monkeypatch.setenv("HOME", str(home_dir))
     monkeypatch.setenv("PATH", str(bin_dir))
     monkeypatch.chdir(project_dir)
+    # Premium now requires launcher AND an active/grace license (REQ-006).
+    monkeypatch.setattr(
+        license_module,
+        "get_status",
+        lambda *a, **k: {"status": "active", "days_remaining": None, "detail": "license active"},
+    )
 
     for result in (detect_capabilities(), run_detect_capabilities()):
         assert result["tier"] == "premium"
