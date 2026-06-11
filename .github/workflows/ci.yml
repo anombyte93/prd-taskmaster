@@ -1,9 +1,16 @@
-name: tests
+name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, v4-merge]
   pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # Proves the zero-dependency promise: the package + CLI must run with NO pip
@@ -21,7 +28,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Guard — package imports with no third-party deps
         run: |
-          python -S -c "import sys; sys.path.insert(0,'.'); import prd_taskmaster, prd_taskmaster.cli, prd_taskmaster.pipeline, prd_taskmaster.shipcheck; print('stdlib-only import OK', prd_taskmaster.__version__)"
+          python -S -c "import sys; sys.path.insert(0,'.'); import prd_taskmaster, prd_taskmaster.cli, prd_taskmaster.pipeline, prd_taskmaster.shipcheck, prd_taskmaster.backend, prd_taskmaster.llm_client, prd_taskmaster.task_state; print('stdlib-only import OK', prd_taskmaster.__version__)"
       - name: Guard — no third-party imports anywhere in the package
         run: |
           python - <<'PY'
@@ -68,7 +75,53 @@ jobs:
       - name: Full test suite
         run: python -m pytest tests/ -q
 
-  # All five version strings must agree.
+  # The engine must resolve a backend and stay usable with NO TaskMaster binary
+  # and NO API keys — the Native Mode promise (FR-33).
+  no-taskmaster-no-keys:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Backend resolves native; preflight succeeds on bare runner
+        env:
+          ANTHROPIC_API_KEY: ""
+          OPENAI_API_KEY: ""
+          OPENAI_COMPATIBLE_API_KEY: ""
+        run: |
+          python script.py backend-detect | python -m json.tool
+          python script.py engine-preflight --no-configure > /tmp/preflight.json
+          python - <<'PY'
+          import json
+          out = json.load(open("/tmp/preflight.json"))
+          backend = out["backend"]
+          assert out["ok"] is True, "preflight must succeed without TaskMaster"
+          assert backend["selected"] == "native", backend
+          assert backend["ai_ops"] == "agent", backend
+          print("native agent-driven fallback OK:", out["summary"])
+          PY
+
+  # Installer + packaging sanity: install.sh parses, package.json is coherent,
+  # and the npm package never hard-requires task-master-ai.
+  installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install.sh syntax
+        run: bash -n install.sh
+      - name: package.json coherent, TaskMaster not a hard dependency
+        run: |
+          node -e '
+            const p = require("./package.json");
+            if (p.dependencies && p.dependencies["task-master-ai"]) {
+              console.error("task-master-ai must not be a hard dependency");
+              process.exit(1);
+            }
+            console.log("package.json OK:", p.name, p.version);
+          '
+
+  # All version strings must agree.
   version-agreement:
     runs-on: ubuntu-latest
     steps:
@@ -86,13 +139,12 @@ jobs:
           plug = json.loads(pathlib.Path(".claude-plugin/plugin.json").read_text())["version"]
           sh = re.search(r'VERSION="([^"]+)"', pathlib.Path("install.sh").read_text()).group(1)
           chlog = pathlib.Path("CHANGELOG.md").read_text()
-          chlog_has = "v4.0.0" in chlog or "[4.0.0]" in chlog or "4.0.0" in chlog
           versions = {"package/__init__": pkg_v, "package.json": pj, "plugin.json": plug, "install.sh": sh}
-          print(versions, "CHANGELOG mentions 4.0.0:", chlog_has)
           vals = set(versions.values())
           if len(vals) != 1:
               print("VERSION MISMATCH:", versions); sys.exit(1)
-          if not chlog_has:
-              print("CHANGELOG missing the current version entry"); sys.exit(1)
-          print("all versions agree:", vals.pop())
+          v = vals.pop()
+          if v not in chlog:
+              print(f"CHANGELOG missing entry for {v}"); sys.exit(1)
+          print("all versions agree:", v)
           PY
