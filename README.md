@@ -86,6 +86,24 @@ Most AI coding tools tell you a task is done. This one makes "done" provable:
 
 ---
 
+## Built for the token-shortage era
+
+Every job runs on the cheapest model that can do it — and escalates only when a validator says
+it failed. One setting controls how aggressive that is:
+
+```json
+// .atlas-ai/fleet.json
+{ "token_economy": "conservative" }   // or "balanced" (default) / "performance"
+```
+
+Task decomposition and research run through **TaskMaster's own model-agnostic AI** (any API you
+configure — Anthropic, OpenAI, Perplexity, Gemini, openai-compatible…), parallelized across
+isolated workdirs so N expansions run concurrently without write races. Complexity 2 scaffolding
+gets a haiku-class model; the hardest long-running work gets the frontier model; nothing defaults
+to expensive. Local telemetry (`economy-report`) shows your real success-rate and latency per
+model so the routing gets smarter on YOUR workload — priors and sources in
+[`docs/product/MODEL-ECONOMY.md`](docs/product/MODEL-ECONOMY.md).
+
 ## Free vs Atlas Pro
 
 | | Free (MIT) | Atlas Pro — $29/mo |
@@ -96,6 +114,10 @@ Most AI coding tools tell you a task is done. This one makes "done" provable:
 | Verified solo execution — evidence required per task | ✓ | ✓ |
 | Model-agnostic: Claude / Codex / Gemini | ✓ | ✓ |
 | Parallel research fan-out | ✓ | ✓ |
+| **Token economy** — start cheap, escalate only on failure (conservative/balanced/performance) | ✓ | ✓ |
+| Parallel **native TaskMaster** expansion — any configured API, isolated workdirs | ✓ | ✓ |
+| Local cost telemetry + `economy-report` | ✓ | ✓ |
+| Adaptive routing auto-tuning from telemetry | — | ✓ (roadmap) |
 | **Atlas Fleet** — parallel waves of isolated workers, checker-gated merges, one final PR | — | ✓ |
 | Browser-verification MCP (UI proof, not just logs) | — | ✓ |
 | Secrets-vault MCP (keys never in your repo or prompts) | — | ✓ |

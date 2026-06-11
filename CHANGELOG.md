@@ -11,6 +11,13 @@ re-launches it as an **open-core** product: a free MIT engine plus a commercial 
 tier.
 
 ### Added
+- **Token economy** (`token_economy`: conservative|balanced|performance) — per-op-class start
+  tiers, validator-gated escalation with per-mode ceilings, and economy-aware provider
+  configuration. Verified priors and sources in `docs/product/MODEL-ECONOMY.md`.
+- **Parallel native TaskMaster expansion** (`tm-parallel` / `tm_parallel_expand`) — TaskMaster's
+  model-agnostic `expand --research` runs concurrently in isolated workdirs (per-task economy-tier
+  models), merged atomically; the Claude-subagent path becomes the documented fallback.
+- **Local cost telemetry** (`.atlas-ai/telemetry.jsonl`) + `economy-report` summarizer.
 - **Unified deterministic core** (`prd_taskmaster/`) — a single stdlib-only Python package that
   is the one source of truth for PRD validation, task calculation, complexity enrichment,
   capability detection, the pipeline state machine, and the ship-check gate. Imported by both the

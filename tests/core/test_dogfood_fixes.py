@@ -85,6 +85,158 @@ def test_configure_providers_recommends_protected_init(tmp_path, monkeypatch):
     assert "init-taskmaster" in exc.value.extra["fix"]
 
 
+def _seed_taskmaster_config(root: Path, models: dict) -> None:
+    taskmaster = root / ".taskmaster"
+    taskmaster.mkdir()
+    (taskmaster / "config.json").write_text(json.dumps({"models": models}, indent=2))
+
+
+def _read_taskmaster_config(root: Path) -> dict:
+    return json.loads((root / ".taskmaster" / "config.json").read_text())
+
+
+def _patch_provider_detection(monkeypatch, *, claude: bool = False, codex: bool = False) -> None:
+    def fake_which(name: str) -> str | None:
+        if name == "claude" and claude:
+            return "/fake/bin/claude"
+        if name == "codex" and codex:
+            return "/fake/bin/codex"
+        return None
+
+    monkeypatch.setattr("prd_taskmaster.providers.shutil.which", fake_which)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
+    monkeypatch.delenv("PERPLEXITY_API_BASE_URL", raising=False)
+    monkeypatch.delenv("PERPLEXITY_API_FREE_BASE_URL", raising=False)
+
+
+def test_configure_providers_conservative_rewrites_engine_default_main_to_fast_tier(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _patch_provider_detection(monkeypatch)
+    _seed_taskmaster_config(
+        tmp_path,
+        {
+            "main": {
+                "provider": "claude-code",
+                "modelId": "sonnet",
+                "maxTokens": 64000,
+                "temperature": 0.2,
+            }
+        },
+    )
+
+    result = run_configure_providers(economy="conservative")
+
+    assert result["economy"] == "conservative"
+    assert result["models"]["main"] == {
+        "provider": "claude-code",
+        "modelId": "haiku",
+        "maxTokens": 64000,
+        "temperature": 0.2,
+    }
+    assert "main" in result["changed"]
+
+
+def test_configure_providers_balanced_with_key_configures_sonar_research(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _patch_provider_detection(monkeypatch)
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "test-key")
+    _seed_taskmaster_config(tmp_path, {})
+
+    result = run_configure_providers(economy="balanced")
+
+    assert result["economy"] == "balanced"
+    assert result["models"]["research"] == {
+        "provider": "perplexity",
+        "modelId": "sonar",
+        "maxTokens": 8700,
+        "temperature": 0.1,
+    }
+
+
+def test_configure_providers_performance_with_key_configures_sonar_pro_research(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _patch_provider_detection(monkeypatch)
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "test-key")
+    _seed_taskmaster_config(tmp_path, {})
+
+    result = run_configure_providers(economy="performance")
+
+    assert result["economy"] == "performance"
+    assert result["models"]["research"] == {
+        "provider": "perplexity",
+        "modelId": "sonar-pro",
+        "maxTokens": 8700,
+        "temperature": 0.1,
+    }
+
+
+def test_configure_providers_user_configured_main_is_not_touched(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _patch_provider_detection(monkeypatch, claude=True)
+    user_main = {
+        "provider": "openai",
+        "modelId": "gpt-4.1",
+        "maxTokens": 32000,
+        "temperature": 0.3,
+    }
+    _seed_taskmaster_config(tmp_path, {"main": dict(user_main)})
+
+    result = run_configure_providers(economy="conservative")
+
+    assert result["models"]["main"] == user_main
+    assert result["skipped_main"] == "user-configured"
+    assert "main" not in result["changed"]
+
+
+def test_configure_providers_none_economy_reads_fleet_json(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _patch_provider_detection(monkeypatch)
+    (tmp_path / ".atlas-ai").mkdir()
+    (tmp_path / ".atlas-ai" / "fleet.json").write_text(json.dumps({"token_economy": "conservative"}))
+    _seed_taskmaster_config(
+        tmp_path,
+        {
+            "main": {
+                "provider": "claude-code",
+                "modelId": "sonnet",
+                "maxTokens": 64000,
+                "temperature": 0.2,
+            }
+        },
+    )
+
+    result = run_configure_providers()
+
+    assert result["economy"] == "conservative"
+    assert result["models"]["main"]["modelId"] == "haiku"
+
+
+def test_configure_providers_free_proxy_first_preserves_local_proxy_golden(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _patch_provider_detection(monkeypatch)
+    _seed_taskmaster_config(tmp_path, {})
+
+    result = run_configure_providers(economy="conservative")
+
+    assert result["models"]["research"] == {
+        "provider": "openai-compatible",
+        "modelId": "sonar",
+        "maxTokens": 8700,
+        "temperature": 0.1,
+        "baseURL": "http://127.0.0.1:8765",
+    }
+    assert result["changed"] == [
+        "research",
+        ".env:OPENAI_COMPATIBLE_API_KEY",
+        ".env:PERPLEXITY_API_BASE_URL",
+    ]
+    assert (tmp_path / ".env").read_text() == (
+        'OPENAI_COMPATIBLE_API_KEY="local-perplexity-api-free"\n'
+        'PERPLEXITY_API_BASE_URL="http://127.0.0.1:8765"\n'
+    )
+
+
 # ── Finding 3 (P2): calc-tasks respects the discovery scale band ───────────
 
 def test_calc_tasks_solo_band_clamps_down():

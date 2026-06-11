@@ -11,6 +11,7 @@ from prd_taskmaster.validation import cmd_validate_prd, cmd_validate_tasks
 from prd_taskmaster.tasks import cmd_calc_tasks, cmd_backup_prd, cmd_enrich_tasks
 from prd_taskmaster.taskmaster import cmd_init_taskmaster
 from prd_taskmaster.batch import cmd_engine_preflight
+from prd_taskmaster.economy import cmd_economy_report
 from prd_taskmaster import fleet, parallel, tm_parallel
 
 
@@ -138,6 +139,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tag")
     p.add_argument("--threshold", type=int, default=7)
 
+    # economy-report
+    p = sub.add_parser("economy-report", help="Summarize .atlas-ai/telemetry.jsonl per (op_class, model)")
+    p.add_argument("--input", default=None)
+
     # fleet-waves
     p = sub.add_parser("fleet-waves", help="Compute Atlas Fleet dependency waves")
     p.add_argument("--concurrency", type=int, default=3)
@@ -169,6 +174,7 @@ DISPATCH = {
     "tm-run": tm_parallel.cmd_tm_run,
     "tm-harvest": tm_parallel.cmd_tm_harvest,
     "fleet-waves": fleet.cmd_fleet_waves,
+    "economy-report": cmd_economy_report,
 }
 
 

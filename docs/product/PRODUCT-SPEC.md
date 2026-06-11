@@ -117,8 +117,10 @@ Targets: **[v4.0.0 launch] → [+6 months]**.
 - **US-G2 [FREE]** As Lead Theo, I want deferred decisions allowed when attributed (`reason:`),
   so that a thin spec is honest rather than blocked.
 - **US-G3 [FREE]** As any user, I want every task expanded into subtasks before handoff.
-  - AC: GENERATE gate requires `task_count>0` AND `subtask_coverage==1.0`; serial
-    `task-master expand --all` (never parallel per-id — data-loss race).
+  - AC: GENERATE gate requires `task_count>0` AND `subtask_coverage==1.0`; expansion via the
+    token-economy decision tree (FR-30): native-parallel tm-parallel by default, agent-parallel
+    fallback, serial native for tiny graphs. Concurrent expands in ONE directory remain forbidden
+    (lock-stale race) — isolation dirs are the parallel mechanism.
 
 ### Epic: Task Planning
 - **US-T1 [FREE]** As any user, I want task count calibrated to project scale.
@@ -303,7 +305,8 @@ Tags: **[FREE]/[PRO]**, phase.
   `reason:`/`defer:`) MUST be a hard fail; attributed placeholders recorded as
   `deferred_decisions`.
 - **FR-12 [FREE]** GENERATE gate MUST require grade ∈ {EXCELLENT,GOOD}, `task_count>0`,
-  `subtask_coverage==1.0`. Subtask expansion MUST be serial `task-master expand --all`.
+  `subtask_coverage==1.0`. Subtask expansion MUST follow the FR-30 decision tree; concurrent
+  expands in a single project directory are forbidden (lock-stale race).
 - **FR-13 [FREE]** Complexity MUST be read from the report JSON, never the stdout table.
   `calc_tasks` MUST calibrate count to scale.
 
@@ -347,6 +350,20 @@ Tags: **[FREE]/[PRO]**, phase.
 - **FR-27 [PRO]** A validated license MUST cache a signed offline-grace token; after grace, fleet
   dispatch MUST refuse new runs but allow in-flight runs to drain; the FREE engine MUST remain
   fully functional regardless of license state.
+
+**Token economy**
+- **FR-29 [FREE]** A `token_economy` setting (conservative|balanced|performance, default balanced)
+  MUST control start tiers per op class, escalation steps/ceiling, and research-provider choice;
+  explicit user routing/models MUST always win over presets.
+- **FR-30 [FREE]** Task expansion/research MUST default to native TaskMaster AI (model-agnostic,
+  any configured API) parallelized via isolated workdirs when TM ≥ 0.43 and a real structured API
+  is the research role; the agent-parallel path remains the fallback (free proxy, no key, failures,
+  repo-grounded research).
+- **FR-31 [FREE]** Every AI invocation the engine orchestrates MUST append a telemetry row
+  (op_class, model, exit, wall_ms, escalated) to .atlas-ai/telemetry.jsonl; `economy-report` MUST
+  summarize success-rate and p50 wall per (op_class, model).
+- **FR-32 [PRO]** Adaptive auto-tuning of fleet.json routing from accumulated telemetry is an
+  Atlas Pro capability (roadmap).
 
 **Cross-cutting**
 - **FR-28 [FREE]** All MCP tools MUST return dicts and MUST NEVER call `sys.exit` / terminate the

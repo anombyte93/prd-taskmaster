@@ -59,3 +59,68 @@ def economy_profile(cfg):
         escalation.update(user_escalation)
     profile["escalation"] = escalation
     return profile
+
+
+# ─── T7: telemetry summary (economy-report) ──────────────────────────────────
+
+def summarize_telemetry(path=None):
+    """Summarize .atlas-ai/telemetry.jsonl per (op_class, model).
+
+    The local-measurement loop from MODEL-ECONOMY.md: success rate and p50
+    wall-time per model per op class, plus escalation count. Malformed lines
+    are skipped and counted, never fatal.
+    """
+    import json
+    from pathlib import Path as _P
+
+    p = _P(path) if path else _P(".atlas-ai") / "telemetry.jsonl"
+    rows, skipped = [], 0
+    if p.is_file():
+        for line in p.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                skipped += 1
+
+    groups = {}
+    escalations = 0
+    for r in rows:
+        key = (str(r.get("op_class", "unknown")), str(r.get("model", "unknown")))
+        g = groups.setdefault(key, {"calls": 0, "successes": 0, "walls": []})
+        g["calls"] += 1
+        if r.get("exit") == 0:
+            g["successes"] += 1
+        if isinstance(r.get("wall_ms"), (int, float)):
+            g["walls"].append(r["wall_ms"])
+        if r.get("escalated"):
+            escalations += 1
+
+    out = []
+    for (op_class, model), g in sorted(groups.items()):
+        walls = sorted(g["walls"])
+        p50 = walls[len(walls) // 2] if walls else None
+        out.append({
+            "op_class": op_class,
+            "model": model,
+            "calls": g["calls"],
+            "success_rate": (g["successes"] / g["calls"]) if g["calls"] else None,
+            "p50_wall_ms": p50,
+        })
+
+    return {
+        "ok": True,
+        "total_calls": len(rows),
+        "skipped_lines": skipped,
+        "escalations": escalations,
+        "groups": out,
+        "telemetry_path": str(p),
+    }
+
+
+def cmd_economy_report(args):
+    from prd_taskmaster.lib import emit
+
+    emit(summarize_telemetry(getattr(args, "input", None)))
