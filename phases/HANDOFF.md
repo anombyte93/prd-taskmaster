@@ -44,7 +44,7 @@ Key signals:
 
 Decision logic:
 
-1. If superpowers + `ralph-loop` are detected, recommend **Verified Loop**.
+1. If superpowers + a loop runner are detected, recommend **Verified Loop**.
 2. If superpowers only are detected, recommend **Plan & Drive**.
 3. If TaskMaster CLI only is detected, recommend **Auto-Execute**.
 4. Otherwise recommend **Plan & Drive**.

@@ -212,7 +212,7 @@ def detect_capabilities() -> dict:
 
     v4 is designed to be tool-agnostic. Detection covers:
       - Claude Code plugins (superpowers, atlas-*)
-      - Claude Code skills (cdd, ralph-loop, phase-executor, etc.)
+      - Claude Code skills (evidence cards, loop runner, phase-executor, etc.)
       - External AI tools (Cursor, RooCode, Codex CLI, Gemini CLI, etc.)
       - TaskMaster (CLI or MCP)
 

@@ -94,7 +94,7 @@ section below.
 
 Decision logic (first match wins):
 
-- `superpowers` + `ralph-loop` present → **Verified Loop** (recommended free)
+- `superpowers` + loop runner present → **Verified Loop** (recommended free)
 - `superpowers` only → **Plan & Drive** (free, manual drive)
 - `task-master-ai` only → **Auto-Execute** (free, native TaskMaster loop)
 - Fallback → **Plan & Drive** (free)
