@@ -6,6 +6,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh | bash
 #   bash install.sh                # fresh install or upgrade
 #   bash install.sh --check-update # check for newer version only
+#   bash install.sh --no-telemetry # install without anonymous install ping
 #
 # Customize the variables below for your skill repository.
 # ============================================================================
@@ -170,6 +171,17 @@ with open(path, 'w') as f:
     else
         ok "You are on the latest version (${VERSION})"
     fi
+}
+
+send_install_telemetry() {
+    if [[ "${ATLAS_TELEMETRY:-}" == "0" ]]; then
+        return 0
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        return 0
+    fi
+
+    ATLAS_SKILL_DIR="${SKILL_DIR}" python3 -c 'import os, sys, time; sys.path.insert(0, os.environ["ATLAS_SKILL_DIR"]); from prd_taskmaster.telemetry import send_event; send_event("install"); time.sleep(1.1)' >/dev/null 2>&1 || true
 }
 
 # ---------------------------------------------------------------------------
@@ -347,6 +359,8 @@ ALIASEOF
     info "Open any project in Claude Code and type:"
     printf "  ${CYAN}/atlas${RESET}   (or ${CYAN}/%s${RESET}, or just say \"I want to build …\")\n" "${SKILL_NAME}"
     printf "\n"
+
+    send_install_telemetry
 }
 
 # ---------------------------------------------------------------------------
@@ -360,11 +374,17 @@ main() {
         --version|-v)
             echo "${SKILL_NAME} v${VERSION}"
             ;;
+        --no-telemetry)
+            export ATLAS_TELEMETRY=0
+            install_skill
+            check_update
+            ;;
         --help|-h)
-            printf "Usage: %s [--check-update | --version | --help]\n" "${0##*/}"
+            printf "Usage: %s [--check-update | --version | --no-telemetry | --help]\n" "${0##*/}"
             printf "\n"
             printf "  (no args)       Install or upgrade the skill\n"
             printf "  --check-update  Check GitHub for a newer release\n"
+            printf "  --no-telemetry  Install without anonymous install telemetry\n"
             printf "  --version       Print current version\n"
             printf "  --help          Show this help\n"
             ;;

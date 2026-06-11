@@ -138,6 +138,33 @@ execution — the entire engine in this repo. Read every line.
 
 ---
 
+## Telemetry
+
+Atlas sends anonymous, best-effort client telemetry for product health. The payload schema is
+exactly `{install_id, event, version, os}`. `install_id` is a random UUID stored locally at
+`~/.atlas-ai/install_id`; `event` is one of `install`, `atlas_invoked`, `reach_execute`, or
+`ship_check_ok`; `version` is the package version; `os` is `platform.system()`.
+
+Telemetry contains no PII, goal text, code, paths, prompts, file names, or project content.
+Network failures are ignored and never block the CLI or installer.
+
+Opt out with `ATLAS_TELEMETRY=0`, including pipe installs:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/anombyte93/prd-taskmaster/main/install.sh | ATLAS_TELEMETRY=0 bash
+```
+
+For downloaded installs, use:
+
+```bash
+bash install.sh --no-telemetry
+```
+
+You can also set `"telemetry": false` in `~/.atlas-ai/config.json` or a project
+`.taskmaster/config.json`.
+
+---
+
 ## FAQ
 
 **Will the free engine stay free?** Yes — MIT, and this repo will never require a key.
