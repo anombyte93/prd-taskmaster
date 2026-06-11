@@ -4,6 +4,7 @@ emit()/fail() live here (CLI layer). Pure cores raise CommandError instead of
 calling fail(), and return dicts instead of calling emit().
 """
 
+import fcntl
 import json
 import os
 import re
@@ -13,6 +14,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Callable
 
 # ─── Path constants ───────────────────────────────────────────────────────────
 # Templates live at the REPO ROOT (one level above this package dir).
@@ -58,6 +60,54 @@ class CommandError(Exception):
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ─── Stateful-core helpers (atomic / locked writes, JSON IO) ──────────────────
+# Ported byte-faithful from the plugin mcp-server/lib.py. All return values are
+# dicts/strings — NEVER call sys.exit (per spec §13.3).
+
+def atomic_write(path: Path, content: str) -> None:
+    """Write content to path atomically via tmp + os.replace (atomic on POSIX)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+    tmp.write_text(content)
+    os.replace(tmp, path)
+
+
+def locked_update(path: Path, transform: Callable[[str], str]) -> str:
+    """Read-modify-write under flock. transform takes current content, returns new content.
+    Returns the new content for convenience."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with open(lock_path, "w") as lock_f:
+        fcntl.flock(lock_f, fcntl.LOCK_EX)
+        try:
+            current = path.read_text() if path.exists() else ""
+            new = transform(current)
+            atomic_write(path, new)
+            return new
+        finally:
+            fcntl.flock(lock_f, fcntl.LOCK_UN)
+
+
+def emit_json_error(message: str, **extra: Any) -> dict:
+    """Format an error response as a dict. DO NOT call sys.exit."""
+    return {"ok": False, "error": message, **extra}
+
+
+def read_json(path: Path) -> dict:
+    """Read and parse a JSON file. Returns empty dict if missing."""
+    path = Path(path)
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())
+
+
+def write_json(path: Path, data: dict) -> None:
+    """Write dict as JSON atomically."""
+    atomic_write(path, json.dumps(data, indent=2, default=str))
 
 
 def word_count(text: str) -> int:
