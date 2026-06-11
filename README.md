@@ -104,6 +104,12 @@ Most AI coding tools tell you a task is done. This one makes "done" provable:
 The engine is the whole engine — the free tier is **not a demo**. Pro adds the fleet orchestrator
 and bundled MCPs. [Get Atlas Pro →](https://atlas-ai.au/pro)
 
+Atlas Pro checkout contract: the externally hosted `/pro` page must offer Atlas Pro Monthly
+($29/mo) and Atlas Pro Annual ($290/yr) subscriptions through Stripe Checkout, with cancel
+returning to `/pro`. The externally hosted `/pro/success` page must tell buyers: "License key
+sent to your email. Check spam folder. Activation: script.py license-activate LICENSE_KEY.
+Docs: atlas-ai.au/docs." and link to `/docs/activation`.
+
 ---
 
 ## Atlas Fleet (Atlas Pro)
