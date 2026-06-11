@@ -1,11 +1,10 @@
 ---
 name: prd-taskmaster
 description: >-
-  Smart PRD generator with TaskMaster integration. Detects existing PRDs and offers execute/update/replace options.
-  Generates comprehensive technical PRDs optimized for task breakdown, validates with 13 automated checks,
-  and optionally executes tasks autonomously with datetime tracking and rollback support. Use when user requests
-  "PRD", "product requirements", or mentions task-driven development. Defaults to PRD generation with
-  handoff to TaskMaster. Optionally supports autonomous execution with 4 modes.
+  Zero-config goal-to-tasks engine (the Atlas engine). Takes any goal (software, pentest,
+  business, learning), runs adaptive discovery via brainstorming, generates a validated spec,
+  parses into TaskMaster tasks, and hands off to execution. Use when user says "PRD", "product
+  requirements", "I want to build", invokes /atlas, or wants task-driven development.
 allowed-tools:
   - Read
   - Write
@@ -13,290 +12,215 @@ allowed-tools:
   - Grep
   - Glob
   - Bash
+  - Skill
   - AskUserQuestion
+  - WebSearch
 ---
 
-# PRD Generator for TaskMaster v3.0
+# prd-taskmaster — the Atlas engine
 
-Smart PRD generation with deterministic operations handled by `script.py`.
-AI handles judgment (questions, content, decisions); script handles mechanics.
+Zero-config goal-to-tasks engine. AI handles discovery and content; `script.py` handles mechanics.
 
-**Script location**: `~/.claude/skills/prd-taskmaster/script.py`
-**All script commands output JSON.**
+**Command:** `/atlas` is the canonical invocation (or `/prd-taskmaster`, or just say "I want to
+build …"). The full plugin install also exposes phase skills; this standalone skill runs the whole
+pipeline inline.
+
+**Script:** `~/.claude/skills/prd-taskmaster/script.py` (all commands output JSON). It is a thin
+shim over the bundled `prd_taskmaster/` package — the single source of truth shared with the plugin.
+
+**Manual flag:** If the user says `--manual`, `manual=true`, or "do it manually", perform the
+TaskMaster mechanics yourself: write `.taskmaster/docs/prd.md`, write `.taskmaster/tasks/tasks.json`
+with tasks and subtasks, run `validate-tasks`, then run `enrich-tasks`. Do not block on TaskMaster
+CLI/MCP parsing.
 
 ## When to Use
 
-Activate when user says: PRD, product requirements, taskmaster, task-driven development.
-Do NOT activate for: API docs, test specs, project timelines, PDF creation.
+Activate: PRD, product requirements, taskmaster, task-driven development, "I want to build X", any goal.
+Skip: API docs, test specs, project timelines, PDF creation.
 
-## Core Principles
+## Phase 1: Zero-Config Preflight
 
-- **Quality Over Speed**: Planning is 95% of the work
-- **Taskmaster Required**: Blocks if not detected
-- **Engineer-Focused**: Technical depth, code examples, architecture
-- **Validation-Driven**: 13 automated checks via script
-- **User Testing Checkpoints**: Every 5 tasks
-
----
-
-## Workflow (12 Steps)
-
-### Step 1: Preflight & Resume Detection
+Run preflight and auto-detect everything. Ask zero setup questions.
 
 ```bash
 python3 ~/.claude/skills/prd-taskmaster/script.py preflight
 ```
 
-Returns JSON: `has_taskmaster`, `prd_path`, `task_count`, `tasks_completed`, `tasks_pending`, `taskmaster_method`, `has_claude_md`, `has_crash_state`, `crash_state`.
+**From preflight JSON, determine the state:**
 
-**If `has_crash_state` is true**: Present resume options to user:
-1. Continue from last subtask
-2. Restart current task
-3. Resume from last checkpoint
-4. Start fresh
+| Condition | Action |
+|-----------|--------|
+| `prd_path` exists + `task_count > 0` | Ask: execute tasks / update PRD / new PRD / review |
+| `taskmaster_method == "none"` + no manual flag | Show install: `npm install -g task-master-ai`, wait, re-detect |
+| manual flag present | Proceed using Manual Mechanics Mode, regardless of TaskMaster CLI/MCP state |
+| `has_taskmaster` but no PRD | Proceed to Discovery |
+| `has_crash_state` | Offer: resume from crash point or start fresh |
 
-**Then proceed to Step 2.**
-
----
-
-### Step 2: Detect Existing PRD
-
-Use preflight JSON: if `prd_path` is not null and `task_count > 0`, an existing PRD is found.
-
-**If existing PRD found**, use AskUserQuestion:
-- **Execute tasks** from existing PRD (skip to Step 11)
-- **Update/refine** existing PRD (edit and re-parse)
-- **Create new PRD** (replace - backup first via `script.py backup-prd --input <path>`)
-- **Review** existing PRD (display summary, then exit)
-
-**If no PRD found**: Proceed to Step 3.
-
----
-
-### Step 3: Detect Taskmaster
-
-Use preflight JSON field `taskmaster_method`: `mcp`, `cli`, or `none`.
-
-**If `none`**: Block and show installation instructions:
-- Option 1 (recommended): Install MCP Task-Master-AI
-- Option 2: `npm install -g task-master-ai`
-- Wait for user to install and confirm, then re-run: `script.py detect-taskmaster`
-
-**No proceeding without taskmaster detected.**
-
----
-
-### Step 4: Discovery Questions
-
-Ask detailed questions to build comprehensive PRD. Use AskUserQuestion for structured input.
-
-**Essential (5):**
-1. What problem does this solve? (user pain point, business impact)
-2. Who is the target user/audience?
-3. What is the proposed solution or feature?
-4. What are the key success metrics?
-5. What constraints exist? (technical, timeline, resources)
-
-**Technical (4):**
-6. Existing codebase or greenfield?
-7. Tech stack?
-8. Integration requirements?
-9. Performance/scale requirements?
-
-**TaskMaster-specific (3):**
-10. Used taskmaster before?
-11. Estimated complexity? (simple/typical/complex)
-12. Timeline expectations?
-
-**Open-ended (1):**
-13. Anything else? (edge cases, constraints, context)
-
-**Smart defaults**: If user provides minimal answers, use best guesses and document assumptions.
-
----
-
-### Step 5: Initialize Taskmaster
-
-Only if `.taskmaster/` doesn't exist (check preflight `has_taskmaster`).
+**Auto-configure providers** (silent):
 
 ```bash
-python3 ~/.claude/skills/prd-taskmaster/script.py init-taskmaster --method <cli|mcp>
+python3 ~/.claude/skills/prd-taskmaster/script.py configure-providers
+python3 ~/.claude/skills/prd-taskmaster/script.py detect-providers
 ```
 
-For MCP: use the returned params to call `mcp__task-master-ai__initialize_project`.
-For CLI: script runs `taskmaster init` directly.
+Report compact status:
+```
+  ✓ Detected: TaskMaster (MCP|CLI)
+  ✓ Detected: Provider (Claude Code|Codex CLI|Anthropic API)
+  ✓ Detected: Research (Perplexity API Free|Perplexity MCP|Perplexity API|fallback)
+```
 
----
+**Gate: TaskMaster detected OR manual flag present. Providers configured. Proceed to Discovery.**
 
-### Step 6: Generate PRD
+### Provider Defaults
 
-Load template:
+Always prefer subscription/native providers before paid API keys:
+
+1. Main: `claude-code` / `sonnet` when `claude` exists; otherwise `codex-cli` / `gpt-5.2-codex` when `codex` exists.
+2. Fallback: `codex-cli` / `gpt-5.2-codex` when available; otherwise `claude-code` / `sonnet`.
+3. Research: local Perplexity API Free through TaskMaster `openai-compatible` provider:
+   - model: `sonar`
+   - baseURL: `http://127.0.0.1:8765`
+   - `.env` key: `OPENAI_COMPATIBLE_API_KEY="local-perplexity-api-free"` (dummy local key only)
+
+Do not require `ANTHROPIC_API_KEY` or paid `PERPLEXITY_API_KEY` when native Claude/Codex and Perplexity API Free are available.
+
+## Phase 2: Discovery
+
+Read the phase file and follow it:
+```
+Read ~/.claude/skills/prd-taskmaster/phases/DISCOVER.md
+```
+
+Progressive, adaptive, domain-agnostic discovery via superpowers:brainstorming.
+
+**Gate: Discovery complete and user approved design. Proceed to Generate.**
+
+## Phase 3: Generate & Validate
+
+Read the phase file and follow it:
+```
+Read ~/.claude/skills/prd-taskmaster/phases/GENERATE.md
+```
+
+Generate spec, validate quality, parse tasks, enrich with metadata.
+
+**Gate: PRD validated GOOD+ and tasks created through TaskMaster parse/expand OR Manual Mechanics Mode. Proceed to Handoff.**
+
+### Manual Mechanics Mode
+
+Use this when the user passes `--manual` or TaskMaster parsing/expansion is a poor fit.
+
+1. Generate `.taskmaster/docs/prd.md` normally.
+2. Manually write `.taskmaster/tasks/tasks.json` in TaskMaster-compatible shape:
+   - top-level object with `tasks: []`
+   - each task has `id`, `title`, `description`, `details`, `testStrategy`, `status`, `dependencies`, `priority`, and `subtasks`
+   - every task has at least 2 subtasks with `id`, `title`, `description`, `status`, and `dependencies`
+3. Run:
+   ```bash
+   python3 ~/.claude/skills/prd-taskmaster/script.py validate-tasks
+   python3 ~/.claude/skills/prd-taskmaster/script.py enrich-tasks
+   python3 ~/.claude/skills/prd-taskmaster/script.py validate-tasks --require-phase-config
+   ```
+4. Treat successful validation + enrichment + phaseConfig validation as equivalent to TaskMaster parse + expand.
+
+## Phase 4: Handoff
+
+Read the phase file and follow it:
+```
+Read ~/.claude/skills/prd-taskmaster/phases/HANDOFF.md
+```
+
+Detect capabilities, recommend ONE execution mode, hand off. Modes (user-facing names):
+**Verified Loop** (recommended when superpowers + a loop runner are present), **Auto-Execute**
+(TaskMaster's native loop), **Plan & Drive** (plan only). **Atlas Fleet** — parallel multi-session
+execution — appears as an **Atlas Pro** option when a licensed `atlas-launcher` is detected;
+otherwise it shows as a locked teaser pointing to https://atlas-ai.au/pro. The free engine is
+always fully usable on its own.
+
+**Gate: User chose mode and handoff complete.**
+
+## Script Commands Reference
+
+| Command | Purpose |
+|---------|---------|
+| `preflight` | Detect environment state |
+| `detect-taskmaster` | Find MCP or CLI taskmaster |
+| `configure-providers` | Configure native Claude/Codex + local Perplexity API Free defaults |
+| `detect-providers` | Auto-detect AI providers |
+| `detect-capabilities` | Scan for available skills/tools |
+| `load-template --type comprehensive\|minimal` | Load PRD template |
+| `validate-prd --input <path>` | Quality checks + placeholder detection |
+| `calc-tasks --requirements <count>` | Recommended task count |
+| `backup-prd --input <path>` | Timestamped backup |
+| `validate-tasks [--input <path>]` | Validate manually-authored tasks.json |
+| `enrich-tasks` | Add phaseConfig metadata to tasks |
+| `parallel-plan [--missing-only]` | Emit per-task research packets for parallel subagents |
+| `parallel-apply --input <results.json>` | Merge parallel research results atomically |
+| `parallel-extract --output <path>` / `parallel-inject --input <path>` | Tagged ⇄ flat tasks bridge |
+
+## Parallel Research & Complexity
+
+TaskMaster's own `expand --all --research` and `analyze-complexity --research` are SEQUENTIAL
+(every call rewrites tasks.json — parallel CLI invocations clobber each other). With Perplexity API
+Free, TaskMaster's strict object-generation call can also receive prose instead of JSON even though
+the proxy itself works. Therefore the `parallel-*` commands are the default research/complexity path
+when there are ≥4 tasks, when Perplexity API Free is configured, or when any TaskMaster AI provider
+errors.
+
+Pattern — the parallelism lives in the AGENT, not the script:
+
 ```bash
-python3 ~/.claude/skills/prd-taskmaster/script.py load-template --type <comprehensive|minimal>
+python3 ~/.claude/skills/prd-taskmaster/script.py parallel-plan --missing-only   # research packets JSON
+# AGENT: split packets into N groups (by lane/domain), spawn N parallel research
+#   subagents; each verifies files in-repo + researches APIs and returns
+#   [{id, complexityScore, recommendedSubtasks, reasoning, researchNotes, subtasks[]}]
+# AGENT: concatenate results -> results.json
+python3 ~/.claude/skills/prd-taskmaster/script.py parallel-apply --input results.json   # ONE atomic write
+#   + writes .taskmaster/reports/task-complexity-report[_<tag>].json (TaskMaster format)
+#   + returns needs_more_subtasks (score >= threshold w/ too-few subtasks) for a second pass
 ```
 
-Returns JSON with `content` field containing the template.
-
-**AI judgment**: Fill template with user's answers from Step 4:
-- Replace placeholders with actual content
-- Expand examples with project-specific details
-- Add technical depth based on discovery answers
-
-Write completed PRD to `.taskmaster/docs/prd.md`.
-
----
-
-### Step 7: Validate PRD Quality
+If the `perplexity-api-free` MCP wrapper times out or says the proxy is unreachable, check direct
+proxy health:
 
 ```bash
-python3 ~/.claude/skills/prd-taskmaster/script.py validate-prd --input .taskmaster/docs/prd.md
+curl -sS -X POST http://127.0.0.1:8765/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"sonar","messages":[{"role":"user","content":"Return exactly: ok"}],"max_tokens":16}'
 ```
 
-Returns JSON: `score`, `max_score`, `grade`, `checks` (13 items), `warnings`.
+If direct `curl` works, continue: use MCP, direct proxy calls, or agent research to produce the
+`results.json` schema, then normalize prose into valid JSON before `parallel-apply`. Do not block on
+native `task-master analyze-complexity --research`.
 
-**Grading**: EXCELLENT (91%+), GOOD (83-90%), ACCEPTABLE (75-82%), NEEDS_WORK (<75%).
-
-**AI judgment**: If warnings exist, offer user three options:
-1. Proceed with current PRD
-2. Auto-fix warnings
-3. Review and fix manually
-
-If grade is NEEDS_WORK, strongly recommend fixing before proceeding.
-
----
-
-### Step 8: Parse & Expand Tasks
-
-Calculate task count:
-```bash
-python3 ~/.claude/skills/prd-taskmaster/script.py calc-tasks --requirements <count>
-```
-
-Returns `recommended` task count.
-
-**For MCP**:
-```
-mcp__task-master-ai__parse_prd: input=".taskmaster/docs/prd.md", numTasks=<recommended>, research=true
-mcp__task-master-ai__expand_all: research=true
-```
-
-**For CLI**:
-```bash
-taskmaster parse-prd --input .taskmaster/docs/prd.md --research --num-tasks <recommended>
-taskmaster expand-all --research
-```
-
----
-
-### Step 9: Insert User Test Tasks
+Tag bridge for explicit flat-file workflows (the script also reads tagged TaskMaster files directly):
 
 ```bash
-python3 ~/.claude/skills/prd-taskmaster/script.py gen-test-tasks --total <task_count>
+python3 ~/.claude/skills/prd-taskmaster/script.py parallel-extract --output /tmp/flat.json
+python3 ~/.claude/skills/prd-taskmaster/script.py validate-tasks --input /tmp/flat.json
+python3 ~/.claude/skills/prd-taskmaster/script.py enrich-tasks  --input /tmp/flat.json
+python3 ~/.claude/skills/prd-taskmaster/script.py validate-tasks --input /tmp/flat.json --require-phase-config
+python3 ~/.claude/skills/prd-taskmaster/script.py parallel-inject --input /tmp/flat.json
 ```
 
-Returns array of USER-TEST task definitions with `title`, `description`, `dependencies`, `template`.
+All commands default `--tag` to `.taskmaster/state.json` currentTag and run from the project root.
 
-**For each task in the array**:
-- MCP: `mcp__task-master-ai__add_task` with title, description, details=template, dependencies, priority=high
-- CLI: `taskmaster add-task --title="..." --description="..." --dependencies="..." --priority=high`
+## Context
 
----
+**Standalone:** Works on its own. Takes any goal, produces spec + tasks.
+**Produces:** spec.md + tasks.json (in `.taskmaster/`).
+**Then:** hand off to an execution mode (Verified Loop / Auto-Execute / Plan & Drive), or
+**Atlas Fleet** for parallel multi-session execution with Atlas Pro.
 
-### Step 10: Setup Tracking Scripts
+## Critical Rules
 
-```bash
-python3 ~/.claude/skills/prd-taskmaster/script.py gen-scripts --output-dir .taskmaster/scripts
-```
-
-Creates 5 scripts: track-time.py, rollback.sh, learn-accuracy.py, security-audit.py, execution-state.py.
-
----
-
-### Step 10.5: Generate CLAUDE.md
-
-**Pre-check**: Use Glob to check if `./CLAUDE.md` exists. If it exists, skip.
-
-If generating:
-1. Load template: `script.py load-template` won't work here -- use Read tool on `~/.claude/skills/prd-taskmaster/templates/CLAUDE.md.template`
-2. **AI judgment**: Replace placeholders with project-specific values from discovery:
-   - `{{PROJECT_NAME}}`, `{{TECH_STACK}}`, `{{ARCHITECTURE_OVERVIEW}}`
-   - `{{KEY_DEPENDENCIES}}`, `{{TESTING_FRAMEWORK}}`, `{{DEV_ENVIRONMENT}}`, `{{TEST_COMMAND}}`
-3. Write to `./CLAUDE.md`
-4. Ask if user uses Codex -- if yes and no `codex.md`, write identical copy
-
----
-
-### Step 11: Choose Next Action
-
-Use AskUserQuestion:
-
-**Question**: "PRD and tasks ready. How to proceed?"
-- **Show TaskMaster Commands** (default): Display command reference, then exit skill
-- **Autonomous Execution**: Ask follow-up for execution mode
-
-**If Autonomous Execution selected**, ask execution mode:
-- **Sequential to Checkpoint** (recommended): Tasks one-by-one until next USER-TEST
-- **Parallel to Checkpoint**: Independent tasks in parallel until USER-TEST
-- **Full Autonomous**: All tasks parallel, skip user validation
-- **Manual Control**: User decides each task
-
-**AI judgment**: Recommend mode based on context:
-- First-time/critical: Sequential
-- Experienced/non-critical: Parallel
-- Trusted/time-critical: Full Autonomous
-- Complex/learning: Manual
-
----
-
-### Step 12: Summary & Start
-
-**If Handoff**: Display PRD location, task counts, key requirements, validation score, task phases, user test checkpoints, and TaskMaster commands. Then exit skill.
-
-**If Autonomous**: Display same summary plus execution mode, then begin execution using the selected mode's rules.
-
----
-
-## Execution Mode Rules
-
-### All Modes Include
-
-- **DateTime tracking**: `python3 .taskmaster/scripts/track-time.py start|complete <task_id> [subtask_id]`
-- **Progress logging**: `python3 ~/.claude/skills/prd-taskmaster/script.py log-progress --task-id <id> --title "..." --duration "..." --subtasks "..." --tests "..." --issues "..."`
-- **Git policy**: Branch per task (`task-{id}-{slug}`), sub-branch per subtask, merge to main with checkpoint tag
-- **Rollback**: If user says "rollback to task X", run `bash .taskmaster/scripts/rollback.sh X`
-- **State tracking**: `python3 .taskmaster/scripts/execution-state.py start|complete|checkpoint <task_id>`
-
-### Sequential to Checkpoint
-
-Execute tasks one-by-one. For each task:
-1. Start time tracking
-2. Create feature branch
-3. For each subtask: create sub-branch, implement, test, commit, merge to task branch
-4. Complete time tracking
-5. Log progress
-6. Merge to main, create checkpoint tag
-7. Stop at next USER-TEST for user validation
-
-### Parallel to Checkpoint
-
-Same as sequential but launch up to 3 concurrent independent tasks.
-Handle merge conflicts automatically. Stop at USER-TEST.
-
-### Full Autonomous
-
-Maximum parallelization (up to 5 concurrent). Auto-complete USER-TEST tasks.
-Only stop when ALL tasks complete.
-
-### Manual Control
-
-Wait for user commands: "next task", "task {id}", "status", "parallel {id1,id2}".
-
----
-
-## Tips
-
-- More detail in discovery = better PRD
-- Quantify goals: not "improve UX" but "increase NPS from 45 to 60"
-- USER-TEST checkpoints catch issues early
-- Git checkpoints allow easy rollback
-- Use `script.py validate-prd` at any time to re-check PRD quality
+1. Zero setup questions — detect everything, ask only discovery questions
+2. Discovery via superpowers:brainstorming — one question at a time, adaptive
+3. Domain-agnostic — works for any goal (app, pentest, business, anything)
+4. Validate PRDs catch placeholders — mustache, TBD, TODO patterns fail validation
+5. Manual flag means "do the TaskMaster mechanics manually", not "skip validation"
+6. Handoff recommends ONE mode — present best fit, not equal choices
+7. Phase files must be Read explicitly — they are not auto-loaded
+8. Native/free provider defaults are enforced by `configure-providers`; do not drift back to paid Anthropic/Perplexity APIs unless native/free routes are unavailable
+9. Perplexity API Free research must be normalized through `parallel-apply`; native TaskMaster research is only acceptable when it returns valid structured output and validation passes
