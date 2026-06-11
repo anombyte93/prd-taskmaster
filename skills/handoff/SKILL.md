@@ -110,12 +110,12 @@ Recommended: Plan Only
   You drive execution manually
 ```
 
-### Mode B: TaskMaster Auto-Execute
+### Mode B: TaskMaster Auto-Execute (Mode B — TaskMaster backend only)
 
 ```
 Recommended: TaskMaster Auto-Execute
-  MCP:  mcp__task-master-ai__next_task -> implement -> set_task_status(id, "done")
-  CLI:  task-master next -> implement -> task-master set-status --id N --status done
+  MCP:  mcp__task-master-ai__next_task -> implement -> set_task_status(id, "done") (Mode B — TaskMaster backend only)
+  CLI:  task-master next -> implement -> task-master set-status --id N --status done (Mode B — TaskMaster backend only)
   Native TaskMaster execution loop (no external orchestrator required)
 ```
 
@@ -177,7 +177,7 @@ tool-agnostic wrappers around the same `.taskmaster/tasks/tasks.json`.
 |---|---|---|
 | **E** | Cursor Composer | `cursor --open .taskmaster/tasks/tasks.json`, @-ref in Composer |
 | **F** | RooCode | VS Code command palette → `RooCode: Run tasks.json` |
-| **G** | Codex CLI | `task-master next --format json \| codex implement` (free via ChatGPT) |
+| **G** | Codex CLI | `python3 script.py next-task \| codex implement` (free via ChatGPT) |
 | **H** | Gemini CLI | `gemini --file .taskmaster/tasks/tasks.json implement next` (free via Google) |
 | **I** | CodeRabbit | Implement via A–H, open PR, CodeRabbit reviews per task. Combines with other modes. |
 | **J** | Aider | `aider --read .taskmaster/tasks/tasks.json` — pair-programming style |
@@ -193,11 +193,11 @@ uses HTML-comment sentinels so re-runs are no-ops.
    ```markdown
    ## Task Execution Workflow (prd-taskmaster)
 
-   When implementing tasks, prefer task-master-ai MCP tools over the CLI:
-   1. `mcp__task-master-ai__next_task()` or `task-master next` — get next ready task
-   2. `set_task_status(id, "in-progress")` — note hyphen; underscore is rejected
+   When implementing tasks, prefer backend operations:
+   1. `python3 script.py next-task` — get next ready task
+   2. `python3 script.py set-status --id <id> --status in-progress` — note hyphen; underscore is rejected
    3. Implement the task (follow the plan step linked to this task)
-   4. `set_task_status(id, "done")` — mark complete
+   4. `python3 script.py set-status --id <id> --status done` — mark complete
    5. Update TodoWrite with progress
    6. Repeat from step 1
 
@@ -272,7 +272,7 @@ natural-language affirmatives, no ambiguity.
      another tool…")
    - Mode D 🔒 Atlas Fleet teaser with the Atlas Pro price and /pro URL
    - A "next step" description scoped to the recommended mode (e.g. for Mode
-     B: "run `task-master next`" with the first ready task ID)
+     B: "run `task-master next`" with the first ready task ID (Mode B — TaskMaster backend only))
 
 2. **Call `AskUserQuestion`** with a multi-option question listing each
    available execution mode. Use the user-facing names (internal IDs in
@@ -294,7 +294,7 @@ natural-language affirmatives, no ambiguity.
 3. **Dispatch the chosen mode:**
    - **Mode A handoff**: invoke `superpowers:writing-plans` with spec path
      `.taskmaster/docs/prd.md`
-   - **Mode B handoff**: show the `task-master next` command + the first
+   - **Mode B handoff (Mode B — TaskMaster backend only)**: show the `task-master next` command + the first
      ready task ID surfaced from `.taskmaster/tasks/tasks.json`
    - **Mode C handoff**: write `.claude/atlas-loop-prompt.md` describing the
      task-execution contract, then invoke `/goal` with the condition:

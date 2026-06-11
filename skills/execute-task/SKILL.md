@@ -69,11 +69,11 @@ to `done`. Do the 13 steps in order. Do not skip.
    says 10 done but tasks.json says 3 done), report the diff and halt — do
    not paper over bookkeeping drift by silently reconciling.
 
-3. **Pick next task**: run the TaskMaster next command with the plugin's
-   project-root pointer. Use exactly this invocation:
+3. **Pick next task**: run backend op `next` with the plugin's project-root
+   pointer. Use exactly this invocation:
 
    ```bash
-   task-master next --format json
+   python3 script.py next-task
    ```
 
    Parse the JSON result.
@@ -110,8 +110,14 @@ to `done`. Do the 13 steps in order. Do not skip.
    `.atlas-ai/cdd/task-<id>.json`. A task without subtasks is treated as a
    single RED card.
 
-6. **Set in-progress**: run `task-master set-status --id <N> --status in-progress`
-   from the current project root. This flip is
+6. **Set in-progress**: run backend op `set-status` from the current project
+   root:
+
+   ```bash
+   python3 script.py set-status --id <N> --status in-progress
+   ```
+
+   This flip is
    observable by watchers and anchors the iteration in TaskMaster itself.
 
 7. **Dispatch implementer subagent** — NEVER in-session. The controller
@@ -146,7 +152,8 @@ to `done`. Do the 13 steps in order. Do not skip.
      recon ladder (step 11).
    - **BLOCKED** — the subagent cannot proceed. Try one model-tier upgrade
      first (e.g. standard -> capable). If still blocked, break the task
-     into smaller subtasks via `task-master expand --id <N>`. If still
+     into smaller subtasks via backend op `expand`
+     (`python3 script.py expand --id <N>`). If still
      blocked, set status=blocked, inbox parent, halt this iteration.
 
    Do NOT invent new status values. The four above are the only terminal
@@ -182,11 +189,11 @@ to `done`. Do the 13 steps in order. Do not skip.
    surface to inbox.
 
 10. **Mark done + propagate state**:
-    a. Run `task-master set-status --id <N> --status done` for the parent
-       task.
+    a. Run backend op `set-status` for the parent task:
+       `python3 script.py set-status --id <N> --status done`.
     b. **Subtask writeback**: for each subtask `S` in `task.subtasks` whose
        evidence file (per the CDD card from step 5) exists, run
-       `task-master set-status --id <N>.<S> --status done`. Subtasks left
+       `python3 script.py set-status --id <N>.<S> --status done`. Subtasks left
        `pending` while the parent is `done` are a data-integrity violation
        that breaks any tool computing progress from subtask state.
        (Codified 2026-06-04 — yesterday's run left all 39 subtasks

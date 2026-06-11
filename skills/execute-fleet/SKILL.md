@@ -75,7 +75,7 @@ Repeat until no runnable tasks remain:
    at a time. After each merge, run the checker/build gate expected for the
    project before merging the next branch.
 9. Mark the task done only after the merge gate passes:
-   `task-master set-status --id <id> --status done`.
+   `python3 script.py set-status --id <id> --status done`.
 10. Recompute waves after every accepted merge. Do not keep dispatching from a
     stale frontier.
 

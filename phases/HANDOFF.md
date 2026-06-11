@@ -62,10 +62,10 @@ Recommended: Plan Only
   You drive execution manually
 ```
 
-### Mode B: TaskMaster Auto-Execute
+### Mode B: TaskMaster Auto-Execute (Mode B — TaskMaster backend only)
 ```
 Recommended: TaskMaster Auto-Execute
-  task-master next -> implement -> task-master set-status done -> repeat
+  task-master next -> implement -> task-master set-status done -> repeat (Mode B — TaskMaster backend only)
   Native TaskMaster execution loop
 ```
 
@@ -107,11 +107,11 @@ Read the project's `./CLAUDE.md`. Append the TaskMaster workflow section if norm
 ```markdown
 ## Task Execution Workflow (prd-taskmaster)
 
-When implementing tasks, use TaskMaster MCP/CLI tools:
-1. `next_task` / `task-master next` -- get next dependency-ready task
-2. `set_task_status(id, "in_progress")` -- mark started
+When implementing tasks, use backend operations:
+1. `script.py next-task` -- get next dependency-ready task
+2. `script.py set-status --id <id> --status in-progress` -- mark started
 3. Implement the task (follow the plan step linked to this task)
-4. `set_task_status(id, "done")` -- mark complete
+4. `script.py set-status --id <id> --status done` -- mark complete
 5. Update TodoWrite with progress
 6. Repeat from step 1
 
@@ -162,7 +162,7 @@ If asks options -> show all 5 modes with one-line descriptions.
 If picks different -> execute that handoff instead.
 
 **Mode A handoff**: Invoke /writing-plans with spec path.
-**Mode B handoff**: Show `task-master next` command.
+**Mode B handoff (Mode B — TaskMaster backend only)**: Show `task-master next` command.
 **Mode C handoff**: Write .claude/ralph-loop-prompt.md and invoke ralph-loop.
 **Mode D handoff**: Invoke /atlas-loop with goal and task context.
 **Mode M handoff**: Load `.taskmaster/tasks/tasks.json`, create TodoWrite from it, and invoke the requested execution skill directly.

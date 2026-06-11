@@ -187,20 +187,36 @@ always fully usable on its own.
 | `parallel-apply --input <results.json>` | Merge parallel research results atomically |
 | `parallel-extract --output <path>` / `parallel-inject --input <path>` | Tagged ⇄ flat tasks bridge |
 
+## Backend operations
+
+This table is normative — instruction sites reference operations by name.
+
+| Operation | Command (both backends) | Notes |
+|-----------|--------------------------|-------|
+| `init` | `script.py init-project` | `taskmaster` backend wraps native TaskMaster initialization safely; `native` backend uses direct API initialization or returns `agent_action_required`. |
+| `parse-prd` | `script.py parse-prd --input <path> --num-tasks N [--tag]` | `taskmaster` backend wraps native TaskMaster PRD parsing; `native` backend uses direct API parsing or returns `agent_action_required`. |
+| `rate` | `script.py rate [--tag] [--no-research]` | `taskmaster` backend wraps native TaskMaster complexity/rating; `native` backend uses direct API rating or returns `agent_action_required`. |
+| `expand` | `script.py expand [--id N ...] [--no-research] [--tag]` | `taskmaster` backend wraps native TaskMaster expansion, including `tm-parallel` for expand; `native` backend uses direct API expansion or returns `agent_action_required`. |
+| `next` | `script.py next-task [--tag]` | Engine-native under every backend; next/set-status are engine-native under every backend. |
+| `set-status` | `script.py set-status --id <id> --status <status> [--tag]` | Engine-native under every backend; next/set-status are engine-native under every backend. |
+
 ## Parallel Research & Complexity
 
 **Decision tree for expansion + research** (token-economy aware):
 
 ```
 Manual flag                        → Native Mode (unchanged)
-pending tasks ≤ 3                  → serial NATIVE: analyze-complexity --research, then expand per task (main dir)
+pending tasks ≤ 3                  → TaskMasterBackend.expand internal: serial NATIVE
+                                     rate --research, then expand per task (main dir)
 task-master ≥ 0.43 AND research
-  role is a REAL structured API    → NATIVE-PARALLEL (DEFAULT): script.py tm-parallel
+  role is a REAL structured API    → TaskMasterBackend.expand internal: NATIVE-PARALLEL
+                                     (DEFAULT): script.py tm-parallel
   (sonar/anthropic/openai… key)      one serial analyze-complexity, then N isolated workdirs each running
                                      native `expand --id N --research` with an economy-tier model; ONE
                                      atomic harvest merge. Failed packets → agent-parallel rerun.
 free local proxy / no API key /
-  TM provider errors / TM < 0.43   → AGENT-PARALLEL (fallback): parallel-plan → N subagents → parallel-apply
+  TM provider errors / TM < 0.43   → native/agent path: AGENT-PARALLEL (fallback):
+                                     parallel-plan → N subagents → parallel-apply
 ```
 
 Why isolation dirs: task-master 0.43+ uses proper-lockfile + atomic writes, but its 10s lock-stale

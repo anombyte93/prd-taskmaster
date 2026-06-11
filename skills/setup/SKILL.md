@@ -1,11 +1,11 @@
 ---
 name: setup
 description: >-
-  Phase 0 of the prd-taskmaster pipeline. Verifies task-master is installed,
-  the project is initialized, the provider stack is configured (DETECT-FIRST —
-  never overwrite a working user config), and the AI pipeline actually runs.
-  Autonomous: zero user questions unless a hard block is hit. Declares the
-  Setup phase complete so DISCOVER can follow.
+  Phase 0 of the prd-taskmaster pipeline. Resolves the active backend,
+  initializes the project, configures the provider stack when the TaskMaster
+  backend is active (DETECT-FIRST — never overwrite a working user config),
+  and verifies the AI pipeline. Autonomous: zero user questions unless a hard
+  block is hit. Declares the Setup phase complete so DISCOVER can follow.
 user-invocable: false
 allowed-tools:
   - Read
@@ -36,25 +36,38 @@ Declarative phase skill. Invoked by the prd-taskmaster orchestrator when
 
 ## Procedure (5 steps, abort on hard failure)
 
-### Step 1: Installation check
+### Step 1: Backend detection
 
-Run `which task-master-ai`.
+Run backend detection:
 
-If the binary is not found, report:
+```bash
+python3 script.py backend-detect
+```
+
+If TaskMaster is unavailable, report one compact info line:
 
 ```
-task-master not installed. Install with:
+TaskMaster is optional. Installing task-master-ai unlocks the TaskMaster backend:
   npm install -g task-master-ai
-Then re-run this skill.
+Proceeding with the resolved backend.
 ```
 
-Abort the phase. Do NOT auto-install.
+Do NOT auto-install and do NOT stop for installation. Continue with the resolved
+backend.
 
 ### Step 2: Project init
 
 Check whether the current project has a `.taskmaster/` directory.
 
-If missing, run `task-master init --yes`. If present, continue.
+If missing, run backend op `init`:
+
+```bash
+python3 script.py init-project
+```
+
+If explicitly operating the TaskMaster backend, this may wrap
+`task-master init --yes` with the engine's `.mcp.json` protection. If
+`.taskmaster/` is present, continue.
 
 ### Step 2.5: Customisation bootstrap (REQUIRED — closes execute-task deadlock)
 
@@ -97,8 +110,11 @@ manually `touch`-ed from outside the loop.)
 
 ### Step 3: Provider configuration — DETECT-FIRST
 
-**Read `task-master models` output BEFORE setting anything.** This is the
-load-bearing rule. A working user config must NOT be overwritten silently.
+When the TaskMaster backend is active, **read `task-master models` output BEFORE
+setting anything.** This is the load-bearing rule. A working user config must
+NOT be overwritten silently. When the native backend is active, provider
+configuration is handled by the resolved backend and this TaskMaster-specific
+step is informational only.
 
 | `task-master models` output | Action |
 |---|---|
@@ -129,8 +145,11 @@ Research role.
 ### Step 4: Probe test
 
 If tasks already exist, call the MCP tool
-`mcp__plugin_prd-taskmaster_go__validate_setup` or run
-`task-master analyze-complexity --id 1`.
+`mcp__plugin_prd-taskmaster_go__validate_setup` or run backend op `rate`:
+
+```bash
+python3 script.py rate
+```
 
 If no tasks exist yet (fresh project), skip the probe — Step 3's provider
 configuration is sufficient evidence the pipeline is wired.
@@ -161,10 +180,10 @@ After Steps 1–5 report green:
 ## Red flags (stop and report, do not paper over)
 
 - "The config is set but looks wrong — I'll fix it" → NO. Report and ask.
-- "No tasks exist so I'll skip the whole provider step" → NO. Provider must be
-  configured before DISCOVER runs (otherwise `parse-prd` fails later).
+- "No tasks exist so I'll skip backend detection" → NO. Backend detection must
+  run before DISCOVER so later backend ops resolve consistently.
 - "I'll auto-install task-master via npm" → NO. Installation is a user action;
-  this skill only detects and reports.
+  this skill only reports that installation unlocks the TaskMaster backend.
 - "I can call advance_phase without check_gate" → NO. Gate first, always.
 
 ## Non-exits

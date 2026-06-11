@@ -186,7 +186,7 @@ is additive, never a replacement.
 - If grade is ACCEPTABLE or better AND placeholders_found == 0: proceed to
   Step 4.
 
-## Step 4: Parse tasks via TaskMaster
+## Step 4: Parse tasks via backend
 
 Calculate task count first:
 
@@ -194,30 +194,32 @@ Calculate task count first:
 
 **CLI**: `python3 script.py calc-tasks --requirements <count>`
 
-Then parse (detect method from preflight):
+Then parse through the normative backend operation:
 
-**MCP (preferred)**: `mcp__task-master-ai__parse_prd(input=".taskmaster/docs/prd.md", numTasks=<recommended>)`
+**backend op parse-prd**: `python3 script.py parse-prd --input .taskmaster/docs/prd.md --num-tasks <recommended>`
 
-**MCP fallback**: `mcp__plugin_prd-taskmaster_go__tm_parse_prd(input_path=".taskmaster/docs/prd.md", num_tasks=<recommended>)`
+**TaskMaster backend direct methods** (only when explicitly operating that backend):
+- **MCP**: `mcp__task-master-ai__parse_prd(input=".taskmaster/docs/prd.md", numTasks=<recommended>)`
+- **MCP fallback**: `mcp__plugin_prd-taskmaster_go__tm_parse_prd(input_path=".taskmaster/docs/prd.md", num_tasks=<recommended>)`
+- **CLI**: `task-master parse-prd --input .taskmaster/docs/prd.md --num-tasks <recommended>`
 
-**CLI**: `task-master parse-prd --input .taskmaster/docs/prd.md --num-tasks <recommended>`
-
-The parse writes to `.taskmaster/tasks/tasks.json`. Verify the file exists
+The backend operation writes to `.taskmaster/tasks/tasks.json`. Verify the file exists
 and contains the expected number of tasks before continuing.
 
-## Step 5: Analyze complexity via TaskMaster
+## Step 5: Rate complexity via backend
 
-Use TaskMaster's native complexity analysis instead of home-rolled
-classification:
+Use the normative backend operation instead of home-rolled classification:
 
-**MCP (preferred)**: `mcp__task-master-ai__analyze_complexity` (analyzes all tasks)
+**backend op rate**: `python3 script.py rate`
 
-**MCP fallback**: `mcp__plugin_prd-taskmaster_go__tm_analyze_complexity` (wraps the CLI)
+**TaskMaster backend direct methods** (only when explicitly operating that backend):
+- **MCP**: `mcp__task-master-ai__analyze_complexity` (analyzes all tasks)
+- **MCP fallback**: `mcp__plugin_prd-taskmaster_go__tm_analyze_complexity` (wraps the CLI)
+- **CLI**: `task-master analyze-complexity`
 
-**CLI**: `task-master analyze-complexity`
-
-**Important — output location**: `analyze-complexity` does NOT emit JSON to
-stdout. It writes structured analysis to
+**Important — output location**: the TaskMasterBackend internal
+`analyze-complexity` step does NOT emit JSON to stdout. It writes structured
+analysis to
 `.taskmaster/reports/task-complexity-report.json` and prints a human-readable
 table to stdout. To read the structured result, read the report file:
 
@@ -235,7 +237,7 @@ Every task MUST be expanded into subtasks before HANDOFF. Subtasks are
 verifiable checkpoints — without them, tasks are black boxes that either
 pass or fail with no intermediate proof.
 
-### Use `task-master expand --all`, NOT per-id parallel calls
+### Use backend op expand, NOT bare per-id parallel calls
 
 Per-id parallel calls (e.g. `task-master expand --id=1 & task-master expand
 --id=2 &`) hit a non-atomic read-modify-write race on
@@ -245,11 +247,19 @@ writer wins and earlier writes are silently lost — the AI call reports
 success, the subtasks were generated, but they never landed on disk.
 Detected in the v4 Shade dogfood 2026-04-13.
 
-`task-master expand --all` is the correct path. It is internally serial
-(one task at a time, one file write at a time) and therefore atomic across
-the whole batch.
+**backend op expand** is the correct path:
 
-**Invocation (CLI required path):**
+```bash
+python3 script.py expand
+```
+
+The backend operation chooses the correct implementation. Its
+TaskMasterBackend.expand internals may use serial native expansion,
+`tm-parallel`, or the TaskMaster backend direct methods below. The native/agent
+path uses agent-parallel planning and atomic apply when direct native API
+expansion is unavailable.
+
+**TaskMaster backend direct methods** (only when explicitly operating that backend):
 
 ```bash
 # Preferred: research-enriched expansion (when a research provider is configured)
@@ -304,7 +314,7 @@ total = len(all_tasks)
 no_subs = [t['id'] for t in all_tasks if not t.get('subtasks')]
 
 if no_subs:
-    print(f'WARNING: {covered}/{total} tasks expanded. Missing: {no_subs}. Re-run task-master expand --all.')
+    print(f'WARNING: {covered}/{total} tasks expanded. Missing: {no_subs}. Re-run backend op expand.')
 else:
     print(f'OK: All {total} tasks expanded ({sum(counts)} subtasks total).')
 "
@@ -316,13 +326,13 @@ If any task still shows 0 subtasks after `--all` completes (rate-limit hiccup,
 provider timeout, partial run), re-run the same command:
 
 ```bash
-task-master expand --all --research
+python3 script.py expand
 ```
 
-`--all` only re-expands tasks that are still in `pending` state with 0
-subtasks, so a second invocation is safe and recovers gracefully. Do NOT
-work around it with parallel per-id calls — that is the exact pattern
-that causes silent data loss.
+The backend operation only re-expands tasks that are still in `pending` state
+with 0 subtasks, so a second invocation is safe and recovers gracefully. Do NOT
+work around it with parallel per-id calls — that is the exact pattern that
+causes silent data loss.
 
 ## Evidence gate
 

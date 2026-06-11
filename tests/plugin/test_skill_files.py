@@ -7,6 +7,11 @@ import yaml
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+DOC_CONTRACT_PATHS = [
+    REPO_ROOT / "SKILL.md",
+    *sorted((REPO_ROOT / "phases").glob("*.md")),
+    *sorted((REPO_ROOT / "skills").glob("*/SKILL.md")),
+]
 
 
 def _parse_frontmatter(path: str) -> dict:
@@ -61,6 +66,51 @@ def test_setup_skill_ports_detect_first_rule():
     assert "task-master" in content
 
 
+def test_setup_skill_frames_taskmaster_install_as_backend_unlock():
+    content = (REPO_ROOT / "skills/setup/SKILL.md").read_text()
+    assert "unlocks the TaskMaster backend" in content
+    assert "Then re-run this skill" not in content
+    assert "Abort the phase" not in content
+    if "npm install -g task-master-ai" in content:
+        install_index = content.index("npm install -g task-master-ai")
+        window = content[max(0, install_index - 300): install_index + 300]
+        assert "unlocks the TaskMaster backend" in window
+        assert "prerequisite" not in window.lower()
+
+
+def test_orchestrator_skill_defines_normative_backend_operations():
+    content = (REPO_ROOT / "SKILL.md").read_text()
+    assert "## Backend operations" in content
+    assert "This table is normative — instruction sites reference operations by name." in content
+    assert "| Operation | Command (both backends) | Notes |" in content
+    for operation, command in (
+        ("init", "script.py init-project"),
+        ("parse-prd", "script.py parse-prd"),
+        ("rate", "script.py rate"),
+        ("expand", "script.py expand"),
+        ("next", "script.py next-task"),
+        ("set-status", "script.py set-status"),
+    ):
+        assert f"| `{operation}` | `{command}" in content, f"missing backend op row: {operation}"
+    assert "next/set-status are engine-native under every backend" in content
+
+
+def test_bare_taskmaster_lifecycle_commands_are_mode_b_only():
+    forbidden = ("task-master next", "task-master set-status")
+    failures = []
+    for path in DOC_CONTRACT_PATHS:
+        rel_path = path.relative_to(REPO_ROOT)
+        lines = path.read_text().splitlines()
+        for line_no, line in enumerate(lines, start=1):
+            if not any(command in line for command in forbidden):
+                continue
+            context_lines = lines[max(0, line_no - 4): min(len(lines), line_no + 3)]
+            context = "\n".join(context_lines)
+            if "Mode B" not in context or "TaskMaster backend only" not in context:
+                failures.append(f"{rel_path}:{line_no}: {line}")
+    assert not failures, "bare task-master lifecycle commands outside Mode B:\n" + "\n".join(failures)
+
+
 def test_discover_skill_has_valid_frontmatter():
     fm = _parse_frontmatter("skills/discover/SKILL.md")
     assert fm["name"] == "discover"
@@ -111,8 +161,13 @@ def test_generate_skill_references_gate_mcp_tools():
 def test_generate_skill_ports_six_steps():
     content = (REPO_ROOT / "skills/generate/SKILL.md").read_text()
     assert ".taskmaster/docs/prd.md" in content
-    assert "task-master parse-prd" in content
-    assert "task-master expand --all" in content
+    assert "backend op parse-prd" in content
+    assert "script.py parse-prd" in content
+    assert "backend op rate" in content
+    assert "script.py rate" in content
+    assert "backend op expand" in content
+    assert "script.py expand" in content
+    assert "TaskMaster backend direct methods" in content
     assert ".taskmaster/tasks/tasks.json" in content
     assert ".taskmaster/reports/task-complexity-report.json" in content
     assert "validate-prd" in content or "validate_prd" in content
@@ -198,6 +253,11 @@ def test_expand_tasks_skill_references_plugin_mcp_and_agent():
     assert len(content.splitlines()) >= 80, "expand-tasks SKILL.md too short"
 
 
+def test_expand_tasks_skill_mentions_backend_op_expand_native_api():
+    content = (REPO_ROOT / "skills/expand-tasks/SKILL.md").read_text()
+    assert "backend op expand (native api)" in content
+
+
 def test_research_expander_agent_has_valid_frontmatter():
     fm = _parse_frontmatter("agents/research-expander.md")
     assert fm["name"] == "research-expander"
@@ -250,6 +310,14 @@ def test_execute_task_skill_implements_cdd_loop():
         assert phrase in content, f"missing loop element: {phrase}"
     for enum in ("DONE_WITH_CONCERNS", "NEEDS_CONTEXT", "BLOCKED"):
         assert enum in content, f"missing route status: {enum}"
-    assert "task-master next --format json" in content
+    assert "script.py next-task" in content
+    assert "script.py set-status" in content
+    assert "task-master next --format json" not in content
     assert "sys.exit" not in content
     assert "EnterPlanMode" not in content
+
+
+def test_execute_fleet_skill_uses_backend_set_status():
+    content = (REPO_ROOT / "skills/execute-fleet/SKILL.md").read_text()
+    assert "script.py set-status" in content
+    assert "task-master set-status" not in content

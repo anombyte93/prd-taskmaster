@@ -86,17 +86,23 @@ Returns: `score`, `grade`, `checks`, `warnings`, `placeholders_found`.
 **If NEEDS_WORK**: Offer auto-fix or proceed-with-risk.
 **If GOOD+**: Proceed to task parsing.
 
-## Step 4: Parse Tasks via TaskMaster
+## Step 4: Parse Tasks via Backend
 
 Calculate task count:
 ```bash
 python3 ~/.claude/skills/prd-taskmaster/script.py calc-tasks --requirements <count>
 ```
 
-Parse (detect method from preflight):
+Parse through the normative backend operation:
 
-**MCP**: `parse_prd` tool with input=".taskmaster/docs/prd.md", numTasks=<recommended>
-**CLI**: `task-master parse-prd --input .taskmaster/docs/prd.md --num-tasks <recommended>`
+**backend op parse-prd**:
+```bash
+python3 ~/.claude/skills/prd-taskmaster/script.py parse-prd --input .taskmaster/docs/prd.md --num-tasks <recommended>
+```
+
+**TaskMaster backend direct methods** (only when explicitly operating that backend):
+- **MCP**: `mcp__task-master-ai__parse_prd(input=".taskmaster/docs/prd.md", numTasks=<recommended>)`
+- **CLI**: `task-master parse-prd --input .taskmaster/docs/prd.md --num-tasks <recommended>`
 
 ### Native Mode Path (manual flag / no TaskMaster)
 
@@ -164,17 +170,19 @@ Every task MUST be expanded into subtasks before execution begins. Subtasks are 
 
 ```
 Manual flag                      → subtasks written by hand, validate-tasks passed (skip expansion)
-pending tasks ≤ 3                → SERIAL NATIVE in the main dir:
-                                     task-master analyze-complexity --research   (once)
-                                     task-master expand --id=<id> --research     (per task)
+pending tasks ≤ 3                → TaskMasterBackend.expand internal: SERIAL NATIVE
+                                     in the main dir:
+                                     rate --research   (once)
+                                     expand --id=<id> --research     (per task)
 task-master ≥ 0.43 AND research
-  role is a REAL structured API  → NATIVE-PARALLEL (DEFAULT):
+  role is a REAL structured API  → TaskMasterBackend.expand internal:
+                                     NATIVE-PARALLEL (DEFAULT):
                                      python3 script.py tm-parallel
                                    (serial analyze-complexity → N isolated workdirs, each running
                                     native expand --research on an economy-tier model → ONE atomic
                                     harvest merge. Failed packets fall back to agent-parallel.)
 free local proxy / no API key /
-  TM errors / TM < 0.43          → AGENT-PARALLEL (fallback):
+  TM errors / TM < 0.43          → native/agent path: AGENT-PARALLEL (fallback):
                                      parallel-plan → N research subagents → parallel-apply
 ```
 
