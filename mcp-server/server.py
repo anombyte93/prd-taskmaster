@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FastMCP server for prd-taskmaster.
 
-Registers 19 tools wrapping the sibling modules (pipeline, capabilities,
+Registers 20 tools wrapping the sibling modules (pipeline, capabilities,
 taskmaster, validation, templates) plus server-native helpers
 (calc_tasks, backup_prd, append_workflow, debrief, log_progress,
 gen_test_tasks, read_state, gen_scripts, compute_fleet_waves).
@@ -27,6 +27,7 @@ from prd_taskmaster import taskmaster as TM
 from prd_taskmaster import templates as TPL
 from prd_taskmaster import lib as LIB
 from prd_taskmaster import fleet as F
+from prd_taskmaster import batch as B
 
 mcp = FastMCP("prd-taskmaster")
 
@@ -37,6 +38,14 @@ mcp = FastMCP("prd-taskmaster")
 def preflight(cwd: str | None = None) -> dict:
     """Inspect project state and recommend the next pipeline action."""
     return P.preflight(cwd)
+
+
+@mcp.tool()
+def engine_preflight(configure: bool = True) -> dict:
+    """One-call Phase 1: preflight + taskmaster + provider config/detect +
+    capabilities, with a human-presentable summary. Prefer this over the
+    individual probes."""
+    return B.run_engine_preflight(configure=configure)
 
 
 @mcp.tool()

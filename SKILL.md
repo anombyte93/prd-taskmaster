@@ -42,8 +42,16 @@ Skip: API docs, test specs, project timelines, PDF creation.
 
 Run preflight and auto-detect everything. Ask zero setup questions.
 
+**MCP (preferred — ONE batched call, no script spam):** if an `engine_preflight`
+MCP tool is available in your session (plugin install, or the engine's MCP server
+registered), call it once — it covers preflight + taskmaster detection + provider
+configuration + capabilities and returns a `summary` list to present verbatim.
+Skip the individual script calls below entirely.
+
+**CLI fallback (zero-dependency installs):** one batched subcommand, same result:
+
 ```bash
-python3 ~/.claude/skills/prd-taskmaster/script.py preflight
+python3 ~/.claude/skills/prd-taskmaster/script.py engine-preflight
 ```
 
 **From preflight JSON, determine the state:**
@@ -151,6 +159,7 @@ always fully usable on its own.
 
 | Command | Purpose |
 |---------|---------|
+| `engine-preflight` | ONE batched call: preflight + taskmaster + providers + capabilities + summary |
 | `preflight` | Detect environment state |
 | `detect-taskmaster` | Find MCP or CLI taskmaster |
 | `init-taskmaster` | task-master init with `.mcp.json` protection |

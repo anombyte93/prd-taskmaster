@@ -10,6 +10,7 @@ from prd_taskmaster.templates import cmd_load_template
 from prd_taskmaster.validation import cmd_validate_prd, cmd_validate_tasks
 from prd_taskmaster.tasks import cmd_calc_tasks, cmd_backup_prd, cmd_enrich_tasks
 from prd_taskmaster.taskmaster import cmd_init_taskmaster
+from prd_taskmaster.batch import cmd_engine_preflight
 from prd_taskmaster import fleet, parallel
 
 
@@ -22,6 +23,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     # preflight
     sub.add_parser("preflight", help="Detect environment state")
+
+    # engine-preflight (batched Phase 1: preflight + taskmaster + providers + capabilities)
+    p = sub.add_parser("engine-preflight", help="One-call Phase 1: all probes + summary")
+    p.add_argument("--no-configure", action="store_true")
 
     # detect-taskmaster
     sub.add_parser("detect-taskmaster", help="Find MCP or CLI taskmaster")
@@ -121,6 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 DISPATCH = {
     "preflight": cmd_preflight,
+    "engine-preflight": cmd_engine_preflight,
     "detect-taskmaster": cmd_detect_taskmaster,
     "configure-providers": cmd_configure_providers,
     "detect-providers": cmd_detect_providers,
