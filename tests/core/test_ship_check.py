@@ -161,3 +161,16 @@ def test_run_ship_check_api_agrees_on_empty(tmp_path: Path, monkeypatch) -> None
     assert result["exit_code"] == 1
     assert result["stdout"] is None
     assert any("pipeline.json missing" in f for f in result["failures"])
+
+
+def test_ship_check_passes_with_flat_tasks_format(tmp_path):
+    """Gate 2 must accept the flat {"tasks": [...]} format the engine itself
+    produces in Manual Mechanics Mode (dogfood finding, 2026-06-11)."""
+    _green(tmp_path)  # tagged all-green baseline...
+    # ...then overwrite tasks.json with the FLAT format
+    (tmp_path / ".taskmaster" / "tasks" / "tasks.json").write_text(json.dumps(
+        {"tasks": [{"id": 1, "status": "done"}, {"id": 2, "status": "done"}]}
+    ))
+    r = _run(tmp_path)
+    assert r.returncode == 0, f"stderr={r.stderr!r}"
+    assert "SHIP_CHECK_OK" in r.stdout

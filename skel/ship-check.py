@@ -79,9 +79,18 @@ def gate_tasks(repo_root: Path) -> Tuple[bool, List[str], list]:
         tdata = json.loads(tf.read_text())
     except json.JSONDecodeError as exc:
         return False, [f"tasks.json invalid JSON: {exc}"], []
+    # Accept both canonical formats: tagged {"master": {"tasks": [...]}}
+    # and flat {"tasks": [...]} (Manual Mechanics Mode / fleet samples).
     tasks = tdata.get("master", {}).get("tasks", [])
+    if not tasks and isinstance(tdata.get("tasks"), list):
+        tasks = tdata["tasks"]
     if not tasks:
-        return False, ["tasks.json has no tasks under master.tasks"], []
+        for value in tdata.values():
+            if isinstance(value, dict) and isinstance(value.get("tasks"), list) and value["tasks"]:
+                tasks = value["tasks"]
+                break
+    if not tasks:
+        return False, ["tasks.json has no tasks (checked master.tasks, flat tasks, and tagged fallback)"], []
     failures: List[str] = []
     for t in tasks:
         if t.get("status") != "done":
