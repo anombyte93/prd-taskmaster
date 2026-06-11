@@ -1,0 +1,75 @@
+{
+  "format": "atlas-license-key-v1",
+  "now": 1717200000,
+  "public_key_hex": "1fc868c32afba550e6db6db038302a6bd83fbbd848a87191f3a03bdcccf7e88d",
+  "vectors": [
+    {
+      "expected": {
+        "ok": true,
+        "reason": "valid"
+      },
+      "key": "ATLAS-eyJleHAiOjE3MTcyODY0MDAsImlhdCI6MTcxNzE5NjQwMCwibGlkIjoibGljX3ZlY192YWxpZCIsInBsYW4iOiJwcm8tbW9udGhseSIsInN1YiI6IjExMzlmODQ0MWM0MDJkZGI1NzdjMGE5MTNmY2Q1NWZiZDk1OTkxNzY1ZDU0YzI1MTgzMzc2YjEyNThhNjBiNTciLCJ2IjoxfQ.WmWCSicU8CKP7zxRybsyXfb2_uZFzF7Ybhv_wflG-DUjDjczy0a7awmqSt0paGozTrCzGl7yqcc77ljG2lHSCw",
+      "name": "valid",
+      "payload": {
+        "exp": 1717286400,
+        "iat": 1717196400,
+        "lid": "lic_vec_valid",
+        "plan": "pro-monthly",
+        "sub": "1139f8441c402ddb577c0a913fcd55fbd95991765d54c25183376b1258a60b57",
+        "v": 1
+      },
+      "reproducible": true
+    },
+    {
+      "expected": {
+        "ok": false,
+        "reason": "expired"
+      },
+      "key": "ATLAS-eyJleHAiOjE3MTcxMTM2MDAsImlhdCI6MTcxNzAyNzIwMCwibGlkIjoibGljX3ZlY19leHBpcmVkIiwicGxhbiI6InByby1hbm51YWwiLCJzdWIiOiJjNzFlODc3OWM0ZTkxZjU3MTRhNDY2NWUwNTdmYzE3MTQ1ZTJjYmI5ZGE2NDRiZTg0OWRiYjhmYTNlZGEzNTAyIiwidiI6MX0.8borueelBbkFmj1GOiB8wID3mVynC_z-2IYQEFQ6Sn0b0ZZZsu_NdDQM83aF9J1DZeBEUAryoIGJ9Dh_OWDiDQ",
+      "name": "expired",
+      "payload": {
+        "exp": 1717113600,
+        "iat": 1717027200,
+        "lid": "lic_vec_expired",
+        "plan": "pro-annual",
+        "sub": "c71e8779c4e91f5714a4665e057fc17145e2cbb9da644be849dbb8fa3eda3502",
+        "v": 1
+      },
+      "reproducible": true
+    },
+    {
+      "expected": {
+        "ok": false,
+        "reason": "signature mismatch"
+      },
+      "key": "ATLAS-eyJleHAiOjE3MTcyODY0MDAsImlhdCI6MTcxNzE5NjQwMCwibGlkIjoibGljX3ZlY190YW1wZXJlZCIsInBsYW4iOiJwcm8tbW9udGhseSIsInN1YiI6IjExMzlmODQ0MWM0MDJkZGI1NzdjMGE5MTNmY2Q1NWZiZDk1OTkxNzY1ZDU0YzI1MTgzMzc2YjEyNThhNjBiNTciLCJ2IjoxfQ.WmWCSicU8CKP7zxRybsyXfb2_uZFzF7Ybhv_wflG-DUjDjczy0a7awmqSt0paGozTrCzGl7yqcc77ljG2lHSCw",
+      "name": "tampered-payload",
+      "payload": {
+        "exp": 1717286400,
+        "iat": 1717196400,
+        "lid": "lic_vec_tampered",
+        "plan": "pro-monthly",
+        "sub": "1139f8441c402ddb577c0a913fcd55fbd95991765d54c25183376b1258a60b57",
+        "v": 1
+      },
+      "reproducible": false
+    },
+    {
+      "expected": {
+        "ok": false,
+        "reason": "signature mismatch"
+      },
+      "key": "ATLAS-eyJleHAiOjE3MTcyODY0MDAsImlhdCI6MTcxNzE5NjQwMCwibGlkIjoibGljX3ZlY192YWxpZCIsInBsYW4iOiJwcm8tbW9udGhseSIsInN1YiI6IjExMzlmODQ0MWM0MDJkZGI1NzdjMGE5MTNmY2Q1NWZiZDk1OTkxNzY1ZDU0YzI1MTgzMzc2YjEyNThhNjBiNTciLCJ2IjoxfQ.hCBr4uhhVXYqG0YBudByqQb7_pq8OhHpoRUCORm0qjtMrVg1emzmMgTHJ7A-oGkhTgEFTq0UZhueltqPE7JeBA",
+      "name": "signature-mismatch",
+      "payload": {
+        "exp": 1717286400,
+        "iat": 1717196400,
+        "lid": "lic_vec_valid",
+        "plan": "pro-monthly",
+        "sub": "1139f8441c402ddb577c0a913fcd55fbd95991765d54c25183376b1258a60b57",
+        "v": 1
+      },
+      "reproducible": false
+    }
+  ]
+}
