@@ -1,10 +1,11 @@
-"""MCP tool contract tests — the merged server.py registers 18 tools.
+"""MCP tool contract tests — the merged server.py registers 19 tools.
 
 Retargeted from the plugin: server.py now imports from prd_taskmaster.* and
 lives at mcp-server/server.py. We add the repo root (so `prd_taskmaster` is
 importable) and mcp-server/ (so `import server` works) to sys.path.
 """
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -42,8 +43,36 @@ def test_load_template_unknown_type_raises():
     assert "not found" in str(exc.value).lower()
 
 
-def test_server_registers_18_tools():
-    """Verify server.py declares all 18 expected tool functions at module scope."""
+def test_compute_fleet_waves_tool(tmp_path, monkeypatch):
+    import server as S
+    tasks_dir = tmp_path / ".taskmaster" / "tasks"
+    tasks_dir.mkdir(parents=True)
+    (tasks_dir / "tasks.json").write_text(json.dumps({
+        "alpha": {
+            "tasks": [
+                {"id": 1, "status": "pending", "dependencies": []},
+                {"id": 2, "status": "pending", "dependencies": []},
+                {"id": 3, "status": "pending", "dependencies": [1, 2]},
+            ]
+        }
+    }))
+    monkeypatch.chdir(tmp_path)
+
+    r = S.compute_fleet_waves(concurrency=2, tag="alpha")
+
+    assert r == {
+        "ok": True,
+        "tag": "alpha",
+        "waves": [[1, 2], [3]],
+        "blocked": [],
+        "deadlocked": False,
+        "ready": [1, 2],
+        "concurrency": 2,
+    }
+
+
+def test_server_registers_19_tools():
+    """Verify server.py declares all 19 expected tool functions at module scope."""
     import server as S
     expected = {
         "preflight", "current_phase", "advance_phase", "check_gate",
@@ -51,8 +80,9 @@ def test_server_registers_18_tools():
         "detect_capabilities", "load_template", "validate_prd",
         "calc_tasks", "gen_test_tasks", "backup_prd", "append_workflow",
         "debrief", "log_progress", "read_state", "gen_scripts",
+        "compute_fleet_waves",
     }
-    assert len(expected) == 18
+    assert len(expected) == 19
     public_attrs = {name for name in dir(S) if not name.startswith("_")}
     missing = expected - public_attrs
     assert not missing, f"missing tools: {sorted(missing)}"

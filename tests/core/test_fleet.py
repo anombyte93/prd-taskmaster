@@ -1,6 +1,14 @@
-"""Unit tests for the Atlas Fleet wave scheduler."""
+"""Unit and CLI tests for the Atlas Fleet wave scheduler."""
+
+import json
+import subprocess
+import sys
+from pathlib import Path
 
 from prd_taskmaster.fleet import compute_waves, ready_set
+
+REPO = Path(__file__).resolve().parents[2]
+SCRIPT = REPO / "script.py"
 
 
 def _task(task_id, status="pending", dependencies=None):
@@ -24,6 +32,110 @@ def test_compute_waves_linear_chain():
         "blocked": [],
         "deadlocked": False,
     }
+
+
+def _run_cli(cwd, *args):
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    )
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def _write_tasks(tmp_path, payload, current_tag=None):
+    tasks_dir = tmp_path / ".taskmaster" / "tasks"
+    tasks_dir.mkdir(parents=True)
+    (tasks_dir / "tasks.json").write_text(json.dumps(payload))
+    if current_tag is not None:
+        (tmp_path / ".taskmaster" / "state.json").write_text(
+            json.dumps({"currentTag": current_tag})
+        )
+
+
+def test_fleet_waves_cli_uses_current_tag(tmp_path):
+    _write_tasks(
+        tmp_path,
+        {
+            "alpha": {
+                "tasks": [
+                    _task(1),
+                    _task(2, dependencies=[1]),
+                    _task(3, status="done"),
+                ]
+            }
+        },
+        current_tag="alpha",
+    )
+
+    code, out, err = _run_cli(tmp_path, "fleet-waves")
+
+    assert code == 0, err
+    data = json.loads(out)
+    assert data == {
+        "ok": True,
+        "tag": "alpha",
+        "waves": [[1], [2]],
+        "blocked": [],
+        "deadlocked": False,
+        "ready": [1],
+        "concurrency": 3,
+    }
+
+
+def test_fleet_waves_cli_supports_flat_tasks_with_tag(tmp_path):
+    _write_tasks(
+        tmp_path,
+        {
+            "tasks": [
+                _task(1),
+                _task(2, dependencies=[1]),
+            ]
+        },
+    )
+
+    code, out, err = _run_cli(tmp_path, "fleet-waves", "--tag", "release")
+
+    assert code == 0, err
+    data = json.loads(out)
+    assert data["ok"] is True
+    assert data["tag"] == "release"
+    assert data["waves"] == [[1], [2]]
+    assert data["ready"] == [1]
+
+
+def test_fleet_waves_cli_concurrency_override(tmp_path):
+    _write_tasks(
+        tmp_path,
+        {
+            "master": {
+                "tasks": [
+                    _task(1),
+                    _task(2),
+                    _task(3),
+                ]
+            }
+        },
+    )
+
+    code, out, err = _run_cli(tmp_path, "fleet-waves", "--concurrency", "2")
+
+    assert code == 0, err
+    data = json.loads(out)
+    assert data["concurrency"] == 2
+    assert data["ready"] == [1, 2, 3]
+    assert data["waves"] == [[1, 2], [3]]
+
+
+def test_fleet_waves_cli_missing_tasks_json_fails(tmp_path):
+    code, out, err = _run_cli(tmp_path, "fleet-waves")
+
+    assert code == 1, err
+    data = json.loads(out)
+    assert data["ok"] is False
+    assert ".taskmaster/tasks/tasks.json" in data["error"]
+    assert "not found" in data["error"]
 
 
 def test_compute_waves_diamond_dependency_preserves_input_order():

@@ -1,8 +1,14 @@
 """Atlas Fleet dependency scheduler.
 
-The public functions in this module operate on a plain list of task dicts.
-Tag resolution belongs to CLI/MCP layers, not this scheduler core.
+The scheduler core operates on a plain list of task dicts. The run_* and
+cmd_* wrappers resolve TaskMaster tags for CLI/MCP callers.
 """
+
+import argparse
+import json
+
+from prd_taskmaster import parallel
+from prd_taskmaster.lib import CommandError, emit, fail
 
 
 def _task_id(task):
@@ -27,6 +33,21 @@ def _dependencies(task):
 
 def _chunk(items, size):
     return [items[index:index + size] for index in range(0, len(items), size)]
+
+
+def _load_tagged_or_raise(tag):
+    if not parallel.TASKS.is_file():
+        raise CommandError(f"{parallel.TASKS} not found")
+    try:
+        raw = json.loads(parallel.TASKS.read_text())
+    except json.JSONDecodeError as exc:
+        raise CommandError(f"Failed to parse {parallel.TASKS}: {exc}") from exc
+
+    if tag not in raw or not isinstance(raw.get(tag), dict):
+        if "tasks" in raw and isinstance(raw["tasks"], list):
+            return raw, None
+        raise CommandError(f"tag '{tag}' not found in {parallel.TASKS}")
+    return raw, tag
 
 
 def ready_set(tasks):
@@ -77,3 +98,37 @@ def compute_waves(tasks, max_concurrency=3):
         "blocked": [],
         "deadlocked": False,
     }
+
+
+def run_fleet_waves(concurrency=3, tag=""):
+    """Resolve TaskMaster tasks and return fleet wave scheduling JSON."""
+    if concurrency < 1:
+        raise CommandError("concurrency must be >= 1")
+
+    resolved_tag = parallel.current_tag(argparse.Namespace(tag=tag or None))
+    raw, tag_key = _load_tagged_or_raise(resolved_tag)
+    try:
+        tasks = parallel.get_tasks(raw, tag_key)
+    except (KeyError, TypeError) as exc:
+        raise CommandError(
+            f"tasks missing for tag '{resolved_tag}' in {parallel.TASKS}"
+        ) from exc
+
+    waves = compute_waves(tasks, concurrency)
+    return {
+        "ok": True,
+        "tag": resolved_tag,
+        "waves": waves["waves"],
+        "blocked": waves["blocked"],
+        "deadlocked": waves["deadlocked"],
+        "ready": ready_set(tasks),
+        "concurrency": concurrency,
+    }
+
+
+def cmd_fleet_waves(args):
+    """CLI wrapper for fleet-waves."""
+    try:
+        emit(run_fleet_waves(args.concurrency, getattr(args, "tag", "")))
+    except CommandError as exc:
+        fail(exc.message, **exc.extra)

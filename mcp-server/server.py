@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """FastMCP server for prd-taskmaster.
 
-Registers 18 tools wrapping the sibling modules (pipeline, capabilities,
+Registers 19 tools wrapping the sibling modules (pipeline, capabilities,
 taskmaster, validation, templates) plus server-native helpers
 (calc_tasks, backup_prd, append_workflow, debrief, log_progress,
-gen_test_tasks, read_state, gen_scripts).
+gen_test_tasks, read_state, gen_scripts, compute_fleet_waves).
 
 No explicit process termination — mcp.run() is the event loop and
 returns naturally when the transport closes.
@@ -26,11 +26,12 @@ from prd_taskmaster import mode_recommend as C
 from prd_taskmaster import taskmaster as TM
 from prd_taskmaster import templates as TPL
 from prd_taskmaster import lib as LIB
+from prd_taskmaster import fleet as F
 
 mcp = FastMCP("prd-taskmaster")
 
 
-# ─── Delegation tools (10) ────────────────────────────────────────────────────
+# ─── Delegation tools (11) ────────────────────────────────────────────────────
 
 @mcp.tool()
 def preflight(cwd: str | None = None) -> dict:
@@ -90,6 +91,12 @@ def validate_prd(input_path: str, ai: bool = False) -> dict:
 def load_template(type: str = "comprehensive") -> dict:
     """Load the named PRD template bundled with the plugin."""
     return TPL.run_load_template(type)
+
+
+@mcp.tool()
+def compute_fleet_waves(concurrency: int = 3, tag: str = "") -> dict:
+    """Compute Atlas Fleet dependency waves for the selected TaskMaster tag."""
+    return F.run_fleet_waves(concurrency, tag)
 
 
 # ─── Server-native tools (8) ──────────────────────────────────────────────────

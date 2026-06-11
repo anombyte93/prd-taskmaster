@@ -10,7 +10,7 @@ from prd_taskmaster.templates import cmd_load_template
 from prd_taskmaster.validation import cmd_validate_prd, cmd_validate_tasks
 from prd_taskmaster.tasks import cmd_calc_tasks, cmd_backup_prd, cmd_enrich_tasks
 from prd_taskmaster.taskmaster import cmd_init_taskmaster
-from prd_taskmaster import parallel
+from prd_taskmaster import fleet, parallel
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -111,6 +111,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tag")
     p.add_argument("--input", required=True)
 
+    # fleet-waves
+    p = sub.add_parser("fleet-waves", help="Compute Atlas Fleet dependency waves")
+    p.add_argument("--concurrency", type=int, default=3)
+    p.add_argument("--tag", default="")
+
     return parser
 
 
@@ -131,6 +136,7 @@ DISPATCH = {
     "parallel-apply": parallel.cmd_apply,
     "parallel-extract": parallel.cmd_extract,
     "parallel-inject": parallel.cmd_inject,
+    "fleet-waves": fleet.cmd_fleet_waves,
 }
 
 
