@@ -13,3 +13,7 @@ binding = "LICENSE_DB"
 database_name = "atlas-license-db"
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
+
+[[analytics_engine_datasets]]
+binding = "TELEMETRY"
+dataset = "telemetry_events"

@@ -12,6 +12,9 @@ export const TEST_PUBLIC_KEY_HEX =
 export function makeTestEnv(overrides: Partial<Env> = {}): Env {
   return {
     ...env,
+    TELEMETRY: {
+      writeDataPoint: () => undefined
+    } as unknown as AnalyticsEngineDataset,
     STRIPE_WEBHOOK_SECRET: TEST_STRIPE_WEBHOOK_SECRET,
     STRIPE_API_KEY: TEST_STRIPE_API_KEY,
     ED25519_PRIVATE_KEY: TEST_PRIVATE_SEED_HEX,

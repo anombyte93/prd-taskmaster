@@ -1,6 +1,7 @@
 import type { Env } from "./types";
 import { handleLicenseRefresh } from "./refresh";
 import { handleStripeWebhook } from "./stripe";
+import { handleTelemetry } from "./telemetry";
 
 const POST_ONLY_ROUTES = new Set([
   "/stripe/webhook",
@@ -32,6 +33,9 @@ export default {
       }
       if (pathname === "/stripe/webhook") {
         return handleStripeWebhook(request, env, ctx);
+      }
+      if (pathname === "/telemetry") {
+        return handleTelemetry(request, env);
       }
       return notImplemented();
     }

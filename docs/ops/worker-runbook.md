@@ -169,6 +169,31 @@ integration was skipped and recorded as blocked in `FLEET-LOG-BACKEND.md`. The
 Vitest suite verifies active, trialing, cancelled, unknown, rate-limited, CORS,
 and method-guard behavior against local D1 with mocked Stripe responses.
 
+## Telemetry Endpoint
+
+`POST https://api.atlas-ai.au/telemetry` accepts exact JSON with
+`install_id`, `event`, `version`, and `os`. Valid events are `install`,
+`atlas_invoked`, `reach_execute`, and `ship_check_ok`. Valid requests return
+`204`; invalid schema returns `400`; non-POST methods return `405`.
+
+Telemetry storage has two sinks:
+
+- D1 table `telemetry_events`, the primary store for exact KPI queries.
+- Workers Analytics Engine binding `TELEMETRY`, used for cheap event counters.
+
+Run local migrations and tests:
+
+```sh
+cd workers
+npm run d1:migrate:local
+npm test -- test/telemetry.test.ts
+```
+
+KPI SQL and smoke-test curls are documented in
+`docs/ops/telemetry-queries.md`. Production deployment and public smoke testing
+were intentionally skipped in this environment per the mission guardrail; the
+blocked item is recorded in `FLEET-LOG-BACKEND.md`.
+
 ## D1
 
 The Worker binds D1 as `LICENSE_DB`. Local migrations are safe to run with:

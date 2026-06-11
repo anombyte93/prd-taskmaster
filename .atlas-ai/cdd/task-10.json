@@ -1,0 +1,19 @@
+{
+  "task": 10,
+  "given": "The Worker exposes a public telemetry endpoint for minimal Atlas usage events",
+  "when": "POST /telemetry receives valid events, malformed payloads, storage failures, or KPI query fixtures",
+  "then": [
+    "valid install, atlas_invoked, reach_execute, and ship_check_ok payloads return 204",
+    "schema violations return 400 and method violations return 405",
+    "valid events are inserted into D1 telemetry_events",
+    "valid events call Analytics Engine writeDataPoint with blobs [event, version, os] and indexes [install_id]",
+    "storage sink failures are logged without changing a valid request response",
+    "documented D1 KPI queries compute A1, A3, AC1, and AC2 from seeded rows"
+  ],
+  "evidence_required": [
+    "workers/test/telemetry.test.ts red/green output",
+    "D1 migration 0003 applied locally",
+    "Worker typecheck and vitest output",
+    "blocked deploy/smoke logged because production deploy is intentionally skipped"
+  ]
+}
