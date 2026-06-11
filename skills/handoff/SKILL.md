@@ -7,7 +7,8 @@ description: >-
   mode (A/B/C) with reasoned justification, appends the task-execution
   workflow to CLAUDE.md, surfaces a structured AskUserQuestion multi-option
   picker for user agency, and dispatches the chosen mode. Mode D (Atlas Fleet)
-  is always shown as a locked Atlas Pro teaser — never selectable, never executed.
+  is selectable only when detect_capabilities returns tier=premium (licensed
+  atlas-launcher detected); otherwise it is a locked Atlas Pro teaser.
   Plan Mode is NOT used (spec section 13.5): AskUserQuestion is the sole
   user-agency mechanism. Declares HANDOFF complete so EXECUTE can follow.
 user-invocable: false
@@ -23,7 +24,7 @@ Declarative phase skill. Invoked by the prd-taskmaster orchestrator when
 `current_phase` is `HANDOFF`. Never called directly by a user.
 
 The one rule: **detect what the user has, recommend ONE mode, give the user a
-structured choice, dispatch the chosen mode. Mode D is a roadmap teaser only.**
+structured choice, dispatch the chosen mode. Mode D executes only on tier=premium; otherwise it is a locked teaser.**
 
 ## Entry gate
 
@@ -52,7 +53,7 @@ HANDOFF CHECKLIST:
 - [ ] Summary displayed (spec location, task count, capabilities)
 - [ ] CLAUDE.md task workflow appended (idempotent)
 - [ ] AskUserQuestion mode picker surfaced (or prose fallback if hook-blocked)
-- [ ] User choice dispatched (Mode A / B / C)
+- [ ] User choice dispatched (Mode A / B / C, or D when tier=premium)
 - [ ] Debrief scaffold emitted (optional, silently tolerated)
 - [ ] Handoff complete
 ```
@@ -71,14 +72,15 @@ Key signals:
 | superpowers plugin | Modes A, C (brainstorm, plans, subagents) |
 | task-master-ai (CLI or MCP) | Mode B (native auto-execute loop) |
 | ralph-loop plugin | Mode C (iterative execution loop) |
-| atlas-loop skill | pre-release seed for Mode D — Atlas Pro (locked) |
-| atlas-cdd skill | pre-release seed for Mode D — Atlas Pro (locked) |
+| atlas-launcher MCP (licensed) | Mode D — Atlas Fleet (tier=premium) |
+| atlas-loop / atlas-cdd skills | legacy Mode-D seeds — superseded by atlas-launcher detection |
 | Research model (task-master or MCP) | Deep research per task |
 | Playwright MCP | Tier S browser verification |
 
-**Mode D (Atlas Fleet) is locked unless licensed.** Even if `atlas-loop` and
-`atlas-cdd` are detected locally, the skill must NOT execute Mode D — see
-Step 2's decision logic and the Mode D section below.
+**Mode D (Atlas Fleet) unlocks on `tier: "premium"` only** — i.e. a licensed
+`atlas-launcher` MCP registration detected by `detect_atlas_launcher()`. Local
+`atlas-loop`/`atlas-cdd` skills do NOT unlock it. See Step 2 and the Mode D
+section below.
 
 ## Step 2: Recommend ONE mode
 
@@ -91,8 +93,13 @@ Decision logic (first match wins):
 
 External-tool modes (E–J: Cursor, RooCode, Codex, Gemini, CodeRabbit, Aider)
 are offered as alternatives via the `alternative_modes` field, not primary
-recommendations. **Mode D is never the recommended mode — it is always a
-locked Atlas Pro teaser,** regardless of which local plugins are installed.
+recommendations. **Mode D is recommended iff `tier == "premium"` AND the task
+graph parallelizes (>= 2 independent dependency chains — check `fleet-waves`
+output: any wave with >= 2 chunks). Premium + serial graph: recommend the best
+free mode and say why ("your tasks form a single dependency chain — Verified
+Loop is the right tool here"); Fleet stays selectable but not default. Free
+tier: Mode D is a locked Atlas Pro teaser, never selectable, regardless of
+which local plugins are installed.**
 
 ### Mode A: Plan Only (Manual)
 
@@ -125,7 +132,7 @@ Recommended: Plan + Ralph Loop
   Completion: doubt agent reviews verification log before promise satisfied.
 ```
 
-### Mode D: 🔒 Atlas Fleet (Atlas Pro — locked unless licensed)
+### Mode D: Atlas Fleet (selectable on tier=premium; 🔒 locked teaser on free)
 
 ```
 🔒 Atlas Fleet                                          Atlas Pro · $29/mo
@@ -139,11 +146,17 @@ Recommended: Plan + Ralph Loop
   Unlock: https://atlas-ai.au/pro   (the free modes above stay free forever)
 ```
 
-**In Phase A this mode is a locked teaser — not selectable, never executed.**
-It becomes a real, selectable mode only when a licensed `atlas-launcher` is
-detected (`detect_capabilities` → `tier: "premium"` + `atlas_launcher: true`);
-that wiring ships in the Atlas Fleet release. If the user selects Mode D while
-locked, respond with:
+**When `tier == "premium"`** (licensed `atlas-launcher` detected): Mode D is a
+real, selectable mode — dispatching it invokes `/prd-taskmaster:execute-fleet`
+(the wave orchestrator skill). Show the unlocked card:
+
+```
+▸ Atlas Fleet                     ★ Pro · license active
+  <N> waves · est. from your dependency graph · walk-away
+```
+
+**When `tier == "free"`**: Mode D is a locked teaser — not selectable, never
+executed. If the user selects it while locked, respond with:
 
 > "Atlas Fleet is part of Atlas Pro ($29/mo). On this project it would split
 > your tasks into parallel waves across isolated worktrees with checker-gated
@@ -235,7 +248,7 @@ Capabilities:
   [check|circle] Playwright (browser verification)
   [check|circle] Research provider
   [check|circle] Ralph-loop plugin
-  [check|circle] Atlas Fleet (Atlas Pro — locked)
+  [check|circle] Atlas Fleet (premium: selectable · free: locked)
 ```
 
 ## Step 5: Mandatory AskUserQuestion for mode selection
@@ -272,8 +285,9 @@ natural-language affirmatives, no ambiguity.
    - "Use another tool…" — expands the applicable alternatives from E–J
    - "Show me more detail before I decide" — loops back to Step 4 summary
 
-   Mark the recommended mode as the default (never Atlas Fleet). Selecting
-   Atlas Fleet while locked returns the upgrade response (see the Mode D block
+   Mark the recommended mode as the default (Atlas Fleet may be the default
+   only when tier=premium AND the graph parallelizes). Selecting Atlas Fleet
+   while locked (free tier) returns the upgrade response (see the Mode D block
    in Step 2) and re-prompts with only the free modes (plus any applicable
    alternatives).
 
@@ -294,7 +308,7 @@ natural-language affirmatives, no ambiguity.
      (Migrated from `/ralph-loop:ralph-loop` 2026-06-04 — Claude Code's
      built-in `/goal` evaluator structurally solves the controller-wears-
      different-hats triple-verify rot caught in the 2026-06-03 audit.)
-   - **Mode D handoff**: not executable — waitlist response only, re-prompt
+   - **Mode D handoff (tier=premium)**: invoke `/prd-taskmaster:execute-fleet` — it owns the wave loop, worker dispatch, verification, merges, and SHIP_CHECK_OK termination. (free tier: upgrade response only, re-prompt)
 
 ### Hook-blocked fallback (graceful degradation)
 
