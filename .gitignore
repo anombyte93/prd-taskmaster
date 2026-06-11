@@ -52,10 +52,11 @@ node_modules/
 *.sw?
 # OS specific
 
-# Task files
-# tasks.json
-# tasks/ 
 .claude/
 .env
 .env.example
 CLAUDE.md
+
+# Task files
+# tasks.json
+# tasks/ 

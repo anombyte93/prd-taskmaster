@@ -32,21 +32,56 @@ def init_taskmaster(method: str = "cli") -> dict:
     project_root = Path.cwd()
     env = _build_env()
 
+    # DETECT-FIRST (FR-6): task-master init overwrites an existing .mcp.json with
+    # its own template (placeholder API keys), destroying e.g. a plugin's server
+    # registration. Snapshot it and restore verbatim if init clobbers it.
+    mcp_json = project_root / ".mcp.json"
+    mcp_before = mcp_json.read_text() if mcp_json.is_file() else None
+
     # try full flag set, fall back if older taskmaster
     attempts = [
         [cli, "init", "--yes", "--store-tasks-in-git", "--rules=claude"],
         [cli, "init", "--yes"],
     ]
     last_error = None
+    result = None
     for cmd in attempts:
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60, cwd=project_root)
             if r.returncode == 0:
-                return {"ok": True, "project_root": str(project_root), "cmd": " ".join(cmd)}
+                result = {"ok": True, "project_root": str(project_root), "cmd": " ".join(cmd)}
+                break
             last_error = r.stderr
         except Exception as e:
             last_error = str(e)
-    return emit_json_error(f"task-master init failed: {last_error}", project_root=str(project_root))
+
+    mcp_protected = False
+    if mcp_before is not None and mcp_json.is_file() and mcp_json.read_text() != mcp_before:
+        mcp_json.write_text(mcp_before)
+        mcp_protected = True
+
+    if result is None:
+        return emit_json_error(f"task-master init failed: {last_error}", project_root=str(project_root))
+
+    result["mcp_json_protected"] = mcp_protected
+    if mcp_protected:
+        result["note"] = (
+            ".mcp.json was restored to its pre-init contents (task-master init had "
+            "overwritten it). Add TaskMaster's MCP server manually if you want it."
+        )
+    return result
+
+
+def cmd_init_taskmaster(args) -> None:
+    """CLI wrapper: protected task-master init (preserves an existing .mcp.json)."""
+    from prd_taskmaster.lib import emit, fail
+
+    result = init_taskmaster()
+    if result.get("ok"):
+        emit(result)
+    else:
+        fail(result.get("error", "task-master init failed"),
+             **{k: v for k, v in result.items() if k not in ("ok", "error")})
 
 
 def detect_taskmaster_method() -> str:

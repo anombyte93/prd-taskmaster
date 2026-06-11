@@ -9,6 +9,7 @@ from prd_taskmaster.capabilities import cmd_detect_capabilities
 from prd_taskmaster.templates import cmd_load_template
 from prd_taskmaster.validation import cmd_validate_prd, cmd_validate_tasks
 from prd_taskmaster.tasks import cmd_calc_tasks, cmd_backup_prd, cmd_enrich_tasks
+from prd_taskmaster.taskmaster import cmd_init_taskmaster
 from prd_taskmaster import parallel
 
 
@@ -42,9 +43,21 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("validate-prd", help="Run 13 quality checks on a PRD")
     p.add_argument("--input", required=True, help="Path to PRD file")
 
+    # init-taskmaster
+    sub.add_parser(
+        "init-taskmaster",
+        help="Run task-master init with .mcp.json protection (raw init overwrites it)",
+    )
+
     # calc-tasks
     p = sub.add_parser("calc-tasks", help="Calculate recommended task count")
     p.add_argument("--requirements", required=True, type=int, help="Number of functional requirements")
+    p.add_argument(
+        "--scale",
+        choices=["solo", "team", "enterprise"],
+        default=None,
+        help="Discovery scale classification; clamps to its band (solo 8-12, team 12-20, enterprise 20-30)",
+    )
 
     # backup-prd
     p = sub.add_parser("backup-prd", help="Timestamped PRD backup")
@@ -113,6 +126,7 @@ DISPATCH = {
     "backup-prd": cmd_backup_prd,
     "validate-tasks": cmd_validate_tasks,
     "enrich-tasks": cmd_enrich_tasks,
+    "init-taskmaster": cmd_init_taskmaster,
     "parallel-plan": parallel.cmd_plan,
     "parallel-apply": parallel.cmd_apply,
     "parallel-extract": parallel.cmd_extract,

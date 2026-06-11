@@ -33,19 +33,29 @@ def run_detect_capabilities() -> dict:
     capabilities["taskmaster-mcp"] = tm["method"] == "mcp"
     capabilities["taskmaster-cli"] = tm["method"] in ("mcp", "cli")
 
-    # Determine recommended mode
-    if capabilities["superpowers"]:
+    # Determine recommended mode — same decision logic as the handoff skill:
+    # superpowers + loop runner -> Verified Loop (C); superpowers only ->
+    # Plan & Drive (A); taskmaster only -> Auto-Execute (B); fallback -> A.
+    if capabilities["superpowers"] and capabilities["ralph-loop"]:
+        recommended = "C"
+        reason = "Verified Loop — superpowers + ralph-loop detected (evidence-gated execution)"
+    elif capabilities["superpowers"]:
         recommended = "A"
-        reason = "Superpowers plugin detected — full AI-assisted pipeline available"
+        reason = "Plan & Drive — superpowers detected, no loop runner installed"
     elif capabilities["taskmaster-cli"]:
         recommended = "B"
-        reason = "TaskMaster CLI available — native auto-execute"
+        reason = "Auto-Execute — TaskMaster CLI available, native loop"
     else:
-        recommended = "C"
-        reason = "Manual control — universal fallback"
+        recommended = "A"
+        reason = "Plan & Drive — universal fallback, no execution tooling detected"
+
+    # Tier: "premium" requires a licensed atlas-launcher (detection ships with
+    # Atlas Fleet / Phase B); until then the standalone skill is always free.
+    tier = "free"
 
     return {
         "ok": True,
+        "tier": tier,
         "capabilities": capabilities,
         "recommended_mode": recommended,
         "recommended_reason": reason,

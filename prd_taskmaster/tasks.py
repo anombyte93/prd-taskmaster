@@ -17,22 +17,47 @@ from prd_taskmaster.lib import (
 )
 
 
-def run_calc_tasks(requirements: int) -> dict:
-    """Calculate recommended task count: requirements * 1.5, clamped 10-40."""
+# Scale bands from discovery's Solo/Team/Enterprise classification
+# (PRODUCT-SPEC US-T1: Solo 8-12 / Team 12-20 / Enterprise 20-30).
+SCALE_BANDS = {
+    "solo": (8, 12),
+    "team": (12, 20),
+    "enterprise": (20, 30),
+}
+
+
+def run_calc_tasks(requirements: int, scale: str | None = None) -> dict:
+    """Calculate recommended task count: requirements * 1.5, clamped to the
+    scale band when discovery classified one, else the generic [10, 40]."""
     raw = math.ceil(requirements * 1.5)
-    recommended = max(10, min(40, raw))
-    return {
+    if scale:
+        key = scale.lower()
+        if key not in SCALE_BANDS:
+            raise CommandError(
+                f"unknown scale: {scale}",
+                {"valid_scales": sorted(SCALE_BANDS)},
+            )
+        lo, hi = SCALE_BANDS[key]
+        formula = f"ceil(requirements * 1.5), clamped to {key} band [{lo}, {hi}]"
+    else:
+        lo, hi = 10, 40
+        formula = "ceil(requirements * 1.5), clamped [10, 40]"
+    recommended = max(lo, min(hi, raw))
+    result = {
         "ok": True,
         "requirements_count": requirements,
         "raw_calculation": raw,
         "recommended": recommended,
-        "formula": "ceil(requirements * 1.5), clamped [10, 40]",
+        "formula": formula,
     }
+    if scale:
+        result["scale"] = scale.lower()
+    return result
 
 
 def cmd_calc_tasks(args: argparse.Namespace) -> None:
     try:
-        emit(run_calc_tasks(args.requirements))
+        emit(run_calc_tasks(args.requirements, getattr(args, "scale", None)))
     except CommandError as e:
         fail(e.message, **e.extra)
 

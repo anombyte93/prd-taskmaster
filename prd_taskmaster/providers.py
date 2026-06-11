@@ -24,7 +24,14 @@ def run_configure_providers() -> dict:
     """Configure TaskMaster for native Claude/Codex plus local Perplexity API Free when available."""
     config = _read_taskmaster_config()
     if not config:
-        raise CommandError(".taskmaster/config.json not found or invalid; run task-master init first")
+        raise CommandError(
+            ".taskmaster/config.json not found or invalid; initialise TaskMaster first",
+            {
+                "recommended_action": "init_taskmaster",
+                "fix": "python3 script.py init-taskmaster",
+                "note": "init-taskmaster preserves an existing .mcp.json (raw 'task-master init' overwrites it)",
+            },
+        )
 
     models = config.setdefault("models", {})
     changed = []

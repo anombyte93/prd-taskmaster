@@ -53,15 +53,22 @@ python3 ~/.claude/skills/prd-taskmaster/script.py preflight
 | `prd_path` exists + `task_count > 0` | Ask: execute tasks / update PRD / new PRD / review |
 | `taskmaster_method == "none"` + no manual flag | Show install: `npm install -g task-master-ai`, wait, re-detect |
 | manual flag present | Proceed using Manual Mechanics Mode, regardless of TaskMaster CLI/MCP state |
+| `has_taskmaster == false` + CLI present | Run `init-taskmaster` (below), then continue |
 | `has_taskmaster` but no PRD | Proceed to Discovery |
 | `has_crash_state` | Offer: resume from crash point or start fresh |
 
-**Auto-configure providers** (silent):
+**Initialise the project if needed, then auto-configure providers** (silent). Always use
+`init-taskmaster` — it protects an existing `.mcp.json`, which raw `task-master init`
+overwrites with a placeholder template:
 
 ```bash
+python3 ~/.claude/skills/prd-taskmaster/script.py init-taskmaster      # only when .taskmaster/ absent
 python3 ~/.claude/skills/prd-taskmaster/script.py configure-providers
 python3 ~/.claude/skills/prd-taskmaster/script.py detect-providers
 ```
+
+If `configure-providers` returns `recommended_action: "init_taskmaster"`, run
+`init-taskmaster` and retry once.
 
 Report compact status:
 ```
@@ -146,12 +153,13 @@ always fully usable on its own.
 |---------|---------|
 | `preflight` | Detect environment state |
 | `detect-taskmaster` | Find MCP or CLI taskmaster |
+| `init-taskmaster` | task-master init with `.mcp.json` protection |
 | `configure-providers` | Configure native Claude/Codex + local Perplexity API Free defaults |
 | `detect-providers` | Auto-detect AI providers |
-| `detect-capabilities` | Scan for available skills/tools |
+| `detect-capabilities` | Scan for available skills/tools; returns tier + recommended mode with reason |
 | `load-template --type comprehensive\|minimal` | Load PRD template |
+| `calc-tasks --requirements <count> [--scale solo\|team\|enterprise]` | Recommended task count (scale-banded) |
 | `validate-prd --input <path>` | Quality checks + placeholder detection |
-| `calc-tasks --requirements <count>` | Recommended task count |
 | `backup-prd --input <path>` | Timestamped backup |
 | `validate-tasks [--input <path>]` | Validate manually-authored tasks.json |
 | `enrich-tasks` | Add phaseConfig metadata to tasks |
