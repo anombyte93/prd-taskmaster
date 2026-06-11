@@ -51,12 +51,17 @@ def fail(msg):
     sys.exit(1)
 
 
-def current_tag(args):
-    if getattr(args, "tag", None):
-        return args.tag
+def _resolve_tag(tag_or_args=None):
+    tag = getattr(tag_or_args, "tag", tag_or_args)
+    if tag:
+        return tag
     if STATE.is_file():
         return json.loads(STATE.read_text()).get("currentTag", "master")
     return "master"
+
+
+def current_tag(args):
+    return _resolve_tag(args)
 
 
 def load_tagged(tag):
@@ -112,14 +117,11 @@ def cmd_plan(args):
     out({"ok": True, "tag": tag, "count": len(packets), "packets": packets})
 
 
-def cmd_apply(args):
-    tag = current_tag(args)
+def apply_results(results: list, tag: str | None = None, threshold: int = 7) -> dict:
+    tag = _resolve_tag(tag)
     raw, tag_key = load_tagged(tag)
     tasks = get_tasks(raw, tag_key)
     by_id = {t["id"]: t for t in tasks}
-    results = json.loads(Path(args.input).read_text())
-    if isinstance(results, dict):
-        results = results.get("results", [])
 
     applied, complexity = [], []
     for r in results:
@@ -157,7 +159,7 @@ def cmd_apply(args):
         "meta": {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             "tasksAnalyzed": len(complexity),
-            "thresholdScore": args.threshold,
+            "thresholdScore": threshold,
             "projectName": Path.cwd().name,
             "usedResearch": True,
             "generatedBy": "prd-taskmaster/parallel.py (agent-parallel research)",
@@ -169,10 +171,17 @@ def cmd_apply(args):
     report_path = REPORTS / f"task-complexity-report{suffix}.json"
     write_atomic(report_path, report)
     needs_more = [c["taskId"] for c in complexity
-                  if (c.get("complexityScore") or 0) >= args.threshold
+                  if (c.get("complexityScore") or 0) >= threshold
                   and len((by_id[c["taskId"]].get("subtasks") or [])) < (c.get("recommendedSubtasks") or 0)]
-    out({"ok": True, "tag": tag, "applied": applied, "report": str(report_path),
-         "needs_more_subtasks": needs_more})
+    return {"ok": True, "tag": tag, "applied": applied, "report": str(report_path),
+            "needs_more_subtasks": needs_more}
+
+
+def cmd_apply(args):
+    results = json.loads(Path(args.input).read_text())
+    if isinstance(results, dict):
+        results = results.get("results", [])
+    out(apply_results(results, tag=getattr(args, "tag", None), threshold=args.threshold))
 
 
 def cmd_extract(args):
