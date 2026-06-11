@@ -1,0 +1,19 @@
+name = "atlas-pro-backend"
+main = "src/index.ts"
+compatibility_date = "2026-06-10"
+
+routes = [
+  { pattern = "api.atlas-ai.au/stripe/webhook", zone_name = "atlas-ai.au" },
+  { pattern = "api.atlas-ai.au/license/refresh", zone_name = "atlas-ai.au" },
+  { pattern = "api.atlas-ai.au/telemetry", zone_name = "atlas-ai.au" }
+]
+
+[[d1_databases]]
+binding = "LICENSE_DB"
+database_name = "atlas-license-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[analytics_engine_datasets]]
+binding = "TELEMETRY"
+dataset = "telemetry_events"

@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS rate_limits (
+  lid TEXT NOT NULL,
+  day TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (lid, day)
+);

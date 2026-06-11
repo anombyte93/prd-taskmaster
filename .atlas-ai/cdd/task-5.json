@@ -1,0 +1,18 @@
+{
+  "task": 5,
+  "given": "Stripe sends signed billing webhooks to the Worker",
+  "when": "checkout, invoice, cancellation, duplicate, unsigned, or forged webhook requests are delivered",
+  "then": [
+    "invalid or missing signatures return 400 without mutating D1",
+    "replayed event IDs return 200 without duplicate side effects",
+    "checkout.session.completed creates a license row and signed ATLAS key",
+    "invoice.paid extends the existing license expiry and reissues a key",
+    "customer.subscription.deleted marks the license cancelled without issuing a key"
+  ],
+  "evidence_required": [
+    "workers/test/stripe.test.ts red/green output",
+    "Worker vitest output",
+    "typecheck output",
+    "blocked Stripe CLI replay logged because Stripe credentials are absent"
+  ]
+}
