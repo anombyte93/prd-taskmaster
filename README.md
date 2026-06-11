@@ -43,6 +43,15 @@ curl -fsSL https://atlas-ai.au/install | bash
 # installs the skill + prd_taskmaster package, sets up the task-master-ai peer
 ```
 
+Expected finish:
+
+```text
+✓ Peer dependency: task-master-ai
+✓ Self-test: task-master-ai --version -> <version>
+Done in <Ns>.
+Installed. Try: /atlas or say "I want to build..."
+```
+
 ### Path 2 — Claude Code plugin
 
 ```bash
@@ -57,7 +66,7 @@ npm install -g task-master-ai
 Open any project in Claude Code and type:
 
 ```
-/atlas      (or /prd-taskmaster, or just say: "I want to build …")
+/atlas      (or /prd-taskmaster, or just say: "I want to build...")
 ```
 
 Requires Python 3.11+ and Linux / macOS / WSL. The free engine needs **no paid API key** — it

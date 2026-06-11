@@ -12,6 +12,7 @@
 # ============================================================================
 
 set -euo pipefail
+INSTALL_STARTED_SECONDS=${SECONDS:-0}
 
 # ---------------------------------------------------------------------------
 # Skill Configuration (customize these per-repo)
@@ -55,6 +56,11 @@ ok()    { printf "${GREEN}[ok]${RESET}    %s\n" "$*"; }
 warn()  { printf "${YELLOW}[warn]${RESET}  %s\n" "$*"; }
 err()   { printf "${RED}[error]${RESET} %s\n" "$*" >&2; }
 die()   { err "$@"; exit 1; }
+die_with_fix() {
+    err "$1"
+    printf "Fix: %s\n" "$2" >&2
+    exit 1
+}
 
 cleanup() {
     if [[ -n "${TMPDIR_SKILL:-}" ]] && [[ -d "${TMPDIR_SKILL}" ]]; then
@@ -65,6 +71,36 @@ trap cleanup EXIT
 
 require_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
+}
+
+ensure_taskmaster_peer() {
+    if ! command -v task-master-ai >/dev/null 2>&1; then
+        if ! command -v npm >/dev/null 2>&1; then
+            die_with_fix \
+                "Peer dependency missing: task-master-ai requires npm to install." \
+                "Install Node.js/npm, then rerun install.sh."
+        fi
+        info "Peer dependency: installing task-master-ai"
+        npm install -g task-master-ai >/dev/null 2>&1 || die_with_fix \
+            "Peer dependency install failed: npm install -g task-master-ai." \
+            "npm install -g task-master-ai"
+    fi
+
+    if ! command -v task-master-ai >/dev/null 2>&1; then
+        die_with_fix \
+            "Peer dependency missing after install: task-master-ai is still not on PATH." \
+            "npm install -g task-master-ai"
+    fi
+
+    local taskmaster_version
+    if ! taskmaster_version=$(task-master-ai --version 2>&1); then
+        die_with_fix \
+            "Self-test failed: task-master-ai --version did not run." \
+            "npm install -g task-master-ai"
+    fi
+
+    printf "✓ Peer dependency: task-master-ai\n"
+    printf "✓ Self-test: task-master-ai --version -> %s\n" "${taskmaster_version}"
 }
 
 # ---------------------------------------------------------------------------
@@ -343,9 +379,18 @@ ALIASEOF
         printf "    rm -rf %s\n" "${legacy_dir}"
     fi
 
+    ensure_taskmaster_peer
+
     # ------------------------------------------------------------------
     # Success
     # ------------------------------------------------------------------
+    local elapsed=$(( SECONDS - INSTALL_STARTED_SECONDS ))
+    printf "\n"
+    printf "✓ Skill files: %s ${SKILL_NAME} v${VERSION}\n" \
+        "$([ "${mode}" = "upgrade" ] && echo "upgraded" || echo "installed")"
+    printf "✓ Alias: /atlas -> %s\n" "${ALIAS_DIR}"
+    printf "✓ Package: prd_taskmaster copied into the skill directory\n"
+    printf "Done in %ss.\n" "${elapsed}"
     printf "\n"
     printf "${GREEN}${BOLD}Successfully %s ${SKILL_NAME} v${VERSION}${RESET}\n" \
         "$([ "${mode}" = "upgrade" ] && echo "upgraded" || echo "installed")"
@@ -356,8 +401,8 @@ ALIASEOF
     fi
 
     printf "\n"
-    info "Open any project in Claude Code and type:"
-    printf "  ${CYAN}/atlas${RESET}   (or ${CYAN}/%s${RESET}, or just say \"I want to build …\")\n" "${SKILL_NAME}"
+    printf "Installed. Try: /atlas or say \"I want to build...\"\n"
+    printf "  Also available: /%s\n" "${SKILL_NAME}"
     printf "\n"
 
     send_install_telemetry

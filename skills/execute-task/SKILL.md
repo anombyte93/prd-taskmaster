@@ -246,7 +246,8 @@ The termination sequence is strict — three steps, in order, no shortcuts:
    false-positive matches by log-watchers.
 
 The ship-check script is deterministic. Its gates are documented at the
-top of `~/Shade_Gen/Projects/prd-taskmaster-plugin/.atlas-ai-skel/ship-check.py`:
+top of `.atlas-ai/ship-check.py` after setup scaffolds it from the installed
+`skel/ship-check.py`:
 
 - Gate 1: `pipeline.json current_phase == "EXECUTE"`
 - Gate 2: every `master.tasks[].status == "done"`

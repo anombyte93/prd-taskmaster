@@ -50,6 +50,15 @@ echo "unexpected git invocation: \$*" >&2
 exit 1
 EOF
     chmod +x "${bin_dir}/git"
+    cat > "${bin_dir}/task-master-ai" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+    echo "task-master-ai 1.2.3"
+else
+    echo "task-master-ai ok"
+fi
+EOF
+    chmod +x "${bin_dir}/task-master-ai"
 }
 
 add_python_stub() {

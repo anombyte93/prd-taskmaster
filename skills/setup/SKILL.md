@@ -77,7 +77,8 @@ no recovery path.
 This step ensures the file exists BEFORE execute-task ever runs:
 
 ```bash
-PLUGIN_SKEL="$HOME/Shade_Gen/Projects/prd-taskmaster-plugin/.atlas-ai-skel/customizations"
+SKILL_DIR="${SKILL_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+PLUGIN_SKEL="$SKILL_DIR/../../skel/customizations"
 mkdir -p .atlas-ai/customizations
 if [ ! -f .atlas-ai/customizations/system-prompt-template.md ]; then
   if [ -d "$PLUGIN_SKEL" ]; then
@@ -97,8 +98,12 @@ Also scaffold `.atlas-ai/ship-check.py` if it doesn't already exist:
 
 ```bash
 if [ ! -f .atlas-ai/ship-check.py ]; then
-  cp "$HOME/Shade_Gen/Projects/prd-taskmaster-plugin/.atlas-ai-skel/ship-check.py" .atlas-ai/ship-check.py
-  chmod +x .atlas-ai/ship-check.py
+  if [ -f "$SKILL_DIR/../../skel/ship-check.py" ]; then
+    cp "$SKILL_DIR/../../skel/ship-check.py" .atlas-ai/ship-check.py
+    chmod +x .atlas-ai/ship-check.py
+  else
+    : > .atlas-ai/ship-check.py
+  fi
 fi
 ```
 

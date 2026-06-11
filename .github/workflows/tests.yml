@@ -68,6 +68,16 @@ jobs:
       - name: Full test suite
         run: python -m pytest tests/ -q
 
+  quickstart-walkthrough:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Deterministic quickstart walkthrough
+        run: bash tests/scripts/quickstart-walkthrough.sh
+
   # All five version strings must agree.
   version-agreement:
     runs-on: ubuntu-latest
