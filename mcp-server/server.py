@@ -28,6 +28,7 @@ from prd_taskmaster import templates as TPL
 from prd_taskmaster import lib as LIB
 from prd_taskmaster import fleet as F
 from prd_taskmaster import batch as B
+from prd_taskmaster import task_state as TS
 from prd_taskmaster import tm_parallel as TMP
 
 mcp = FastMCP("prd-taskmaster")
@@ -114,6 +115,24 @@ def tm_parallel_expand(tag: str = "", dry_run: bool = False) -> dict:
     """Run native TaskMaster expansion in isolated parallel workdirs."""
     try:
         return TMP.run_tm_parallel(tag=tag or None, dry_run=dry_run)
+    except LIB.CommandError as exc:
+        return {"ok": False, "error": exc.message, **exc.extra}
+
+
+@mcp.tool()
+def next_task(tag: str = "") -> dict:
+    """Select the next TaskMaster-compatible task or subtask."""
+    try:
+        return TS.run_next_task(tag=tag or None)
+    except LIB.CommandError as exc:
+        return {"ok": False, "error": exc.message, **exc.extra}
+
+
+@mcp.tool()
+def set_task_status(id: str, status: str, tag: str = "") -> dict:
+    """Set a task or subtask status without terminating the MCP host."""
+    try:
+        return TS.run_set_status(id_str=id, status=status, tag=tag or None)
     except LIB.CommandError as exc:
         return {"ok": False, "error": exc.message, **exc.extra}
 

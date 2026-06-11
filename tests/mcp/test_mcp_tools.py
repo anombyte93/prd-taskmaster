@@ -1,4 +1,4 @@
-"""MCP tool contract tests — the merged server.py registers 21 tools.
+"""MCP tool contract tests — the merged server.py registers 23 tools.
 
 Retargeted from the plugin: server.py now imports from prd_taskmaster.* and
 lives at mcp-server/server.py. We add the repo root (so `prd_taskmaster` is
@@ -73,8 +73,65 @@ def test_compute_fleet_waves_tool(tmp_path, monkeypatch):
     assert set(r["routing"]) == {"1", "2", "3"} and "backends" in r
 
 
-def test_server_registers_21_tools():
-    """Verify server.py declares all 21 expected tool functions at module scope."""
+def test_next_task_and_set_task_status_tools(tmp_path, monkeypatch):
+    import server as S
+
+    tasks_dir = tmp_path / ".taskmaster" / "tasks"
+    tasks_dir.mkdir(parents=True)
+    tasks_file = tasks_dir / "tasks.json"
+    tasks_file.write_text(json.dumps({
+        "alpha": {
+            "tasks": [
+                {
+                    "id": 1,
+                    "title": "Start here",
+                    "description": "",
+                    "details": "",
+                    "testStrategy": "",
+                    "status": "pending",
+                    "priority": "high",
+                    "dependencies": [],
+                    "subtasks": [],
+                }
+            ],
+            "metadata": {"description": "Tasks for alpha context"},
+        }
+    }))
+    monkeypatch.chdir(tmp_path)
+
+    next_result = S.next_task(tag="alpha")
+    assert next_result["ok"] is True
+    assert next_result["task"]["id"] == 1
+
+    status_result = S.set_task_status(id="1", status="done", tag="alpha")
+    assert status_result == {
+        "ok": True,
+        "tag": "alpha",
+        "id": "1",
+        "status": "done",
+        "kind": "task",
+    }
+    assert json.loads(tasks_file.read_text())["alpha"]["tasks"][0]["status"] == "done"
+
+
+def test_set_task_status_tool_returns_error_dict(tmp_path, monkeypatch):
+    import server as S
+
+    tasks_dir = tmp_path / ".taskmaster" / "tasks"
+    tasks_dir.mkdir(parents=True)
+    (tasks_dir / "tasks.json").write_text(json.dumps({
+        "alpha": {"tasks": [], "metadata": {"description": "Tasks for alpha context"}}
+    }))
+    monkeypatch.chdir(tmp_path)
+
+    result = S.set_task_status(id="99", status="done", tag="alpha")
+
+    assert result["ok"] is False
+    assert "unknown id" in result["error"].lower()
+
+
+def test_server_registers_23_tools():
+    """Verify server.py declares all 23 expected tool functions at module scope."""
     import server as S
     expected = {
         "preflight", "current_phase", "advance_phase", "check_gate",
@@ -85,8 +142,10 @@ def test_server_registers_21_tools():
         "compute_fleet_waves",
         "engine_preflight",
         "tm_parallel_expand",
+        "next_task",
+        "set_task_status",
     }
-    assert len(expected) == 21
+    assert len(expected) == 23
     public_attrs = {name for name in dir(S) if not name.startswith("_")}
     missing = expected - public_attrs
     assert not missing, f"missing tools: {sorted(missing)}"
