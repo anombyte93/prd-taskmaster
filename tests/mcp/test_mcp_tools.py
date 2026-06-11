@@ -1,4 +1,4 @@
-"""MCP tool contract tests — the merged server.py registers 23 tools.
+"""MCP tool contract tests — the merged server.py registers 28 tools.
 
 Retargeted from the plugin: server.py now imports from prd_taskmaster.* and
 lives at mcp-server/server.py. We add the repo root (so `prd_taskmaster` is
@@ -130,8 +130,8 @@ def test_set_task_status_tool_returns_error_dict(tmp_path, monkeypatch):
     assert "unknown id" in result["error"].lower()
 
 
-def test_server_registers_23_tools():
-    """Verify server.py declares all 23 expected tool functions at module scope."""
+def test_server_registers_28_tools():
+    """Verify server.py declares all 28 expected tool functions at module scope."""
     import server as S
     expected = {
         "preflight", "current_phase", "advance_phase", "check_gate",
@@ -144,8 +144,22 @@ def test_server_registers_23_tools():
         "tm_parallel_expand",
         "next_task",
         "set_task_status",
+        "backend_detect",
+        "init_project",
+        "parse_prd",
+        "expand_tasks",
+        "rate_tasks",
     }
-    assert len(expected) == 23
+    assert len(expected) == 28
     public_attrs = {name for name in dir(S) if not name.startswith("_")}
     missing = expected - public_attrs
     assert not missing, f"missing tools: {sorted(missing)}"
+
+
+def test_backend_ai_tools_document_agent_action_required():
+    import server as S
+
+    for name in ("backend_detect", "parse_prd", "expand_tasks", "rate_tasks"):
+        doc = getattr(S, name).__doc__ or ""
+        assert "agent_action_required" in doc
+        assert "ai_ops" in doc

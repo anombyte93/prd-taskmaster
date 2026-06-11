@@ -59,33 +59,37 @@ python3 ~/.claude/skills/prd-taskmaster/script.py engine-preflight
 | Condition | Action |
 |-----------|--------|
 | `prd_path` exists + `task_count > 0` | Ask: execute tasks / update PRD / new PRD / review |
-| `taskmaster_method == "none"` + no manual flag | Show install: `npm install -g task-master-ai`, wait, re-detect |
+| `backend.ai_ops == "agent"` | Backend resolves automatically; print ONE info line: add an API key or install `task-master-ai` for headless AI ops; proceed |
 | manual flag present | Proceed using Native Mode (TaskMaster optional), regardless of TaskMaster CLI/MCP state |
-| `has_taskmaster == false` + CLI present | Run `init-taskmaster` (below), then continue |
+| `has_taskmaster == false` + backend selected | Run `init-project` (below), then continue |
 | `has_taskmaster` but no PRD | Proceed to Discovery |
 | `has_crash_state` | Offer: resume from crash point or start fresh |
 
-**Initialise the project if needed, then auto-configure providers** (silent). Always use
-`init-taskmaster` — it protects an existing `.mcp.json`, which raw `task-master init`
-overwrites with a placeholder template:
+**Initialise the project if needed, then auto-configure providers** (silent). Use
+`init-project` for the resolved backend. For the `taskmaster` backend, this preserves
+an existing `.mcp.json`; raw `task-master init` overwrites it with a placeholder template.
+Use `init-taskmaster` only when explicitly operating the `taskmaster` backend:
 
 ```bash
-python3 ~/.claude/skills/prd-taskmaster/script.py init-taskmaster      # only when .taskmaster/ absent
+python3 ~/.claude/skills/prd-taskmaster/script.py init-project         # only when .taskmaster/ absent
+python3 ~/.claude/skills/prd-taskmaster/script.py init-taskmaster      # taskmaster backend only
 python3 ~/.claude/skills/prd-taskmaster/script.py configure-providers
 python3 ~/.claude/skills/prd-taskmaster/script.py detect-providers
 ```
 
 If `configure-providers` returns `recommended_action: "init_taskmaster"`, run
-`init-taskmaster` and retry once.
+`init-project` first; if the backend is explicitly `taskmaster`, `init-taskmaster`
+is also safe and preserves `.mcp.json`.
 
 Report compact status:
 ```
+  ✓ Backend: taskmaster-api|native-api|agent
   ✓ Detected: TaskMaster (MCP|CLI)
   ✓ Detected: Provider (Claude Code|Codex CLI|Anthropic API)
   ✓ Detected: Research (Perplexity API Free|Perplexity MCP|Perplexity API|fallback)
 ```
 
-**Gate: TaskMaster detected OR manual flag present. Providers configured. Proceed to Discovery.**
+**Gate: backend resolved (always true). Report ai_ops capability. Proceed to Discovery.**
 
 ### Provider Defaults
 
@@ -164,6 +168,11 @@ always fully usable on its own.
 | `engine-preflight` | ONE batched call: preflight + taskmaster + providers + capabilities + summary |
 | `preflight` | Detect environment state |
 | `detect-taskmaster` | Find MCP or CLI taskmaster |
+| `backend-detect` | Detect resolved backend, both backend capabilities, and ai_ops |
+| `init-project` | Initialise the resolved backend project state |
+| `parse-prd --input <path> --num-tasks N [--tag]` | Parse a PRD through the resolved backend |
+| `expand [--id N ...] [--no-research] [--tag]` | Expand selected or all pending tasks through the resolved backend |
+| `rate [--tag] [--no-research]` | Rate task complexity through the resolved backend |
 | `init-taskmaster` | task-master init with `.mcp.json` protection |
 | `configure-providers` | Configure native Claude/Codex + local Perplexity API Free defaults |
 | `detect-providers` | Auto-detect AI providers |

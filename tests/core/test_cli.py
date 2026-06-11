@@ -5,6 +5,7 @@ fields of the emitted JSON, proving the CLI wiring and pure cores behave.
 """
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -14,18 +15,63 @@ SCRIPT = REPO_ROOT / "script.py"
 TEMPLATES = REPO_ROOT / "templates"
 
 
-def run_cli(*args, expect_exit=0):
+def run_cli(*args, expect_exit=0, cwd=None, env=None):
     """Run the CLI shim and return parsed JSON stdout."""
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), *args],
         capture_output=True,
         text=True,
-        cwd=str(REPO_ROOT),
+        cwd=str(cwd or REPO_ROOT),
+        env=env,
     )
     assert proc.returncode == expect_exit, (
         f"exit={proc.returncode} expected={expect_exit}\nstdout={proc.stdout}\nstderr={proc.stderr}"
     )
     return json.loads(proc.stdout)
+
+
+def clean_cli_env(tmp_path):
+    env = os.environ.copy()
+    for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_COMPATIBLE_API_KEY"):
+        env.pop(key, None)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    env["PATH"] = str(bin_dir)
+    env["HOME"] = str(tmp_path / "home")
+    return env
+
+
+def force_native_backend(tmp_path):
+    config_dir = tmp_path / ".atlas-ai"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "fleet.json").write_text(json.dumps({"backend": "native"}))
+
+
+def seed_tasks(tmp_path):
+    tm = tmp_path / ".taskmaster"
+    (tm / "tasks").mkdir(parents=True)
+    (tm / "state.json").write_text(json.dumps({"currentTag": "master"}))
+    (tm / "tasks" / "tasks.json").write_text(
+        json.dumps(
+            {
+                "master": {
+                    "tasks": [
+                        {
+                            "id": 1,
+                            "title": "Build backend CLI",
+                            "description": "Surface backend operations.",
+                            "details": "Use backend abstraction wrappers.",
+                            "testStrategy": "python3 -m pytest tests/core/test_cli.py -q",
+                            "status": "pending",
+                            "priority": "medium",
+                            "dependencies": [],
+                            "subtasks": [],
+                        }
+                    ]
+                }
+            }
+        )
+    )
 
 
 def test_calc_tasks_small_clamps_to_10():
@@ -136,3 +182,99 @@ def test_enrich_tasks_adds_phase_config(tmp_path):
     task = written["master"]["tasks"][0]
     assert task["phaseConfig"]["complexity"] == "RESEARCH"
     assert "acceptanceCriteria" in task["phaseConfig"]
+
+
+def test_backend_command_parser_entries():
+    from prd_taskmaster.cli import build_parser
+
+    parser = build_parser()
+
+    assert parser.parse_args(["backend-detect"]).command == "backend-detect"
+    assert parser.parse_args(["init-project"]).command == "init-project"
+
+    parsed = parser.parse_args([
+        "parse-prd",
+        "--input",
+        "prd.md",
+        "--num-tasks",
+        "7",
+        "--tag",
+        "alpha",
+    ])
+    assert parsed.command == "parse-prd"
+    assert parsed.input == "prd.md"
+    assert parsed.num_tasks == 7
+    assert parsed.tag == "alpha"
+
+    parsed = parser.parse_args([
+        "expand",
+        "--id",
+        "1",
+        "--id",
+        "2",
+        "--no-research",
+        "--tag",
+        "alpha",
+    ])
+    assert parsed.command == "expand"
+    assert parsed.id == [1, 2]
+    assert parsed.no_research is True
+    assert parsed.tag == "alpha"
+
+    parsed = parser.parse_args(["rate", "--tag", "alpha", "--no-research"])
+    assert parsed.command == "rate"
+    assert parsed.tag == "alpha"
+    assert parsed.no_research is True
+
+
+def test_native_parse_prd_no_key_returns_agent_action_json(tmp_path):
+    env = clean_cli_env(tmp_path)
+    force_native_backend(tmp_path)
+    prd = tmp_path / "prd.md"
+    prd.write_text("# PRD\n")
+
+    data = run_cli(
+        "parse-prd",
+        "--input",
+        str(prd),
+        "--num-tasks",
+        "3",
+        "--tag",
+        "alpha",
+        cwd=tmp_path,
+        env=env,
+        expect_exit=1,
+    )
+
+    assert data["ok"] is False
+    assert data["agent_action_required"]["op"] == "parse_prd"
+    assert data["agent_action_required"]["num_tasks"] == 3
+
+
+def test_native_expand_and_rate_no_key_return_agent_action_json(tmp_path):
+    env = clean_cli_env(tmp_path)
+    force_native_backend(tmp_path)
+    seed_tasks(tmp_path)
+
+    expand = run_cli(
+        "expand",
+        "--id",
+        "1",
+        "--no-research",
+        cwd=tmp_path,
+        env=env,
+        expect_exit=1,
+    )
+    assert expand["ok"] is False
+    assert expand["agent_action_required"]["op"] == "expand"
+    assert expand["agent_action_required"]["task_ids"] == [1]
+
+    rate = run_cli(
+        "rate",
+        "--no-research",
+        cwd=tmp_path,
+        env=env,
+        expect_exit=1,
+    )
+    assert rate["ok"] is False
+    assert rate["agent_action_required"]["op"] == "rate"

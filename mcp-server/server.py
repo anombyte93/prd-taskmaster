@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """FastMCP server for prd-taskmaster.
 
-Registers 21 tools wrapping the sibling modules (pipeline, capabilities,
-taskmaster, validation, templates) plus server-native helpers
+Registers 28 tools wrapping the sibling modules (pipeline, capabilities,
+taskmaster, backend, validation, templates) plus server-native helpers
 (calc_tasks, backup_prd, append_workflow, debrief, log_progress,
 gen_test_tasks, read_state, gen_scripts, compute_fleet_waves).
 
@@ -30,11 +30,12 @@ from prd_taskmaster import fleet as F
 from prd_taskmaster import batch as B
 from prd_taskmaster import task_state as TS
 from prd_taskmaster import tm_parallel as TMP
+from prd_taskmaster import cli as CLI
 
 mcp = FastMCP("prd-taskmaster")
 
 
-# ─── Delegation tools (11) ────────────────────────────────────────────────────
+# ─── Delegation tools (20) ────────────────────────────────────────────────────
 
 @mcp.tool()
 def preflight(cwd: str | None = None) -> dict:
@@ -135,6 +136,73 @@ def set_task_status(id: str, status: str, tag: str = "") -> dict:
         return TS.run_set_status(id_str=id, status=status, tag=tag or None)
     except LIB.CommandError as exc:
         return {"ok": False, "error": exc.message, **exc.extra}
+
+
+def _backend_tool_call(fn, *args, **kwargs) -> dict:
+    try:
+        return fn(*args, **kwargs)
+    except LIB.CommandError as exc:
+        return {"ok": False, "error": exc.message, **exc.extra}
+    except SystemExit as exc:
+        return {"ok": False, "error": "backend operation exited", "exit": exc.code}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool()
+def backend_detect() -> dict:
+    """Detect resolved backend, both backend detect() results, and ai_ops.
+
+    If ai_ops is "agent", parse_prd, expand_tasks, and rate_tasks may return
+    ok=false with agent_action_required; headless orchestrators should pre-check
+    this tool's ai_ops before starting AI operations.
+    """
+    return _backend_tool_call(CLI.run_backend_detect)
+
+
+@mcp.tool()
+def init_project() -> dict:
+    """Initialise the resolved backend project state."""
+    return _backend_tool_call(CLI.run_init_project)
+
+
+@mcp.tool()
+def parse_prd(prd_path: str, num_tasks: int, tag: str = "") -> dict:
+    """Parse a PRD through the resolved backend.
+
+    When backend_detect reports ai_ops="agent", this can return ok=false with
+    agent_action_required instead of doing headless AI work.
+    """
+    return _backend_tool_call(CLI.run_parse_prd, prd_path, num_tasks, tag=tag or None)
+
+
+@mcp.tool()
+def expand_tasks(
+    task_ids: list | None = None,
+    research: bool = True,
+    tag: str = "",
+) -> dict:
+    """Expand selected or all pending tasks through the resolved backend.
+
+    When backend_detect reports ai_ops="agent", this can return ok=false with
+    agent_action_required instead of doing headless AI work.
+    """
+    return _backend_tool_call(
+        CLI.run_expand,
+        task_ids=task_ids,
+        research=research,
+        tag=tag or None,
+    )
+
+
+@mcp.tool()
+def rate_tasks(tag: str = "", research: bool = True) -> dict:
+    """Rate task complexity through the resolved backend.
+
+    When backend_detect reports ai_ops="agent", this can return ok=false with
+    agent_action_required instead of doing headless AI work.
+    """
+    return _backend_tool_call(CLI.run_rate, tag=tag or None, research=research)
 
 
 # ─── Server-native tools (8) ──────────────────────────────────────────────────
