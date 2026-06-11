@@ -180,7 +180,14 @@ def _detect_taskmaster_method() -> dict:
                 [cli_cmd, "--version"],
                 capture_output=True, text=True, timeout=10
             )
-            cli_version = result.stdout.strip() if result.returncode == 0 else None
+            if result.returncode == 0:
+                # task-master --version can print telemetry notices around the
+                # semver — extract just the version number.
+                import re as _re
+                m = _re.search(r"\d+\.\d+\.\d+", result.stdout)
+                cli_version = m.group(0) if m else result.stdout.strip().splitlines()[-1]
+            else:
+                cli_version = None
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
 
