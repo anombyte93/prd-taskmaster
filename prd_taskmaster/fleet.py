@@ -26,9 +26,18 @@ DEFAULT_ROUTING = {
     "frontier": "claude:fable",    # hardest + longest-running (1M context)
 }
 
-# Documented experimental ladder for fleet.json when experimental_backends=true:
-#   "capable": "codex:gpt-5.5-codex"   (codex top tier slots below Fable)
-#   "standard": "gemini:pro"           (cost-efficient mid tier)
+# Experimental ladder for fleet.json when experimental_backends=true:
+#   "capable": "codex:gpt-5.5-codex"   (codex top tier — near-opus, slots below Fable)
+#   "standard": "gemini:pro"           (solid mid tier, cost-efficient)
+#   "fast": "gemini:flash"             (cost floor — effectively free)
+#
+# QUOTA-POOL DOCTRINE: claude/codex/gemini draw on three SEPARATE quota pools
+# (Claude subscription, ChatGPT subscription, Google free tier). For large
+# fleets the Claude rate limit is the throughput ceiling — spreading fast-tier
+# tasks to gemini and part of standard to codex multiplies concurrent worker
+# capacity, independent of per-task cost. Quality ladder picks the model for
+# a task; quota spreading picks where bulk tiers run when fleet size > one
+# pool's comfort.
 
 DEFAULT_FLEET_CONFIG = {
     "max_concurrency": 3,
