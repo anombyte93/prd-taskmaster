@@ -1,0 +1,27 @@
+{
+  "description": "prd-taskmaster plugin hooks",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__plugin_prd-taskmaster_go__advance_phase",
+        "hooks": [
+          {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/gate_enforcer.py"}
+        ]
+      },
+      {
+        "matcher": "mcp__atlas-cdd__.*|mcp__atlas-loop__.*",
+        "hooks": [
+          {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/mode_d_blocker.py"}
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/evidence_gate.py"}
+        ]
+      }
+    ]
+  }
+}

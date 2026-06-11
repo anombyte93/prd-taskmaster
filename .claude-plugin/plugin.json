@@ -1,0 +1,13 @@
+{
+  "name": "prd-taskmaster",
+  "version": "4.0.0",
+  "description": "Zero-config goal-to-tasks engine for Claude Code (the Atlas engine). Graded PRD validation, dependency-ordered task graph, and CDD-verified execution.",
+  "author": {
+    "name": "Atlas AI",
+    "url": "https://atlas-ai.au"
+  },
+  "homepage": "https://github.com/anombyte93/prd-taskmaster",
+  "repository": "https://github.com/anombyte93/prd-taskmaster.git",
+  "license": "MIT",
+  "keywords": ["claude-code", "taskmaster", "prd", "plugin", "cdd", "atlas"]
+}

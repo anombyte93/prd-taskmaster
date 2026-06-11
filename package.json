@@ -1,0 +1,36 @@
+{
+  "name": "prd-taskmaster",
+  "version": "4.0.0",
+  "description": "Zero-config goal-to-tasks engine for Claude Code (the Atlas engine)",
+  "peerDependencies": {
+    "task-master-ai": ">=0.43.0"
+  },
+  "scripts": {
+    "postinstall": "pip install -r mcp-server/requirements.txt 2>/dev/null || echo 'WARN: Python MCP deps not installed. MCP tools will not start. Run: pip install -r node_modules/prd-taskmaster/mcp-server/requirements.txt'",
+    "test": "pytest tests/",
+    "test:fast": "pytest tests/ -k 'not integration'",
+    "test:integration": "pytest tests/mcp/test_integration.py"
+  },
+  "files": [
+    ".claude-plugin/",
+    ".mcp.json",
+    "skills/",
+    "hooks/",
+    "agents/",
+    "mcp-server/",
+    "prd_taskmaster/",
+    "script.py",
+    "SKILL.md",
+    "phases/",
+    "templates/",
+    "reference/",
+    "skel/",
+    "CHANGELOG.md",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anombyte93/prd-taskmaster.git"
+  },
+  "license": "MIT"
+}
