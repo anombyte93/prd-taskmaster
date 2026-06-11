@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from prd_taskmaster import license
 from prd_taskmaster.lib import emit_json_error
 
 # ---------------------------------------------------------------------------
@@ -293,12 +294,13 @@ def detect_capabilities() -> dict:
     capabilities["taskmaster-cli"] = tm["method"] in ("mcp", "cli")
 
     # ── Derive tier flags ─────────────────────────────────────────────
-    has_atlas_skill_premium = (
-        capabilities.get("atlas-loop", False)
-        and capabilities.get("atlas-cdd", False)
+    atlas_launcher = detect_atlas_launcher()
+    license_status = license.get_status()
+    has_atlas_launcher_premium = (
+        atlas_launcher["mcp_registered"]
+        and license_status["status"] in {"active", "grace"}
     )
-    has_atlas_launcher_premium = detect_atlas_launcher()["mcp_registered"]
-    has_atlas_premium = has_atlas_skill_premium or has_atlas_launcher_premium
+    has_atlas_premium = has_atlas_launcher_premium
     has_free_ralph_stack = (
         capabilities.get("superpowers", False)
         and capabilities.get("ralph-loop", False)
@@ -312,9 +314,6 @@ def detect_capabilities() -> dict:
     if has_atlas_launcher_premium:
         recommended = "D"
         reason = ATLAS_FLEET_REASON
-    elif has_atlas_skill_premium:
-        recommended = "D"
-        reason = "Atlas Loop (premium) — atlas-loop + atlas-cdd detected"
     elif has_free_ralph_stack:
         recommended = "C"
         reason = "Plan + Ralph Loop (recommended free) — superpowers + ralph-loop detected"
@@ -345,6 +344,7 @@ def detect_capabilities() -> dict:
     return {
         "ok": True,
         "tier": "premium" if has_atlas_premium else "free",
+        "license_status": license_status,
         "has_superpowers": capabilities.get("superpowers", False),
         "has_taskmaster": capabilities.get("taskmaster-cli", False),
         "has_atlas_premium": has_atlas_premium,

@@ -6,6 +6,7 @@ from prd_taskmaster.lib import fail
 from prd_taskmaster.preflight import cmd_preflight, cmd_detect_taskmaster
 from prd_taskmaster.providers import cmd_configure_providers, cmd_detect_providers
 from prd_taskmaster.capabilities import cmd_detect_capabilities
+from prd_taskmaster.license_activate import cmd_license_activate
 from prd_taskmaster.templates import cmd_load_template
 from prd_taskmaster.validation import cmd_validate_prd, cmd_validate_tasks
 from prd_taskmaster.tasks import cmd_calc_tasks, cmd_backup_prd, cmd_enrich_tasks
@@ -39,6 +40,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     # detect-capabilities
     sub.add_parser("detect-capabilities", help="Scan for available skills and tools")
+
+    # license-activate
+    p = sub.add_parser("license-activate", help="Activate an Atlas Pro license key")
+    p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    p.add_argument("license_key", help="Atlas license key")
 
     # load-template
     p = sub.add_parser("load-template", help="Load PRD template")
@@ -131,6 +137,7 @@ DISPATCH = {
     "configure-providers": cmd_configure_providers,
     "detect-providers": cmd_detect_providers,
     "detect-capabilities": cmd_detect_capabilities,
+    "license-activate": cmd_license_activate,
     "load-template": cmd_load_template,
     "validate-prd": cmd_validate_prd,
     "calc-tasks": cmd_calc_tasks,
