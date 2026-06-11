@@ -1027,9 +1027,9 @@ When writing task descriptions, use these signals to influence auto-classificati
 | `RESEARCH` | Research/investigate/evaluate keywords | "Research SMS providers", "Evaluate caching strategies" |
 | `VALIDATION` | USER-TEST checkpoints | Automatically detected |
 
-### CDD Gate
+### Evidence Gate
 
-Tasks with `requiresCDD: true` (MEDIUM, COMPLEX, RESEARCH) must have a CDD card defined before implementation begins. The `/phase-executor` skill enforces this gate automatically.
+Tasks with `requiresCDD: true` (MEDIUM, COMPLEX, RESEARCH) must have an evidence card defined before implementation begins. The `/phase-executor` skill enforces this gate automatically.
 
 ---
 

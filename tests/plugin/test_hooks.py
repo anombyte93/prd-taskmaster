@@ -63,7 +63,9 @@ def test_mode_d_blocker_denies_atlas_cdd_tool(tmp_path, monkeypatch):
     rc, out, err = _run_hook(hook_path, input_json)
     assert rc == 0
     assert out.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
-    assert "waitlist" in out.get("hookSpecificOutput", {}).get("permissionDecisionReason", "").lower()
+    reason = out.get("hookSpecificOutput", {}).get("permissionDecisionReason", "")
+    assert "Atlas Pro ($29/mo)" in reason
+    assert "https://atlas-ai.au/pro" in reason
 
 
 def _write_pipeline(tmp_path, phase="EXECUTE"):

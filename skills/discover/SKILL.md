@@ -27,9 +27,16 @@ skill.**
 ## Entry gate
 
 1. Call `mcp__plugin_prd-taskmaster_go__check_gate(phase="DISCOVER", evidence={})`.
-   If the call returns `{gate_passed: false, violations: [...]}`, report the
-   violations and stop. The gate protects against re-entering a completed
-   phase or skipping ahead from SETUP.
+   If the call returns blocked evidence, do not print the raw JSON. Render
+   one plain-English line:
+
+   ```text
+   ✗ Gate blocked: <first violation>
+   Fix: <one copy-pasteable action>
+   ```
+
+   A passed gate renders as `✓ Gate passed: <summary>`. The gate protects
+   against re-entering a completed phase or skipping ahead from SETUP.
 
    **Known issue (Mum dogfood feedback [4]):** check_gate is structurally
    an EXIT gate. On first DISCOVER entry, evidence=`{}` will fail the
@@ -51,15 +58,22 @@ skill.**
 Copy into your response before running the procedure:
 
 ```
-DISCOVERY CHECKLIST:
-- [ ] Mode detected (Interactive vs Autonomous)
-- [ ] Goal captured from skill args or soul purpose
-- [ ] Adaptive questions completed (one at a time)
-- [ ] Constraints extracted and listed
-- [ ] Scale classified (Solo / Team / Enterprise)
-- [ ] Discovery summary captured for GENERATE phase
-- [ ] User approved (Interactive) or summary committed (Autonomous)
+┌─ atlas ── PHASE 2/4: DISCOVERY ────────────────────────────┐
+What happened: Discovery is gathering the goal, constraints, and scale.
+Evidence:
+  ○ Mode detected: waiting
+  ○ Goal captured: waiting
+  ○ Questions answered: 0 of ~5
+  ○ Constraints listed: waiting
+  ○ Scale classified: waiting
+  ○ Approval recorded: waiting
+Next: answer the next discovery question, or say "simpler" for a shorter path.
 ```
+
+During the interview, label each turn `Discovery <n> of ~<N>` and keep a
+running `So far:` list. If the user says "simpler", "quick path", or similar,
+stop asking adaptive questions, summarize the current assumptions, and ask for
+approval to continue with the shorter spec.
 
 ## Interactive Mode (default — user present)
 
@@ -110,15 +124,17 @@ stop and write a handoff note instead of proceeding.
 After brainstorming completes, present via `AskUserQuestion`:
 
 ```
-Discovery Complete:
-  Goal: [one sentence]
-  Audience: [who it's for]
-  Approach: [proposed solution]
-  Key decisions: [list]
-  Constraints: [known limitations]
-  Scale: [Solo | Team | Enterprise]
-
-Proceed to generate spec? (or refine further)
+┌─ atlas ── PHASE 2/4: DISCOVERY ────────────────────────────┐
+What happened: Discovery captured the goal and constraints.
+Evidence:
+  ✓ Goal: [one sentence]
+  ✓ Audience: [who it's for]
+  ✓ Approach: [proposed solution]
+  ✓ Key decisions: [list]
+  ✓ Constraints: [known limitations]
+  ✓ Scale: [Solo | Team | Enterprise]
+Gate passed: discovery is clear enough to generate the spec.
+Next: approve this summary or ask to refine one part.
 ```
 
 - If user says "refine" → ask what to change, update the summary, re-present.

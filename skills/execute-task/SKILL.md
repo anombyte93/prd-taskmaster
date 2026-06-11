@@ -1,12 +1,13 @@
 ---
 name: execute-task
 description: >-
-  Execute the next TaskMaster task using the implementation plan with CDD
+  Execute the next TaskMaster task using the implementation plan with
+  verified execution
   verification. Picks the next ready task, matches it to the plan step,
   implements via a dispatched subagent, verifies subtasks with evidence,
   marks the task done, and loops until every task is complete.
 
-  Wraps the TaskMaster next -> in-progress -> done lifecycle with CDD
+  Wraps the TaskMaster next -> in-progress -> done lifecycle with
   GREEN / RED / BLUE verification and the plugin's triple-verification
   rule. Autonomous by design — no user prompts inside the loop.
 user-invocable: true
@@ -26,7 +27,7 @@ The execution loop. Three sources converge:
 - **Plan** (HOW) — `docs/superpowers/plans/*.md` produced by GENERATE
 - **TaskMaster** (WHAT) — `.taskmaster/tasks/tasks.json` with
   dependencies and complexity scores
-- **CDD** (PROOF) — acceptance cards per task, evidence-gated
+- **Evidence card** (PROOF) — acceptance cards per task, evidence-gated
 
 execute-task is the single skill that runs the full build from "tasks are
 ready" to SHIP_CHECK_OK. It is autonomous — no AskUserQuestion inside the
@@ -104,7 +105,7 @@ to `done`. Do the 13 steps in order. Do not skip.
    improvised; a cold-start successor would have hit the `blocked` path on
    every task.)
 
-5. **Generate CDD card**: convert the task's `subtasks` field into a
+5. **Generate evidence card**: convert the task's `subtasks` field into a
    `testing_plan`. Each subtask becomes a verifiable check with a concrete
    evidence path (file, command output, or test name). Write the card to
    `.atlas-ai/cdd/task-<id>.json`. A task without subtasks is treated as a
@@ -171,7 +172,7 @@ to `done`. Do the 13 steps in order. Do not skip.
    The three checks (run only if the hard gate passes):
 
    - Plugin-native check: evidence file count vs declared subtask count
-     (from the CDD card in step 5). Missing evidence = fail.
+     (from the evidence card in step 5). Missing evidence = fail.
    - `/doubt` skill — adversarial doubt sweep on the claimed completion.
    - `/validate` skill — deterministic validation pass (lint / tests / exit
      codes).
@@ -185,7 +186,7 @@ to `done`. Do the 13 steps in order. Do not skip.
     a. Run `task-master set-status --id <N> --status done` for the parent
        task.
     b. **Subtask writeback**: for each subtask `S` in `task.subtasks` whose
-       evidence file (per the CDD card from step 5) exists, run
+       evidence file (per the evidence card from step 5) exists, run
        `task-master set-status --id <N>.<S> --status done`. Subtasks left
        `pending` while the parent is `done` are a data-integrity violation
        that breaks any tool computing progress from subtask state.
@@ -249,7 +250,7 @@ top of `~/Shade_Gen/Projects/prd-taskmaster-plugin/.atlas-ai-skel/ship-check.py`
 
 - Gate 1: `pipeline.json current_phase == "EXECUTE"`
 - Gate 2: every `master.tasks[].status == "done"`
-- Gate 3: every task has a CDD card (`task-<id>.json` or combined variant)
+- Gate 3: every task has an evidence card (`task-<id>.json` or combined variant)
 - Gate 4: plan file exists at `.taskmaster/docs/plan.md` OR `docs/superpowers/plans/*.md`
 - Gate 5 (HARD): no non-zero `Exit status N` line in any evidence file
 

@@ -182,7 +182,7 @@ def test_detect_capabilities_preserves_free_tier_with_clean_home(
 
     assert plugin_result["tier"] == "free"
     assert plugin_result["recommended_mode"] == "A"
-    assert plugin_result["recommended_reason"] == "Plan Only — universal fallback"
+    assert plugin_result["recommended_reason"] == "Plan & Drive — universal fallback"
 
     assert cli_result["tier"] == "free"
     assert cli_result["recommended_mode"] == "A"

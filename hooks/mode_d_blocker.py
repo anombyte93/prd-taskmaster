@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Mode D blocker hook. Blocks mcp__atlas-cdd and mcp__atlas-loop tool calls.
-Mode D (full CDD + atlas-phoenix) is preview-alpha and requires waitlist opt-in.
+Atlas Fleet blocker hook. Blocks mcp__atlas-cdd and mcp__atlas-loop tool calls.
+Atlas Fleet is part of Atlas Pro and requires a licensed launcher.
 Reads PreToolUse JSON from stdin, returns permissionDecision on stdout.
 Never crashes — all JSON parsing wrapped in try/except.
 No explicit process termination — main() returns and the process ends naturally.
@@ -20,11 +20,11 @@ def main():
 
     tool_name = payload.get("tool_name", "")
 
-    # Check if tool is from blocked Mode D namespaces
+    # Check if tool is from blocked Atlas Fleet namespaces
     if tool_name.startswith("mcp__atlas-cdd__") or tool_name.startswith("mcp__atlas-loop__"):
         reason = (
-            "Mode D (full CDD + atlas-phoenix integration) is preview-alpha and requires waitlist opt-in. "
-            "Please join the waitlist at https://atlas-ai.au/waitlist/mode-d to access this feature."
+            "Atlas Fleet is part of Atlas Pro ($29/mo). "
+            "Unlock: https://atlas-ai.au/pro"
         )
         print(json.dumps({
             "hookSpecificOutput": {

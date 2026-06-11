@@ -316,16 +316,16 @@ def detect_capabilities() -> dict:
         reason = ATLAS_FLEET_REASON
     elif has_free_ralph_stack:
         recommended = "C"
-        reason = "Plan + Ralph Loop (recommended free) — superpowers + ralph-loop detected"
+        reason = "Verified Loop (recommended free) — superpowers + loop runner detected"
     elif capabilities.get("superpowers"):
         recommended = "A"
-        reason = "Plan Only — superpowers detected, no execution loop"
+        reason = "Plan & Drive — superpowers detected, no execution loop"
     elif capabilities.get("taskmaster-cli"):
         recommended = "B"
-        reason = "TaskMaster Auto-Execute — native CLI execution loop"
+        reason = "Auto-Execute — TaskMaster CLI available, native loop"
     else:
         recommended = "A"
-        reason = "Plan Only — universal fallback"
+        reason = "Plan & Drive — universal fallback"
 
     alternative_modes = []
     if capabilities.get("cursor"):

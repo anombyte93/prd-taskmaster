@@ -28,7 +28,7 @@ goal → discovery interview → graded PRD → dependency-ordered task graph �
 2. **Discovery** — an adaptive, one-question-at-a-time interview captures your real constraints.
 3. **Generate** — writes a PRD, scores it against deterministic quality checks (letter grade), then parses it into a task graph with complexity scores and full subtask coverage.
 4. **Handoff** — detects what you have installed and recommends one execution mode.
-5. **Execute** — a CDD-gated loop implements each task and proves it with evidence, ending in a deterministic `SHIP_CHECK_OK` token.
+5. **Execute** — an evidence-gated loop implements each task and proves it with evidence, ending in a deterministic `SHIP_CHECK_OK` token.
 
 ---
 

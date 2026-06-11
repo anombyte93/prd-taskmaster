@@ -58,7 +58,7 @@ def run_detect_capabilities() -> dict:
         reason = ATLAS_FLEET_REASON
     elif capabilities["superpowers"] and capabilities["ralph-loop"]:
         recommended = "C"
-        reason = "Verified Loop — superpowers + ralph-loop detected (evidence-gated execution)"
+        reason = "Verified Loop — superpowers + loop runner detected (evidence-gated execution)"
     elif capabilities["superpowers"]:
         recommended = "A"
         reason = "Plan & Drive — superpowers detected, no loop runner installed"
