@@ -37,6 +37,13 @@ def run_detect_capabilities() -> dict:
 
     atlas_launcher = detect_atlas_launcher()
     license_status = license.get_status()
+    try:
+        saved_license = license.load_license()
+        if saved_license is not None and license.should_refresh(saved_license):
+            license.refresh_if_needed()
+            license_status = license.get_status()
+    except Exception:
+        pass
     has_atlas_launcher_premium = (
         atlas_launcher["mcp_registered"]
         and license_status["status"] in {"active", "grace"}

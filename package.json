@@ -6,7 +6,7 @@
     "task-master-ai": ">=0.43.0"
   },
   "scripts": {
-    "postinstall": "pip install -r mcp-server/requirements.txt 2>/dev/null || echo 'WARN: Python MCP deps not installed. MCP tools will not start. Run: pip install -r node_modules/prd-taskmaster/mcp-server/requirements.txt'",
+    "postinstall": "pip install -r mcp-server/requirements.txt 2>/dev/null || echo 'WARN: Python MCP deps not installed. MCP tools will not start. Run: pip install -r node_modules/prd-taskmaster/mcp-server/requirements.txt'; if [ \"${ATLAS_TELEMETRY:-}\" != \"0\" ] && command -v python3 >/dev/null 2>&1; then ATLAS_SKILL_DIR=\"${PWD}\" python3 -c 'import os, sys, time; sys.path.insert(0, os.environ.get(\"ATLAS_SKILL_DIR\", os.getcwd())); from prd_taskmaster.telemetry import send_event; send_event(\"install\"); time.sleep(1.1)' 2>/dev/null || true; fi",
     "test": "pytest tests/",
     "test:fast": "pytest tests/ -k 'not integration'",
     "test:integration": "pytest tests/mcp/test_integration.py"

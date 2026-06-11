@@ -1,0 +1,15 @@
+{
+  "task": 11,
+  "given": "A local Atlas install runs CLI and pipeline workflows",
+  "when": "telemetry is enabled and lifecycle events occur",
+  "then": [
+    "the client generates a stable anonymous install_id under ~/.atlas-ai",
+    "telemetry POST payloads contain exactly install_id, event, version, and os",
+    "ATLAS_TELEMETRY=0 and telemetry:false config opt-outs prevent install_id creation and network calls",
+    "pipeline and ship-check hooks are best-effort and never alter return values"
+  ],
+  "evidence_required": [
+    "python3 -m pytest tests/test_telemetry.py -q",
+    "python3 -m pytest tests/ -x -q"
+  ]
+}

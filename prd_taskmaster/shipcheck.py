@@ -58,6 +58,15 @@ OVERRIDE_TOKEN = "SHIP_CHECK_OVERRIDE_ADMIN"
 EXIT_STATUS_RE = re.compile(r"\bExit status\s+(\d+)\b", re.IGNORECASE)
 
 
+def _send_telemetry(event: str) -> None:
+    try:
+        from prd_taskmaster import telemetry
+
+        telemetry.send_event(event)
+    except Exception:
+        pass
+
+
 def gate_pipeline(atlas: Path) -> Tuple[bool, List[str]]:
     pf = atlas / "state" / "pipeline.json"
     if not pf.exists():
@@ -261,6 +270,7 @@ def run_ship_check(cwd: Optional[str] = None, dry_run: bool = False,
         exit_code = 0
         suffix = " [OVERRIDE]" if override_active else ""
         stdout = f"SHIP_CHECK_OK{suffix}"
+        _send_telemetry("ship_check_ok")
     else:
         exit_code = 1
         stdout = None

@@ -1,0 +1,16 @@
+{
+  "task": 12,
+  "given": "A user installs Atlas through install.sh or the npm package",
+  "when": "installation completes successfully",
+  "then": [
+    "install.sh sends a best-effort install telemetry event unless opted out",
+    "--no-telemetry and ATLAS_TELEMETRY=0 suppress the install ping before python is invoked",
+    "package.json postinstall sends the same best-effort install event unless opted out",
+    "README discloses exact telemetry fields, event names, and all opt-out mechanisms"
+  ],
+  "evidence_required": [
+    "bash tests/install/test_install_telemetry.sh",
+    "python3 -m pytest tests/install tests/test_telemetry.py -q",
+    "python3 -m pytest tests/ -x -q"
+  ]
+}

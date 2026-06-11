@@ -1,0 +1,15 @@
+{
+  "task": 9,
+  "given": "Atlas Pro checkout is hosted outside this repository on atlas-ai.au and depends on Stripe dashboard state",
+  "when": "this repo documents the checkout surface contract",
+  "then": [
+    "the repo records the monthly and annual Atlas Pro price points",
+    "the repo records the externally hosted /pro and /pro/success URL contract",
+    "external Stripe product creation, live checkout wiring, webhook evidence, and site deployment are logged as blocked rather than fabricated"
+  ],
+  "evidence_required": [
+    "grep -n \"Atlas Pro checkout contract\" README.md",
+    "python3 -m pytest tests/ -x -q",
+    "FLEET-LOG-NET.md BLOCKED entries for external Stripe/site subtasks"
+  ]
+}

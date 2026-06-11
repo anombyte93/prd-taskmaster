@@ -104,6 +104,12 @@ Most AI coding tools tell you a task is done. This one makes "done" provable:
 The engine is the whole engine — the free tier is **not a demo**. Pro adds the fleet orchestrator
 and bundled MCPs. [Get Atlas Pro →](https://atlas-ai.au/pro)
 
+Atlas Pro checkout contract: the externally hosted `/pro` page must offer Atlas Pro Monthly
+($29/mo) and Atlas Pro Annual ($290/yr) subscriptions through Stripe Checkout, with cancel
+returning to `/pro`. The externally hosted `/pro/success` page must tell buyers: "License key
+sent to your email. Check spam folder. Activation: script.py license-activate LICENSE_KEY.
+Docs: atlas-ai.au/docs." and link to `/docs/activation`.
+
 ---
 
 ## Atlas Fleet (Atlas Pro)
@@ -129,6 +135,33 @@ execution — the entire engine in this repo. Read every line.
 
 **Closed (Atlas Pro):** the `atlas-launcher` fleet orchestrator and the two bundled MCPs
 (browser verification, secrets vault). The engine repo will never require a license key.
+
+---
+
+## Telemetry
+
+Atlas sends anonymous, best-effort client telemetry for product health. The payload schema is
+exactly `{install_id, event, version, os}`. `install_id` is a random UUID stored locally at
+`~/.atlas-ai/install_id`; `event` is one of `install`, `atlas_invoked`, `reach_execute`, or
+`ship_check_ok`; `version` is the package version; `os` is `platform.system()`.
+
+Telemetry contains no PII, goal text, code, paths, prompts, file names, or project content.
+Network failures are ignored and never block the CLI or installer.
+
+Opt out with `ATLAS_TELEMETRY=0`, including pipe installs:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/anombyte93/prd-taskmaster/main/install.sh | ATLAS_TELEMETRY=0 bash
+```
+
+For downloaded installs, use:
+
+```bash
+bash install.sh --no-telemetry
+```
+
+You can also set `"telemetry": false` in `~/.atlas-ai/config.json` or a project
+`.taskmaster/config.json`.
 
 ---
 

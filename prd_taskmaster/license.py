@@ -17,6 +17,10 @@ _PAYLOAD_FIELDS = ("lid", "sub", "plan", "iat", "exp", "v")
 _PLANS = ("pro-monthly", "pro-annual")
 PUBLIC_KEY = bytes.fromhex("1fc868c32afba550e6db6db038302a6bd83fbbd848a87191f3a03bdcccf7e88d")
 _GRACE_SECONDS = 14 * 24 * 60 * 60
+_REFRESH_WINDOW_SECONDS = 21 * 24 * 60 * 60
+_REFRESH_RETRY_SECONDS = 24 * 60 * 60
+_REFRESH_URL = "https://api.atlas-ai.au/license/refresh"
+_LAST_REFRESH_FIELD = "last_refresh_attempt"
 _LICENSE_DIRNAME = ".atlas-ai"
 _LICENSE_FILENAME = "license.json"
 _B64URL_RE = _re.compile(r"^[A-Za-z0-9_-]+$")
@@ -162,12 +166,18 @@ def _license_path() -> _Path:
     return _Path.home() / _LICENSE_DIRNAME / _LICENSE_FILENAME
 
 
-def save_license(key_str: str, *, now: int | None = None) -> dict[str, _Any]:
-    """Persist a verified active or grace license under ~/.atlas-ai/license.json."""
-    status = get_status(key_str, now=now)
-    if status["status"] not in {"active", "grace"}:
-        return {"ok": False, **status}
+def _read_license_store() -> dict[str, _Any]:
+    path = _license_path()
+    if not path.is_file():
+        return {}
+    try:
+        data = _json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, _json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
+
+def _write_license_store(data: dict[str, _Any]) -> None:
     path = _license_path()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
@@ -175,7 +185,7 @@ def save_license(key_str: str, *, now: int | None = None) -> dict[str, _Any]:
     except OSError:
         pass
 
-    payload = _json.dumps({"key": key_str}, indent=2)
+    payload = _json.dumps(data, indent=2)
     flags = _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC
     fd = _os.open(path, flags, 0o600)
     try:
@@ -188,20 +198,149 @@ def save_license(key_str: str, *, now: int | None = None) -> dict[str, _Any]:
         except OSError:
             pass
 
+
+def save_license(key_str: str, *, now: int | None = None) -> dict[str, _Any]:
+    """Persist a verified active or grace license under ~/.atlas-ai/license.json."""
+    status = get_status(key_str, now=now)
+    if status["status"] not in {"active", "grace"}:
+        return {"ok": False, **status}
+
+    path = _license_path()
+    _write_license_store({"key": key_str})
+
     return {"ok": True, **status, "path": str(path)}
 
 
 def load_license() -> dict[str, _Any] | None:
     """Load and parse the saved license key, returning None on missing/corrupt data."""
-    path = _license_path()
-    if not path.is_file():
-        return None
-    try:
-        data = _json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, _json.JSONDecodeError):
-        return None
+    data = _read_license_store()
     key_str = data.get("key") if isinstance(data, dict) else None
     if not isinstance(key_str, str):
         return None
     parsed = parse_key(key_str)
-    return parsed if parsed.get("ok") else None
+    if not parsed.get("ok"):
+        return None
+    last_attempt = data.get(_LAST_REFRESH_FIELD)
+    if isinstance(last_attempt, int):
+        parsed[_LAST_REFRESH_FIELD] = last_attempt
+    return parsed
+
+
+def _record_refresh_attempt(now: int) -> None:
+    data = _read_license_store()
+    if not isinstance(data.get("key"), str):
+        return
+    data[_LAST_REFRESH_FIELD] = int(now)
+    _write_license_store(data)
+
+
+def _log_refresh_failure(detail: str) -> None:
+    try:
+        print(f"atlas license refresh skipped: {detail}", file=__import__("sys").stderr)
+    except Exception:
+        pass
+
+
+def _should_refresh(license_obj: dict[str, _Any] | None, now: int | None = None) -> bool:
+    current = int(_time.time() if now is None else now)
+    if not isinstance(license_obj, dict) or not license_obj.get("ok"):
+        return False
+
+    status = get_status(license_obj, now=current)
+    if status["status"] not in {"active", "grace"}:
+        return False
+
+    payload = license_obj.get("payload")
+    exp = payload.get("exp") if isinstance(payload, dict) else None
+    if not isinstance(exp, int) or exp - current > _REFRESH_WINDOW_SECONDS:
+        return False
+
+    last_attempt = license_obj.get(_LAST_REFRESH_FIELD)
+    if isinstance(last_attempt, int) and current - last_attempt < _REFRESH_RETRY_SECONDS:
+        return False
+
+    return True
+
+
+def _http_error_reason(exc: _Any) -> str:
+    code = getattr(exc, "code", None)
+    reason = f"http_{code}" if code is not None else "http_error"
+    try:
+        body = exc.read()
+        if isinstance(body, bytes):
+            body = body.decode("utf-8")
+        data = _json.loads(body)
+        if isinstance(data, dict) and isinstance(data.get("reason"), str):
+            return data["reason"]
+    except Exception:
+        pass
+    return reason
+
+
+def _refresh_if_needed(*, now: int | None = None) -> str:
+    current = int(_time.time() if now is None else now)
+    if _os.environ.get("ATLAS_TELEMETRY") == "0":
+        return "skipped"
+
+    saved = load_license()
+    if not _should_refresh(saved, now=current):
+        return "skipped"
+
+    lid = saved["payload"]["lid"]
+    _record_refresh_attempt(current)
+
+    request_mod = __import__("urllib.request", fromlist=["Request", "urlopen"])
+    error_mod = __import__("urllib.error", fromlist=["HTTPError", "URLError"])
+    socket_mod = __import__("socket")
+    body = _json.dumps({"lid": lid}).encode("utf-8")
+    request = request_mod.Request(
+        _REFRESH_URL,
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+
+    try:
+        with request_mod.urlopen(request, timeout=5) as response:
+            response_body = response.read()
+    except error_mod.HTTPError as exc:
+        _log_refresh_failure(_http_error_reason(exc))
+        return "failed"
+    except (error_mod.URLError, socket_mod.timeout, TimeoutError, OSError, ConnectionError) as exc:
+        _log_refresh_failure(str(exc))
+        return "failed"
+    except Exception as exc:
+        _log_refresh_failure(str(exc))
+        return "failed"
+
+    try:
+        data = _json.loads(response_body.decode("utf-8"))
+    except (AttributeError, UnicodeDecodeError, _json.JSONDecodeError):
+        _log_refresh_failure("invalid refresh response")
+        return "failed"
+
+    new_key = data.get("key") if isinstance(data, dict) else None
+    if not isinstance(new_key, str):
+        _log_refresh_failure("refresh response missing key")
+        return "failed"
+
+    parsed = parse_key(new_key)
+    if not parsed.get("ok") or not verify_signature(parsed["payload_bytes"], parsed["signature"], PUBLIC_KEY):
+        _log_refresh_failure("refreshed key failed verification")
+        return "failed"
+
+    saved_result = save_license(new_key, now=current)
+    if not saved_result.get("ok"):
+        _log_refresh_failure(saved_result.get("detail", "refreshed key rejected"))
+        return "failed"
+
+    _record_refresh_attempt(current)
+    return "refreshed"
+
+
+def __getattr__(name: str) -> _Any:
+    if name == "should_refresh":
+        return _should_refresh
+    if name == "refresh_if_needed":
+        return _refresh_if_needed
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
