@@ -165,7 +165,7 @@ def test_run_ship_check_api_agrees_on_empty(tmp_path: Path, monkeypatch) -> None
 
 def test_ship_check_passes_with_flat_tasks_format(tmp_path):
     """Gate 2 must accept the flat {"tasks": [...]} format the engine itself
-    produces in Manual Mechanics Mode (dogfood finding, 2026-06-11)."""
+    produces in Native Mode (dogfood finding, 2026-06-11)."""
     _green(tmp_path)  # tagged all-green baseline...
     # ...then overwrite tasks.json with the FLAT format
     (tmp_path / ".taskmaster" / "tasks" / "tasks.json").write_text(json.dumps(

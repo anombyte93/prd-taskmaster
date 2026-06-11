@@ -6,6 +6,7 @@ placeholder-proof PRD**, compiles it into a **dependency-ordered task graph**, a
 task with **verification evidence** — so "done" means proven, not claimed.
 
 Free and MIT, forever. Works with Claude, Codex, and Gemini.
+**Atlas speaks TaskMaster natively — but doesn't need it.**
 
 ```
 Grade: GOOD  ▰▰▰▰▰▰▰▰▱▱  49/57 (86%) · 0 placeholders · 14 tasks parsed
@@ -164,8 +165,10 @@ and tasks are plain files in your repo.
 **Do I need a paid API key?** No. The engine uses the model CLIs you already have (Claude Code,
 Codex, Gemini) and a local free-research option.
 
-**Do I need TaskMaster?** Yes — `task-master-ai >= 0.43.0` is the task engine (a peer
-dependency; the installer sets it up). A `--manual` path exists if you'd rather not.
+**Do I need TaskMaster?** No. Atlas speaks TaskMaster natively but doesn't require it —
+Native Mode produces the same validated task graph (validate-tasks + enrich-tasks). Installing
+`task-master-ai >= 0.43.0` unlocks the TaskMaster backend: Mode B auto-execute and
+native-parallel expansion through TaskMaster's 13-provider model layer.
 
 **Which platforms?** Linux, macOS, and WSL. (Native Windows is not supported — the atomic state
 machine uses POSIX file locking.)

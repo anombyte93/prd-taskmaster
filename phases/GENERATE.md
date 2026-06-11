@@ -98,7 +98,7 @@ Parse (detect method from preflight):
 **MCP**: `parse_prd` tool with input=".taskmaster/docs/prd.md", numTasks=<recommended>
 **CLI**: `task-master parse-prd --input .taskmaster/docs/prd.md --num-tasks <recommended>`
 
-### Manual Flag Path
+### Native Mode Path (manual flag / no TaskMaster)
 
 If the user passed `--manual`, `manual=true`, or explicitly asked to "do what TaskMaster does manually", skip MCP/CLI parsing and write `.taskmaster/tasks/tasks.json` yourself.
 
@@ -150,7 +150,7 @@ python3 ~/.claude/skills/prd-taskmaster/script.py enrich-tasks
 
 Adds complexity classification (SIMPLE/MEDIUM/COMPLEX/RESEARCH/VALIDATION) and lifecycle phases.
 
-In Manual Flag Path, immediately verify enrichment:
+In the Native Mode Path, immediately verify enrichment:
 
 ```bash
 python3 ~/.claude/skills/prd-taskmaster/script.py validate-tasks --require-phase-config
@@ -203,4 +203,4 @@ else:
 
 ## Evidence Gate
 
-**Gate: Spec validation grade is GOOD+ AND tasks created via TaskMaster parse or manual flag AND `validate-tasks` passes AND all tasks have subtasks AND `enrich-tasks` has run. In Manual Flag Path, `validate-tasks --require-phase-config` must also pass. Proceed to HANDOFF.**
+**Gate: Spec validation grade is GOOD+ AND tasks created via TaskMaster parse or manual flag AND `validate-tasks` passes AND all tasks have subtasks AND `enrich-tasks` has run. In the Native Mode Path, `validate-tasks --require-phase-config` must also pass. Proceed to HANDOFF.**

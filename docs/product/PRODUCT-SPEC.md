@@ -365,6 +365,12 @@ Tags: **[FREE]/[PRO]**, phase.
 - **FR-32 [PRO]** Adaptive auto-tuning of fleet.json routing from accumulated telemetry is an
   Atlas Pro capability (roadmap).
 
+- **FR-33 [FREE, v4.1 roadmap]** A backend abstraction MUST make TaskMaster one pluggable
+  backend (taskmaster|native|auto): both backends expose detect/init/parse_prd/expand/rate;
+  the native backend degrades to agent-driven structured generation without an API key;
+  task-state ops (next/set-status) are engine-native under every backend. tasks.json format
+  compatibility is permanent (the migration funnel from TaskMaster's ecosystem).
+
 **Cross-cutting**
 - **FR-28 [FREE]** All MCP tools MUST return dicts and MUST NEVER call `sys.exit` / terminate the
   host process.

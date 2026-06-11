@@ -102,7 +102,7 @@ Recommended: Atlas Loop (Premium)
 
 ## Step 3: Append Task Workflow to CLAUDE.md
 
-Read the project's `./CLAUDE.md`. Append the TaskMaster workflow section if normal TaskMaster parse was used. If Manual Flag Path was used, append the manual workflow variant instead.
+Read the project's `./CLAUDE.md`. Append the TaskMaster workflow section if normal TaskMaster parse was used. If the Native Mode Path was used, append the manual workflow variant instead.
 
 ```markdown
 ## Task Execution Workflow (prd-taskmaster)
@@ -121,7 +121,7 @@ When implementing tasks, use TaskMaster MCP/CLI tools:
 - TodoWrite = user visibility. TaskMaster = source of truth.
 ```
 
-Manual Flag Path variant:
+Native Mode Path variant:
 
 ```markdown
 ## Task Execution Workflow (prd-taskmaster manual mode)

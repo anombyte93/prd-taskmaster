@@ -60,7 +60,7 @@ python3 ~/.claude/skills/prd-taskmaster/script.py engine-preflight
 |-----------|--------|
 | `prd_path` exists + `task_count > 0` | Ask: execute tasks / update PRD / new PRD / review |
 | `taskmaster_method == "none"` + no manual flag | Show install: `npm install -g task-master-ai`, wait, re-detect |
-| manual flag present | Proceed using Manual Mechanics Mode, regardless of TaskMaster CLI/MCP state |
+| manual flag present | Proceed using Native Mode (TaskMaster optional), regardless of TaskMaster CLI/MCP state |
 | `has_taskmaster == false` + CLI present | Run `init-taskmaster` (below), then continue |
 | `has_taskmaster` but no PRD | Proceed to Discovery |
 | `has_crash_state` | Offer: resume from crash point or start fresh |
@@ -120,11 +120,13 @@ Read ~/.claude/skills/prd-taskmaster/phases/GENERATE.md
 
 Generate spec, validate quality, parse tasks, enrich with metadata.
 
-**Gate: PRD validated GOOD+ and tasks created through TaskMaster parse/expand OR Manual Mechanics Mode. Proceed to Handoff.**
+**Gate: PRD validated GOOD+ and tasks created through TaskMaster parse/expand OR Native Mode. Proceed to Handoff.**
 
-### Manual Mechanics Mode
+### Native Mode (TaskMaster optional)
 
-Use this when the user passes `--manual` or TaskMaster parsing/expansion is a poor fit.
+Formerly "Manual Mechanics Mode". The engine produces the same validated task graph without
+TaskMaster — use it when the user passes `--manual`, TaskMaster isn't installed, or its
+parsing/expansion is a poor fit.
 
 1. Generate `.taskmaster/docs/prd.md` normally.
 2. Manually write `.taskmaster/tasks/tasks.json` in TaskMaster-compatible shape:
@@ -181,7 +183,7 @@ always fully usable on its own.
 **Decision tree for expansion + research** (token-economy aware):
 
 ```
-Manual flag                        → Manual Mechanics Mode (unchanged)
+Manual flag                        → Native Mode (unchanged)
 pending tasks ≤ 3                  → serial NATIVE: analyze-complexity --research, then expand per task (main dir)
 task-master ≥ 0.43 AND research
   role is a REAL structured API    → NATIVE-PARALLEL (DEFAULT): script.py tm-parallel

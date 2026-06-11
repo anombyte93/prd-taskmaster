@@ -80,7 +80,7 @@ def gate_tasks(repo_root: Path) -> Tuple[bool, List[str], list]:
     except json.JSONDecodeError as exc:
         return False, [f"tasks.json invalid JSON: {exc}"], []
     # Accept both canonical formats: tagged {"master": {"tasks": [...]}}
-    # and flat {"tasks": [...]} (Manual Mechanics Mode / fleet samples).
+    # and flat {"tasks": [...]} (Native Mode / fleet samples).
     tasks = tdata.get("master", {}).get("tasks", [])
     if not tasks and isinstance(tdata.get("tasks"), list):
         tasks = tdata["tasks"]
