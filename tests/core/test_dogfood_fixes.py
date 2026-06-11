@@ -114,7 +114,7 @@ def test_calc_tasks_rejects_unknown_scale():
 def test_detect_capabilities_has_tier_and_reason():
     r = run_detect_capabilities()
     assert r["tier"] in ("free", "premium")
-    assert r["recommended_mode"] in ("A", "B", "C")
+    assert r["recommended_mode"] in ("A", "B", "C", "D")
     assert len(r["recommended_reason"]) > 10
 
 

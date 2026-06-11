@@ -9,6 +9,7 @@ from prd_taskmaster.lib import (
     fail,
     _detect_taskmaster_method,
 )
+from prd_taskmaster.mode_recommend import ATLAS_FLEET_REASON, detect_atlas_launcher
 
 
 def run_detect_capabilities() -> dict:
@@ -33,10 +34,16 @@ def run_detect_capabilities() -> dict:
     capabilities["taskmaster-mcp"] = tm["method"] == "mcp"
     capabilities["taskmaster-cli"] = tm["method"] in ("mcp", "cli")
 
+    atlas_launcher = detect_atlas_launcher()
+
     # Determine recommended mode — same decision logic as the handoff skill:
-    # superpowers + loop runner -> Verified Loop (C); superpowers only ->
-    # Plan & Drive (A); taskmaster only -> Auto-Execute (B); fallback -> A.
-    if capabilities["superpowers"] and capabilities["ralph-loop"]:
+    # atlas-launcher MCP -> Atlas Fleet (D); superpowers + loop runner ->
+    # Verified Loop (C); superpowers only -> Plan & Drive (A);
+    # taskmaster only -> Auto-Execute (B); fallback -> A.
+    if atlas_launcher["mcp_registered"]:
+        recommended = "D"
+        reason = ATLAS_FLEET_REASON
+    elif capabilities["superpowers"] and capabilities["ralph-loop"]:
         recommended = "C"
         reason = "Verified Loop — superpowers + ralph-loop detected (evidence-gated execution)"
     elif capabilities["superpowers"]:
@@ -49,9 +56,7 @@ def run_detect_capabilities() -> dict:
         recommended = "A"
         reason = "Plan & Drive — universal fallback, no execution tooling detected"
 
-    # Tier: "premium" requires a licensed atlas-launcher (detection ships with
-    # Atlas Fleet / Phase B); until then the standalone skill is always free.
-    tier = "free"
+    tier = "premium" if atlas_launcher["mcp_registered"] else "free"
 
     return {
         "ok": True,

@@ -4,7 +4,11 @@ import json
 
 import pytest
 
-from prd_taskmaster.mode_recommend import detect_atlas_launcher
+from prd_taskmaster.capabilities import run_detect_capabilities
+from prd_taskmaster.mode_recommend import detect_atlas_launcher, detect_capabilities
+
+
+FLEET_REASON = "Atlas Fleet — atlas-launcher detected (parallel multi-session execution)"
 
 
 def _make_executable(path):
@@ -123,3 +127,58 @@ def test_detect_atlas_launcher_finds_project_mcp_json_only(
         "installed": False,
         "mcp_registered": True,
     }
+
+
+def test_detect_capabilities_flips_both_paths_to_premium_with_launcher_mcp(
+    monkeypatch,
+    tmp_path,
+):
+    home_dir = tmp_path / "home"
+    project_dir = tmp_path / "project"
+    bin_dir = tmp_path / "bin"
+    home_dir.mkdir()
+    project_dir.mkdir()
+    bin_dir.mkdir()
+    (home_dir / ".claude.json").write_text(json.dumps({
+        "mcpServers": {
+            "atlas-launcher": {"command": "atlas-launcher"},
+        },
+    }))
+
+    monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.chdir(project_dir)
+
+    for result in (detect_capabilities(), run_detect_capabilities()):
+        assert result["tier"] == "premium"
+        assert result["recommended_mode"] == "D"
+        assert result["recommended_reason"] == FLEET_REASON
+
+
+def test_detect_capabilities_preserves_free_tier_with_clean_home(
+    monkeypatch,
+    tmp_path,
+):
+    home_dir = tmp_path / "home"
+    project_dir = tmp_path / "project"
+    bin_dir = tmp_path / "bin"
+    home_dir.mkdir()
+    project_dir.mkdir()
+    bin_dir.mkdir()
+
+    monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.chdir(project_dir)
+
+    plugin_result = detect_capabilities()
+    cli_result = run_detect_capabilities()
+
+    assert plugin_result["tier"] == "free"
+    assert plugin_result["recommended_mode"] == "A"
+    assert plugin_result["recommended_reason"] == "Plan Only — universal fallback"
+
+    assert cli_result["tier"] == "free"
+    assert cli_result["recommended_mode"] == "A"
+    assert cli_result["recommended_reason"] == (
+        "Plan & Drive — universal fallback, no execution tooling detected"
+    )

@@ -22,6 +22,7 @@ from prd_taskmaster.lib import emit_json_error
 
 TASKMASTER_DIR = Path(".taskmaster")
 TASKMASTER_MIN_VERSION = "0.43.0"
+ATLAS_FLEET_REASON = "Atlas Fleet — atlas-launcher detected (parallel multi-session execution)"
 
 
 # ---------------------------------------------------------------------------
@@ -292,10 +293,12 @@ def detect_capabilities() -> dict:
     capabilities["taskmaster-cli"] = tm["method"] in ("mcp", "cli")
 
     # ── Derive tier flags ─────────────────────────────────────────────
-    has_atlas_premium = (
+    has_atlas_skill_premium = (
         capabilities.get("atlas-loop", False)
         and capabilities.get("atlas-cdd", False)
     )
+    has_atlas_launcher_premium = detect_atlas_launcher()["mcp_registered"]
+    has_atlas_premium = has_atlas_skill_premium or has_atlas_launcher_premium
     has_free_ralph_stack = (
         capabilities.get("superpowers", False)
         and capabilities.get("ralph-loop", False)
@@ -306,7 +309,10 @@ def detect_capabilities() -> dict:
     )
 
     # ── Mode recommendation ───────────────────────────────────────────
-    if has_atlas_premium:
+    if has_atlas_launcher_premium:
+        recommended = "D"
+        reason = ATLAS_FLEET_REASON
+    elif has_atlas_skill_premium:
         recommended = "D"
         reason = "Atlas Loop (premium) — atlas-loop + atlas-cdd detected"
     elif has_free_ralph_stack:
