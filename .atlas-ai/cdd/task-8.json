@@ -1,0 +1,16 @@
+{
+  "task": 8,
+  "given": "A saved Atlas Pro license is active or in grace and may be near expiry",
+  "when": "capability detection runs and the license is within the refresh window while telemetry is not opted out",
+  "then": [
+    "the client decides refresh eligibility without network access",
+    "the client POSTs only the license id to the refresh endpoint with a 5s timeout",
+    "a refreshed key is saved only after the full existing signature verification path accepts it",
+    "403, timeout, offline, and refresh exceptions never break capability detection"
+  ],
+  "evidence_required": [
+    "python3 -m pytest tests/core/test_license_refresh.py -q",
+    "python3 -m pytest tests/core/test_capabilities.py tests/core/test_license_refresh.py -q",
+    "python3 -m pytest tests/ -q"
+  ]
+}
