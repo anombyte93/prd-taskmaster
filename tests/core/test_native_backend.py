@@ -313,6 +313,9 @@ def test_no_key_operations_return_agent_action_required(tmp_path, monkeypatch):
     assert expand["ok"] is False
     assert expand["agent_action_required"]["op"] == "expand"
     assert expand["agent_action_required"]["packets"]
+    assert expand["agent_action_required"]["hint"] == (
+        "run context-pack on the files a task touches before generating code"
+    )
 
     rate = NativeBackend().rate(tag="master")
     assert rate["ok"] is False

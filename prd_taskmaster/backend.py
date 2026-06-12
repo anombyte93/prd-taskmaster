@@ -268,6 +268,7 @@ def _agent_expand_action(
         "task_ids": task_ids,
         "packets": packets,
         "schema_hint": PARALLEL_RESULT_SCHEMA_HINT,
+        "hint": "run context-pack on the files a task touches before generating code",
         "then": ["spawn research subagents", "parallel-apply --input results.json"],
     }
 

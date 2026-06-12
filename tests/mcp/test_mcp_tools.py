@@ -188,8 +188,34 @@ def test_feedback_submit_and_report_tools(tmp_path, monkeypatch):
     assert (tmp_path / ".atlas-ai" / "feedback.jsonl").is_file()
 
 
-def test_server_registers_31_tools():
-    """Verify server.py declares all 31 expected tool functions at module scope."""
+def test_context_pack_tool_returns_core_pack(tmp_path):
+    import server as S
+
+    module = tmp_path / "tool_target.py"
+    module.write_text("def f(x: int = 2) -> int:\n    return x\n")
+
+    result = S.context_pack(files=[str(module)])
+
+    assert result == {
+        "files": [
+            {
+                "path": str(module),
+                "classes": [],
+                "functions": [
+                    {
+                        "name": "f",
+                        "signature": "(x: int = 2) -> int",
+                        "doc_first_line": "",
+                    }
+                ],
+            }
+        ],
+        "skipped": [],
+    }
+
+
+def test_server_registers_32_tools():
+    """Verify server.py declares all 32 expected tool functions at module scope."""
     import server as S
     expected = {
         "preflight", "current_phase", "advance_phase", "check_gate",
@@ -208,10 +234,11 @@ def test_server_registers_31_tools():
         "parse_prd",
         "expand_tasks",
         "rate_tasks",
+        "context_pack",
         "feedback_submit",
         "feedback_report",
     }
-    assert len(expected) == 31
+    assert len(expected) == 32
     public_attrs = {name for name in dir(S) if not name.startswith("_")}
     missing = expected - public_attrs
     assert not missing, f"missing tools: {sorted(missing)}"

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """FastMCP server for prd-taskmaster.
 
-Registers 31 tools wrapping the sibling modules (pipeline, capabilities,
+Registers 32 tools wrapping the sibling modules (pipeline, capabilities,
 taskmaster, backend, validation, templates) plus server-native helpers
 (calc_tasks, backup_prd, append_workflow, debrief, log_progress,
-gen_test_tasks, read_state, gen_scripts, compute_fleet_waves, feedback).
+gen_test_tasks, read_state, gen_scripts, compute_fleet_waves, context_pack,
+feedback).
 
 No explicit process termination — mcp.run() is the event loop and
 returns naturally when the transport closes.
@@ -32,6 +33,7 @@ from prd_taskmaster import task_state as TS
 from prd_taskmaster import tm_parallel as TMP
 from prd_taskmaster import cli as CLI
 from prd_taskmaster import feedback as FB
+from prd_taskmaster.context_pack import build_context_pack
 
 mcp = FastMCP("prd-taskmaster")
 
@@ -213,6 +215,12 @@ def rate_tasks(tag: str = "", research: bool = True) -> dict:
     agent_action_required instead of doing headless AI work.
     """
     return _backend_tool_call(CLI.run_rate, tag=tag or None, research=research)
+
+
+@mcp.tool()
+def context_pack(files: list, include_private: bool = False) -> dict:
+    """Extract AST-based Python signature context for files."""
+    return build_context_pack(files, include_private=include_private)
 
 
 # ─── Server-native tools (10) ─────────────────────────────────────────────────

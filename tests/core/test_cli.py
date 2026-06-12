@@ -226,6 +226,63 @@ def test_backend_command_parser_entries():
     assert parsed.tag == "alpha"
     assert parsed.no_research is True
 
+    parsed = parser.parse_args([
+        "context-pack",
+        "--files",
+        "a.py",
+        "b.py",
+        "--include-private",
+    ])
+    assert parsed.command == "context-pack"
+    assert parsed.files == ["a.py", "b.py"]
+    assert parsed.include_private is True
+
+
+def test_context_pack_cli_prints_signature_json(tmp_path):
+    module = tmp_path / "module.py"
+    module.write_text(
+        "\n".join(
+            [
+                "class Thing:",
+                "    def use(self, value: int = 1) -> int:",
+                "        return value",
+                "",
+                "def _hidden(flag=False):",
+                "    pass",
+            ]
+        )
+    )
+
+    data = run_cli("context-pack", "--files", str(module), "--include-private")
+
+    assert data == {
+        "files": [
+            {
+                "path": str(module),
+                "classes": [
+                    {
+                        "name": "Thing",
+                        "methods": [
+                            {
+                                "name": "use",
+                                "signature": "(self, value: int = 1) -> int",
+                                "doc_first_line": "",
+                            }
+                        ],
+                    }
+                ],
+                "functions": [
+                    {
+                        "name": "_hidden",
+                        "signature": "(flag=False)",
+                        "doc_first_line": "",
+                    }
+                ],
+            }
+        ],
+        "skipped": [],
+    }
+
 
 def test_native_parse_prd_no_key_returns_agent_action_json(tmp_path):
     env = clean_cli_env(tmp_path)

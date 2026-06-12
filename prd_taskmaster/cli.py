@@ -16,6 +16,7 @@ from prd_taskmaster.taskmaster import cmd_init_taskmaster
 from prd_taskmaster.batch import cmd_engine_preflight
 from prd_taskmaster.economy import cmd_economy_report
 from prd_taskmaster.feedback import HARNESS_CHOICES, cmd_feedback_add, cmd_feedback_report
+from prd_taskmaster.context_pack import build_context_pack
 from prd_taskmaster import fleet, parallel, task_state, tm_parallel
 
 
@@ -127,6 +128,10 @@ def cmd_rate(args) -> None:
         tag=getattr(args, "tag", None),
         research=not getattr(args, "no_research", False),
     )
+
+
+def cmd_context_pack(args) -> None:
+    print(json.dumps(build_context_pack(args.files, include_private=args.include_private), indent=2))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -280,6 +285,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("economy-report", help="Summarize .atlas-ai/telemetry.jsonl per (op_class, model)")
     p.add_argument("--input", default=None)
 
+    # context-pack
+    p = sub.add_parser("context-pack", help="Extract AST-based Python signature context")
+    p.add_argument("--files", nargs="+", required=True, help="Python files to parse")
+    p.add_argument("--include-private", action="store_true")
+
     # feedback-add
     p = sub.add_parser("feedback-add", help="Append one Atlas agent feedback row")
     p.add_argument("--rating", required=True, type=int)
@@ -348,6 +358,7 @@ DISPATCH = {
     "claim-task": task_state.cmd_claim_task,
     "set-status": task_state.cmd_set_status,
     "economy-report": cmd_economy_report,
+    "context-pack": cmd_context_pack,
     "feedback-add": cmd_feedback_add,
     "feedback-report": cmd_feedback_report,
 }
