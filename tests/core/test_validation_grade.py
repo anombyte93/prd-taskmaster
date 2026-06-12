@@ -1,9 +1,9 @@
 """Minimal coverage for prd_taskmaster.validation.run_validate_prd.
 
-The plugin's test_validation.py (14-check) was DROPPED — it asserted the
-plugin's now-removed validation.py. The package's skill validation (13-check)
-is canonical and is exercised by tests/core/test_cli.py. This adds one direct
-assertion that run_validate_prd returns a graded dict.
+Smoke-level assertion that run_validate_prd returns a graded dict. The
+granular 13-check coverage (per-check assertions, grade boundaries, vague
+penalties) lives in tests/core/test_validation.py, ported from the plugin's
+test suite and adapted to this package's contract.
 """
 from prd_taskmaster.validation import run_validate_prd
 
