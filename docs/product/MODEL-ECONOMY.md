@@ -14,6 +14,8 @@
 | Claude Sonnet 4.6 | $3 / $15 | Anthropic's explicit "default for most coding" |
 | Claude Opus 4.8 | $5 / $25 | per-TURN cost is "several times" Sonnet (deeper-thinking turns consume more tokens — multiplier unpublished, measure locally) |
 | Claude Fable 5 | $10 / $50 | tokenizer emits ~30–35% MORE tokens for the same content → effective per-content cost exceeds the 2× sticker vs Opus. Reserve strictly. |
+| gpt-4.1 | $2 / $8 | live-verified 2026-06-12 |
+| gpt-4.1-mini | $0.40 / $1.60 | live-verified 2026-06-12 |
 | Codex GPT-5.5 | 125/12.5/750 credits per MTok | ~5–45 credits per typical task |
 | Codex GPT-5.4 | 62.5/6.25/375 credits | Sonnet-analog on the Codex side |
 | Codex GPT-5.4-Mini | 18.75/1.875/113 credits | ~6.7× cheaper input than 5.5 — Codex's own haiku-class |

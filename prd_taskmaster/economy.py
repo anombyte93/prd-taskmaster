@@ -23,6 +23,8 @@ PRICES_PER_MTOK = {
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-opus-4-8": (5.0, 25.0),
     "claude-fable-5": (10.0, 50.0),
+    "gpt-4.1": (2.0, 8.0),
+    "gpt-4.1-mini": (0.4, 1.6),
 }
 
 NAIVE_BASELINE_MODEL = "claude-fable-5"
@@ -125,7 +127,7 @@ def _price_key_for_model(model):
         return None
     if model in PRICES_PER_MTOK:
         return model
-    for price_key in PRICES_PER_MTOK:
+    for price_key in sorted(PRICES_PER_MTOK, key=len, reverse=True):
         if model.startswith(price_key + "-"):
             return price_key
     return None
