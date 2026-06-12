@@ -705,21 +705,34 @@ class TaskMasterBackend(Backend):
             text=True,
         )
         if result.returncode != 0:
-            return {
+            d = {
                 "ok": False,
                 "task_count": 0,
                 "exit": result.returncode,
                 "stderr": result.stderr,
             }
+            d.setdefault("backend", "taskmaster")
+            d.setdefault("ai", "taskmaster-cli")
+            return d
         _resolved, tasks = _load_tasks(tag)
-        return {"ok": True, "task_count": len(tasks)}
+        d = {"ok": True, "task_count": len(tasks)}
+        d.setdefault("backend", "taskmaster")
+        d.setdefault("ai", "taskmaster-cli")
+        return d
 
     def expand(self, task_ids=None, research=True, tag=None) -> dict:
         resolved, pending = _pending_tasks(tag, task_ids)
         if len(pending) > 3:
-            return tm_parallel.run_tm_parallel(tag=tag)
+            res = tm_parallel.run_tm_parallel(tag=tag)
+            d = dict(res)
+            d.setdefault("backend", "taskmaster")
+            d.setdefault("ai", "taskmaster-cli")
+            return d
         if not pending:
-            return {"ok": True, "tag": resolved, "expanded": [], "failed": [], "results": []}
+            d = {"ok": True, "tag": resolved, "expanded": [], "failed": [], "results": []}
+            d.setdefault("backend", "taskmaster")
+            d.setdefault("ai", "taskmaster-cli")
+            return d
 
         binary = _binary_or_raise()
         results = []
@@ -755,13 +768,16 @@ class TaskMasterBackend(Backend):
                 expanded.append(task_id)
             else:
                 failed.append(task_id)
-        return {
+        d = {
             "ok": not failed,
             "tag": resolved,
             "expanded": expanded,
             "failed": failed,
             "results": results,
         }
+        d.setdefault("backend", "taskmaster")
+        d.setdefault("ai", "taskmaster-cli")
+        return d
 
     def rate(self, tag=None, research=True) -> dict:
         binary = _binary_or_raise()
@@ -770,25 +786,34 @@ class TaskMasterBackend(Backend):
             cmd.append("--research")
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            return {"ok": False, "exit": result.returncode, "stderr": result.stderr}
+            d = {"ok": False, "exit": result.returncode, "stderr": result.stderr}
+            d.setdefault("backend", "taskmaster")
+            d.setdefault("ai", "taskmaster-cli")
+            return d
 
         resolved = parallel.current_tag(tag)
         for path in _report_candidates(resolved):
             raw = _read_json(path)
             if raw is not None:
-                return {
+                d = {
                     "ok": True,
                     "tag": resolved,
                     "report": str(path),
                     "complexityAnalysis": raw.get("complexityAnalysis", []),
                     "raw": raw,
                 }
-        return {
+                d.setdefault("backend", "taskmaster")
+                d.setdefault("ai", "taskmaster-cli")
+                return d
+        d = {
             "ok": False,
             "tag": resolved,
             "report": None,
             "error": "task complexity report not found",
         }
+        d.setdefault("backend", "taskmaster")
+        d.setdefault("ai", "taskmaster-cli")
+        return d
 
 
 def get_backend(cfg=None) -> Backend:

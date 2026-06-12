@@ -173,9 +173,9 @@ def test_expand_delegates_to_tm_parallel_for_more_than_three_pending(tmp_path, m
 
     result = get_backend({"backend": "taskmaster"}).expand(tag="master")
 
-    assert result == {"ok": True, "delegated": True}
+    expected = {"ok": True, "delegated": True, "backend": "taskmaster", "ai": "taskmaster-cli"}
+    assert result == expected
     assert called["tag"] == "master"
-
 
 def test_expand_serial_branch_runs_binary_and_appends_telemetry(tmp_path, monkeypatch):
     from prd_taskmaster.backend import get_backend
@@ -240,3 +240,27 @@ def test_load_fleet_config_backend_key_validates_silently(tmp_path, monkeypatch)
 
     (cfg_dir / "fleet.json").write_text(json.dumps({"backend": "broken"}))
     assert load_fleet_config()["backend"] == "auto"
+
+
+def test_taskmaster_responses_carry_backend_identity(tmp_path, monkeypatch):
+    from prd_taskmaster.backend import get_backend
+    import types
+
+    _isolate(tmp_path, monkeypatch, with_binary=False)
+    _seed_tasks(tmp_path, 1)
+
+    def fake_run(cmd, capture_output=True, text=True):
+        return types.SimpleNamespace(returncode=1, stdout='', stderr='boom')
+
+    monkeypatch.setattr('prd_taskmaster.backend.subprocess.run', fake_run)
+    monkeypatch.setattr('prd_taskmaster.backend._binary_or_raise', lambda: 'task-master')
+
+    backend = get_backend({'backend': 'taskmaster'})
+
+    parse_result = backend.parse_prd(str(tmp_path / 'prd.md'), 3)
+    rate_result = backend.rate()
+
+    for res in (parse_result, rate_result):
+        assert res.get('ok') is False
+        assert res.get('backend') == 'taskmaster'
+        assert res.get('ai') == 'taskmaster-cli'
