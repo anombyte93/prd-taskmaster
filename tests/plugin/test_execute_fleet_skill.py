@@ -5,7 +5,9 @@ grep-able markers and tool ids rather than trying to execute Atlas Fleet.
 """
 from pathlib import Path
 
-import yaml
+import pytest
+
+yaml = pytest.importorskip("yaml")  # test-infra dep only; absent in the stdlib-only CI job
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

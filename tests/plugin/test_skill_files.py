@@ -3,7 +3,9 @@
 Tool-id prefix updated atlas-go -> prd-taskmaster; routes /atlas-go: -> /prd:.
 Paths anchored to REPO_ROOT so the suite is cwd-independent.
 """
-import yaml
+import pytest
+
+yaml = pytest.importorskip("yaml")  # test-infra dep only; absent in the stdlib-only CI job
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
