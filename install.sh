@@ -5,6 +5,8 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh | bash
 #   bash install.sh                # fresh install or upgrade
+#   bash install.sh --with-taskmaster # also install the optional TaskMaster backend
+#   bash install.sh --no-taskmaster   # skip the optional TaskMaster backend offer
 #   bash install.sh --check-update # check for newer version only
 #
 # Customize the variables below for your skill repository.
@@ -22,6 +24,7 @@ VERSION="4.0.0"
 SKILL_DIR="${SKILL_DIR:-${HOME}/.claude/skills/${SKILL_NAME}}"
 ALIAS_NAME="atlas"
 ALIAS_DIR="${HOME}/.claude/skills/${ALIAS_NAME}"
+TASKMASTER_INSTALL_MODE="ask"
 
 # ---------------------------------------------------------------------------
 # Internal constants
@@ -64,6 +67,69 @@ trap cleanup EXIT
 
 require_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
+}
+
+set_taskmaster_install_mode() {
+    local requested="$1"
+    if [[ "${TASKMASTER_INSTALL_MODE}" != "ask" ]] && [[ "${TASKMASTER_INSTALL_MODE}" != "${requested}" ]]; then
+        die "Conflicting TaskMaster backend flags: choose --with-taskmaster or --no-taskmaster"
+    fi
+    TASKMASTER_INSTALL_MODE="${requested}"
+}
+
+install_taskmaster_backend() {
+    info "Installing optional task-master-ai package (unlocks the TaskMaster backend)"
+
+    if command -v task-master-ai >/dev/null 2>&1; then
+        ok "TaskMaster backend already available"
+        return 0
+    fi
+
+    if ! command -v npm >/dev/null 2>&1; then
+        warn "npm not found; skipping optional TaskMaster backend install"
+        warn "Atlas native backend remains available"
+        return 0
+    fi
+
+    if npm install -g task-master-ai; then
+        ok "Installed optional TaskMaster backend"
+    else
+        warn "Optional TaskMaster backend install failed"
+        warn "Atlas native backend remains available"
+    fi
+}
+
+offer_taskmaster_backend() {
+    case "${TASKMASTER_INSTALL_MODE}" in
+        with)
+            install_taskmaster_backend
+            ;;
+        without)
+            info "Skipping optional TaskMaster backend install (--no-taskmaster)"
+            ;;
+        ask)
+            if [[ ! -t 0 ]]; then
+                info "Non-interactive shell; skipping optional TaskMaster backend install"
+                info "Use --with-taskmaster to install task-master-ai when you want the TaskMaster backend"
+                return 0
+            fi
+
+            local answer
+            printf "Install optional task-master-ai package (unlocks the TaskMaster backend)? [Y/n] "
+            read -r answer || answer=""
+            case "${answer:-Y}" in
+                Y|y|YES|Yes|yes)
+                    install_taskmaster_backend
+                    ;;
+                N|n|NO|No|no)
+                    info "Skipping optional TaskMaster backend install"
+                    ;;
+                *)
+                    warn "Unrecognized answer; skipping optional TaskMaster backend install"
+                    ;;
+            esac
+            ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
@@ -331,6 +397,8 @@ ALIASEOF
         printf "    rm -rf %s\n" "${legacy_dir}"
     fi
 
+    offer_taskmaster_backend
+
     # ------------------------------------------------------------------
     # Success
     # ------------------------------------------------------------------
@@ -353,27 +421,52 @@ ALIASEOF
 # Entrypoint
 # ---------------------------------------------------------------------------
 main() {
-    case "${1:-}" in
-        --check-update|-u)
+    local action="install"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --check-update|-u)
+                action="check-update"
+                ;;
+            --version|-v)
+                action="version"
+                ;;
+            --help|-h)
+                action="help"
+                ;;
+            --with-taskmaster)
+                set_taskmaster_install_mode "with"
+                ;;
+            --no-taskmaster)
+                set_taskmaster_install_mode "without"
+                ;;
+            *)
+                die "Unknown argument: $1 (try --help)"
+                ;;
+        esac
+        shift
+    done
+
+    case "${action}" in
+        check-update)
             check_update
             ;;
-        --version|-v)
+        version)
             echo "${SKILL_NAME} v${VERSION}"
             ;;
-        --help|-h)
-            printf "Usage: %s [--check-update | --version | --help]\n" "${0##*/}"
+        help)
+            printf "Usage: %s [--with-taskmaster | --no-taskmaster | --check-update | --version | --help]\n" "${0##*/}"
             printf "\n"
-            printf "  (no args)       Install or upgrade the skill\n"
-            printf "  --check-update  Check GitHub for a newer release\n"
-            printf "  --version       Print current version\n"
-            printf "  --help          Show this help\n"
+            printf "  (no args)           Install or upgrade the skill\n"
+            printf "  --with-taskmaster   Install optional task-master-ai package\n"
+            printf "  --no-taskmaster     Skip optional TaskMaster backend install\n"
+            printf "  --check-update      Check GitHub for a newer release\n"
+            printf "  --version           Print current version\n"
+            printf "  --help              Show this help\n"
             ;;
-        "")
+        install)
             install_skill
             check_update
-            ;;
-        *)
-            die "Unknown argument: $1 (try --help)"
             ;;
     esac
 }

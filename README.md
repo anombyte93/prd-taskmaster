@@ -5,8 +5,22 @@ that takes a one-line goal, interviews you like a senior PM, writes a **graded,
 placeholder-proof PRD**, compiles it into a **dependency-ordered task graph**, and executes every
 task with **verification evidence** — so "done" means proven, not claimed.
 
-Free and MIT, forever. Works with Claude, Codex, and Gemini.
-**Atlas speaks TaskMaster natively — but doesn't need it.**
+Free and MIT, forever.
+
+Atlas has four structural moats:
+
+- **cross-vendor fleet** — Claude, Codex, and Gemini run as separate quota pools instead of one
+  brittle model lane.
+- **Engine-enforced unfakable gates** — `validate-tasks`, evidence checks, and `SHIP_CHECK_OK`
+  make completion a deterministic state, not a claim.
+- **persistent vendor-neutral `tasks.json`** — your PRD, task graph, and execution state stay as
+  plain repo files that survive vendor swaps.
+- **token-economy cost ledger** — every orchestrated model call records routing, exit, latency,
+  and escalation so cheap models do cheap work and expensive models justify themselves.
+
+**Atlas speaks TaskMaster natively — but doesn't need it.** Existing TaskMaster projects get a
+migration funnel: install `task-master-ai` only when you want the TaskMaster backend, while the
+native backend keeps the same validated task graph available without that prerequisite.
 
 ```
 Grade: GOOD  ▰▰▰▰▰▰▰▰▱▱  49/57 (86%) · 0 placeholders · 14 tasks parsed
@@ -25,7 +39,7 @@ Grade: GOOD  ▰▰▰▰▰▰▰▰▱▱  49/57 (86%) · 0 placeholders · 14
 goal → discovery interview → graded PRD → dependency-ordered task graph → verified execution
 ```
 
-1. **Preflight** — detects your environment (TaskMaster, model CLIs, research) and configures it. Zero setup questions.
+1. **Preflight** — detects your environment (native backend, optional TaskMaster backend, model CLIs, research) and configures it. Zero setup questions.
 2. **Discovery** — an adaptive, one-question-at-a-time interview captures your real constraints.
 3. **Generate** — writes a PRD, scores it against deterministic quality checks (letter grade), then parses it into a task graph with complexity scores and full subtask coverage.
 4. **Handoff** — detects what you have installed and recommends one execution mode.
@@ -41,7 +55,8 @@ goal → discovery interview → graded PRD → dependency-ordered task graph �
 
 ```bash
 curl -fsSL https://atlas-ai.au/install | bash
-# installs the skill + prd_taskmaster package, sets up the task-master-ai peer
+# installs the skill + prd_taskmaster package
+# TaskMaster install is optional — unlocks the TaskMaster backend
 ```
 
 ### Path 2 — Claude Code plugin
@@ -50,6 +65,8 @@ curl -fsSL https://atlas-ai.au/install | bash
 # add the marketplace, then install the plugin
 /plugin marketplace add anombyte93/prd-taskmaster
 /plugin install prd-taskmaster
+
+# optional — unlocks the TaskMaster backend
 npm install -g task-master-ai
 ```
 
@@ -71,7 +88,7 @@ uses the model CLIs you already have, with a local free-research option.
 Most AI coding tools tell you a task is done. This one makes "done" provable:
 
 - **Graded PRDs.** Every spec is scored against deterministic checks (EXCELLENT / GOOD / ACCEPTABLE / NEEDS WORK). Bare placeholders (`TBD`, `{{...}}`, `TODO`) are a hard fail.
-- **A real task graph.** Requirements become TaskMaster tasks with dependencies, complexity scores, and full subtask coverage — not a flat checklist.
+- **A real task graph.** Requirements become backend-neutral `tasks.json` tasks with dependencies, complexity scores, and full subtask coverage — not a flat checklist.
 - **Evidence-gated execution.** Each task is implemented and must produce execution evidence before it counts as done.
 - **A completion token you can trust.** `SHIP_CHECK_OK` is emitted only when every gate passes — and a single non-zero `Exit status` in any evidence file blocks it. It is structurally hard to fake.
 
@@ -97,12 +114,13 @@ it failed. One setting controls how aggressive that is:
 { "token_economy": "conservative" }   // or "balanced" (default) / "performance"
 ```
 
-Task decomposition and research run through **TaskMaster's own model-agnostic AI** (any API you
-configure — Anthropic, OpenAI, Perplexity, Gemini, openai-compatible…), parallelized across
-isolated workdirs so N expansions run concurrently without write races. Complexity 2 scaffolding
-gets a haiku-class model; the hardest long-running work gets the frontier model; nothing defaults
-to expensive. Local telemetry (`economy-report`) shows your real success-rate and latency per
-model so the routing gets smarter on YOUR workload — priors and sources in
+Task decomposition and research run through the selected backend. Native mode works without a
+TaskMaster install; installing `task-master-ai >= 0.43.0` unlocks TaskMaster's model-agnostic AI
+(any API you configure — Anthropic, OpenAI, Perplexity, Gemini, openai-compatible…) and isolated
+workdir expansion when that backend is selected. Complexity 2 scaffolding gets a haiku-class
+model; the hardest long-running work gets the frontier model; nothing defaults to expensive.
+Local telemetry (`economy-report`) shows your real success-rate and latency per model so the
+routing gets smarter on YOUR workload — priors and sources in
 [`docs/product/MODEL-ECONOMY.md`](docs/product/MODEL-ECONOMY.md).
 
 ## Free vs Atlas Pro
@@ -111,12 +129,12 @@ model so the routing gets smarter on YOUR workload — priors and sources in
 |---|:---:|:---:|
 | Discovery interview (adaptive, one question at a time) | ✓ | ✓ |
 | Graded PRD validation + placeholder scan | ✓ | ✓ |
-| Dependency-ordered task graph (TaskMaster) | ✓ | ✓ |
+| Dependency-ordered task graph (`tasks.json`) | ✓ | ✓ |
 | Verified solo execution — evidence required per task | ✓ | ✓ |
 | Model-agnostic: Claude / Codex / Gemini | ✓ | ✓ |
 | Parallel research fan-out | ✓ | ✓ |
 | **Token economy** — start cheap, escalate only on failure (conservative/balanced/performance) | ✓ | ✓ |
-| Parallel **native TaskMaster** expansion — any configured API, isolated workdirs | ✓ | ✓ |
+| Optional **TaskMaster backend** expansion — any configured API, isolated workdirs | ✓ | ✓ |
 | Local cost telemetry + `economy-report` | ✓ | ✓ |
 | Adaptive routing auto-tuning from telemetry | — | ✓ (roadmap) |
 | **Atlas Fleet** — parallel waves of isolated workers, checker-gated merges, one final PR | — | ✓ |

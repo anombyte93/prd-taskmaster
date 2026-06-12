@@ -5,6 +5,11 @@
   "peerDependencies": {
     "task-master-ai": ">=0.43.0"
   },
+  "peerDependenciesMeta": {
+    "task-master-ai": {
+      "optional": true
+    }
+  },
   "scripts": {
     "postinstall": "pip install -r mcp-server/requirements.txt 2>/dev/null || echo 'WARN: Python MCP deps not installed. MCP tools will not start. Run: pip install -r node_modules/prd-taskmaster/mcp-server/requirements.txt'",
     "test": "pytest tests/",

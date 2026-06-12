@@ -118,9 +118,10 @@ Targets: **[v4.0.0 launch] → [+6 months]**.
   so that a thin spec is honest rather than blocked.
 - **US-G3 [FREE]** As any user, I want every task expanded into subtasks before handoff.
   - AC: GENERATE gate requires `task_count>0` AND `subtask_coverage==1.0`; expansion via the
-    token-economy decision tree (FR-30): native-parallel tm-parallel by default, agent-parallel
-    fallback, serial native for tiny graphs. Concurrent expands in ONE directory remain forbidden
-    (lock-stale race) — isolation dirs are the parallel mechanism.
+    backend-aware token-economy decision tree (FR-30): TaskMaster backend when explicitly selected
+    or available under auto, native backend otherwise, agent_action_required fallback when no API
+    key is available. Concurrent expands in ONE directory remain forbidden (lock-stale race) —
+    isolation dirs are the parallel mechanism.
 
 ### Epic: Task Planning
 - **US-T1 [FREE]** As any user, I want task count calibrated to project scale.
@@ -173,11 +174,11 @@ Targets: **[v4.0.0 launch] → [+6 months]**.
 ### UC-1 — First-time install & first goal *(FREE)*
 Primary: Indie Ivy. Pre: Claude Code installed; Node/Python present.
 Main: Install → `/atlas` → preflight+current_phase route to setup → SETUP validates/configures,
-scaffolds `.atlas-ai/` → DISCOVER brainstorm → GENERATE writes+validates PRD (≥ACCEPTABLE) →
-parses tasks.json, expands subtasks → HANDOFF recommends a solo mode → user picks → EXECUTE
-loop to `SHIP_CHECK_OK`.
-Alt: task-master missing → report install cmd + halt (never auto-install). Config present →
-DETECT-FIRST skips. Grade NEEDS_WORK → fix-loop (UC-4).
+selects a backend, scaffolds `.atlas-ai/` → DISCOVER brainstorm → GENERATE writes+validates PRD
+(≥ACCEPTABLE) → parses tasks.json, expands subtasks → HANDOFF recommends a solo mode → user
+picks → EXECUTE loop to `SHIP_CHECK_OK`.
+Alt: task-master missing → select native backend and report the optional install cmd (never
+auto-install). Config present → DETECT-FIRST skips. Grade NEEDS_WORK → fix-loop (UC-4).
 
 ### UC-2 — Resuming a crashed pipeline *(FREE)*
 Pre: `.atlas-ai/state/pipeline.json` + `.taskmaster/` exist.
@@ -227,8 +228,9 @@ shown but unlicensed → returns upgrade path, re-prompts free modes.
 1. Run curl one-liner (or `npm i -g prd-taskmaster`); postinstall installs Python MCP deps
    (warns, never hard-fails).
 2. `/atlas` → preflight + current_phase → null → route setup.
-3. SETUP: `which task-master-ai` (missing → print install cmd + halt) → `.taskmaster/` init →
-   DETECT-FIRST provider config → scaffold `.atlas-ai/` + ship-check → advance SETUP→DISCOVER.
+3. SETUP: select backend (`auto|taskmaster|native`), report optional TaskMaster install if
+   missing, initialize `.taskmaster/` task state → DETECT-FIRST provider config → scaffold
+   `.atlas-ai/` + ship-check → advance SETUP→DISCOVER.
 4. DISCOVER: interactive brainstorm → CONSTRAINTS CAPTURED + scale → approve → advance.
 5. GENERATE: load template → fill PRD → CONSTRAINT + SCOPE check → validate_prd (NEEDS_WORK →
    fix-loop) → calc_tasks → parse_prd → analyze-complexity → expand --all → coverage 1.0 →
@@ -284,9 +286,10 @@ Tags: **[FREE]/[PRO]**, phase.
 - **FR-4 [FREE]** Every phase skill MUST be resumable by re-reading `current_phase()` on entry.
 
 **SETUP**
-- **FR-5 [FREE]** SETUP MUST run 6 checks (binary, version ≥0.43.0, project, config, main
-  provider, research provider) with per-check pass/fail + fix command; version/research are
-  warnings.
+- **FR-5 [FREE]** SETUP MUST run 6 backend-aware checks (project, backend selection,
+  TaskMaster binary/version ≥0.43.0 when the TaskMaster backend is selected or detected, config,
+  main provider, research provider) with per-check pass/fail + fix/notice; missing TaskMaster is
+  an optional-backend notice, while version/research remain warnings.
 - **FR-6 [FREE]** Provider config MUST be DETECT-FIRST: never overwrite a working config; only
   fill empty roles; ask before mutating an unsupported provider.
 - **FR-7 [FREE]** SETUP MUST scaffold `.atlas-ai/customizations/` + `.atlas-ai/ship-check.py`
@@ -355,21 +358,23 @@ Tags: **[FREE]/[PRO]**, phase.
 - **FR-29 [FREE]** A `token_economy` setting (conservative|balanced|performance, default balanced)
   MUST control start tiers per op class, escalation steps/ceiling, and research-provider choice;
   explicit user routing/models MUST always win over presets.
-- **FR-30 [FREE]** Task expansion/research MUST default to native TaskMaster AI (model-agnostic,
-  any configured API) parallelized via isolated workdirs when TM ≥ 0.43 and a real structured API
-  is the research role; the agent-parallel path remains the fallback (free proxy, no key, failures,
-  repo-grounded research).
+- **FR-30 [FREE]** Task expansion/research MUST route through backend abstraction and token
+  economy: `auto` selects the TaskMaster backend when TM ≥0.43 and a real structured API is the
+  research role, otherwise native. The TaskMaster backend MAY use TaskMaster AI parallelized via
+  isolated workdirs; the native backend uses direct API generation or the agent_action_required
+  fallback for free proxy, no-key, provider-failure, and repo-grounded research cases.
 - **FR-31 [FREE]** Every AI invocation the engine orchestrates MUST append a telemetry row
   (op_class, model, exit, wall_ms, escalated) to .atlas-ai/telemetry.jsonl; `economy-report` MUST
   summarize success-rate and p50 wall per (op_class, model).
 - **FR-32 [PRO]** Adaptive auto-tuning of fleet.json routing from accumulated telemetry is an
   Atlas Pro capability (roadmap).
 
-- **FR-33 [FREE, v4.1 roadmap]** A backend abstraction MUST make TaskMaster one pluggable
-  backend (taskmaster|native|auto): both backends expose detect/init/parse_prd/expand/rate;
-  the native backend degrades to agent-driven structured generation without an API key;
-  task-state ops (next/set-status) are engine-native under every backend. tasks.json format
-  compatibility is permanent (the migration funnel from TaskMaster's ecosystem).
+- **FR-33 [FREE, SHIPPED v4.1]** Backend abstraction MUST make TaskMaster one pluggable backend:
+  selection is `auto|taskmaster|native`, both backends expose the 5-op protocol
+  `detect/init/parse_prd/expand/rate`, and the native backend returns an `agent_action_required`
+  no-key fallback when direct API generation is unavailable. Task-state ops (next/set-status) are
+  engine-native under every backend. tasks.json format compatibility is permanent (the migration
+  funnel from TaskMaster's ecosystem).
 
 **Cross-cutting**
 - **FR-28 [FREE]** All MCP tools MUST return dicts and MUST NEVER call `sys.exit` / terminate the
