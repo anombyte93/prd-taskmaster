@@ -55,7 +55,6 @@ node_modules/
 .claude/
 .env
 .env.example
-CLAUDE.md
 
 # Task files
 # tasks.json
