@@ -1,6 +1,6 @@
 # Dogfood log: Atlas Improves Atlas
 
-> Started 2026-06-12 · branch v4-merge · 269 tests green and counting
+> Started 2026-06-12 · branch v4-merge · 272 tests green and counting
 > An ongoing log — every engine improvement ships through Atlas's own loop
 > (feedback backlog → mini-PRD → engine-generated task graph → validate-tasks →
 > claim/next-task/set-status execution → orchestrator verification gate → commit →
@@ -13,6 +13,7 @@
 | 2 | hybrid | Engine generation via native API path; codex executed the graph | atomic `claim-task` (select + mark in-progress in ONE locked transaction) — fixes cycle 1's race finding | `a8e2405` |
 | 3 | APIs only | All generation via engine `llm_client` (gpt-4.1-mini → escalated gpt-4.1); orchestrator applied edits mechanically | TaskMaster-path responses always carry `backend`/`ai` identity — fixes cycle 2's silent-resolution finding | `10bbcbe` |
 | 4 | hybrid | Engine generation via native API path; codex executed via `claim-task` | `context-pack`: ast-extracted signature packs for code-gen prompts — fixes cycle 3's hallucinated-signatures finding | `a22d7d1` |
+| 5 | hybrid | Engine generation via native API path; codex executed via `claim-task` | verified OpenAI rates in `PRICES_PER_MTOK` — the ledger's first real `est_saved_usd` (8/8 real calls priced: $0.0126 vs $0.3122 naive, 96% saved) | `696a4fd` |
 
 ## The loop fed itself (evidence chain)
 
