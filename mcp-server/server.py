@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FastMCP server for prd-taskmaster.
 
-Registers 30 tools wrapping the sibling modules (pipeline, capabilities,
+Registers 31 tools wrapping the sibling modules (pipeline, capabilities,
 taskmaster, backend, validation, templates) plus server-native helpers
 (calc_tasks, backup_prd, append_workflow, debrief, log_progress,
 gen_test_tasks, read_state, gen_scripts, compute_fleet_waves, feedback).
@@ -126,6 +126,15 @@ def next_task(tag: str = "") -> dict:
     """Select the next TaskMaster-compatible task or subtask."""
     try:
         return TS.run_next_task(tag=tag or None)
+    except LIB.CommandError as exc:
+        return {"ok": False, "error": exc.message, **exc.extra}
+
+
+@mcp.tool()
+def claim_task(tag: str = "") -> dict:
+    """Atomically select and mark the next task or subtask in-progress."""
+    try:
+        return TS.run_claim_task(tag=tag or None)
     except LIB.CommandError as exc:
         return {"ok": False, "error": exc.message, **exc.extra}
 

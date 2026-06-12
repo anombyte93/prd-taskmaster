@@ -303,6 +303,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("next-task", help="Select the next TaskMaster-compatible task")
     p.add_argument("--tag")
 
+    # claim-task
+    p = sub.add_parser("claim-task", help="Atomically select and claim the next task")
+    p.add_argument("--tag")
+
     # set-status
     p = sub.add_parser("set-status", help="Set a task or subtask status")
     p.add_argument("--id", required=True)
@@ -341,6 +345,7 @@ DISPATCH = {
     "tm-harvest": tm_parallel.cmd_tm_harvest,
     "fleet-waves": fleet.cmd_fleet_waves,
     "next-task": task_state.cmd_next_task,
+    "claim-task": task_state.cmd_claim_task,
     "set-status": task_state.cmd_set_status,
     "economy-report": cmd_economy_report,
     "feedback-add": cmd_feedback_add,

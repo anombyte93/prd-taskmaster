@@ -119,9 +119,7 @@ def _ready_candidates(tasks: list[dict], ready_ids: list) -> list[dict]:
     )
 
 
-def run_next_task(tag: str | None = None) -> dict:
-    """Return the next TaskMaster-compatible task or subtask selection."""
-    resolved_tag, _raw, _tag_key, tasks = _resolve_tasks(tag)
+def _select_next_task(resolved_tag: str, tasks: list[dict]) -> dict:
     ready_ids = fleet.ready_set(tasks)
 
     for parent in _in_progress_candidates(tasks):
@@ -152,6 +150,72 @@ def run_next_task(tag: str | None = None) -> dict:
         "ready_count": len(ready_ids),
         "source": "none",
     }
+
+
+def run_next_task(tag: str | None = None) -> dict:
+    """Return the next TaskMaster-compatible task or subtask selection."""
+    resolved_tag, _raw, _tag_key, tasks = _resolve_tasks(tag)
+    return _select_next_task(resolved_tag, tasks)
+
+
+def _claim_selected_task(tasks: list[dict], selected: dict) -> dict:
+    selected_id = str(selected.get("id"))
+    parent_id = str(selected.get("parent_id", "") or "")
+    if parent_id and "." in selected_id:
+        subtask_id = selected_id.split(".", 1)[1]
+        for task in tasks:
+            if str(task.get("id")) != parent_id:
+                continue
+            for subtask in task.get("subtasks") or []:
+                if str(subtask.get("id")) == subtask_id:
+                    subtask["status"] = "in-progress"
+                    return _subtask_envelope(task, subtask)
+    else:
+        for task in tasks:
+            if str(task.get("id")) == selected_id:
+                task["status"] = "in-progress"
+                return dict(task)
+    raise CommandError(f"unknown id: {selected_id}")
+
+
+def run_claim_task(tag: str | None = None) -> dict:
+    """Atomically select the next task or subtask and mark it in-progress."""
+    resolved_tag = parallel.current_tag(tag)
+    result: dict[str, Any] = {}
+
+    def transform(current: str) -> str:
+        if not current.strip():
+            raise CommandError(f"{parallel.TASKS} not found")
+        try:
+            raw = json.loads(current)
+        except json.JSONDecodeError as exc:
+            raise CommandError(f"Failed to parse {parallel.TASKS}: {exc}") from exc
+        if not isinstance(raw, dict):
+            raise CommandError(f"Failed to parse {parallel.TASKS}: root must be an object")
+
+        tag_key = _tag_key_for_raw(raw, resolved_tag)
+        try:
+            tasks = parallel.get_tasks(raw, tag_key)
+        except (KeyError, TypeError) as exc:
+            raise CommandError(
+                f"tasks missing for tag '{resolved_tag}' in {parallel.TASKS}"
+            ) from exc
+
+        selected = _select_next_task(resolved_tag, tasks)
+        if selected["task"] is None:
+            result.update(selected)
+            result["ok"] = False
+            result["claimed"] = False
+            return current
+
+        claimed_task = _claim_selected_task(tasks, selected["task"])
+        result.update(selected)
+        result["task"] = claimed_task
+        result["claimed"] = True
+        return json.dumps(raw, indent=2, default=str)
+
+    locked_update(parallel.TASKS, transform)
+    return result
 
 
 def _split_id(id_str: str) -> tuple[str, str | None]:
@@ -226,6 +290,13 @@ def run_set_status(id_str: str, status: str, tag: str | None = None) -> dict:
 def cmd_next_task(args: argparse.Namespace) -> None:
     try:
         emit(run_next_task(getattr(args, "tag", None)))
+    except CommandError as exc:
+        fail(exc.message, **exc.extra)
+
+
+def cmd_claim_task(args: argparse.Namespace) -> None:
+    try:
+        emit(run_claim_task(getattr(args, "tag", None)))
     except CommandError as exc:
         fail(exc.message, **exc.extra)
 

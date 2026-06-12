@@ -1,5 +1,6 @@
 """Task state operation tests for native TaskMaster parity."""
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import shutil
 import subprocess
@@ -224,6 +225,55 @@ def test_next_task_supports_flat_tasks_file_with_explicit_tag(tmp_path, monkeypa
     assert result["task"]["id"] == 7
 
 
+def test_claim_task_claims_ready_parent_in_one_operation(tmp_path, monkeypatch):
+    from prd_taskmaster.task_state import run_claim_task
+
+    tasks_file = _write_project(
+        tmp_path,
+        _tagged_payload([
+            _task(1, title="Ready high parent", priority="high"),
+            _task(2, title="Ready medium parent", priority="medium"),
+        ]),
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = run_claim_task()
+
+    assert result["ok"] is True
+    assert result["claimed"] is True
+    assert result["tag"] == "master"
+    assert result["ready_count"] == 2
+    assert result["source"] == "ready"
+    assert result["task"]["id"] == 1
+    assert result["task"]["status"] == "in-progress"
+    written = json.loads(tasks_file.read_text())
+    assert written["master"]["tasks"][0]["status"] == "in-progress"
+    assert written["master"]["tasks"][1]["status"] == "pending"
+
+
+def test_claim_task_returns_false_when_none_ready(tmp_path, monkeypatch):
+    from prd_taskmaster.task_state import run_claim_task
+
+    tasks_file = _write_project(
+        tmp_path,
+        _tagged_payload([_task(1, status="done"), _task(2, status="cancelled")]),
+    )
+    before = tasks_file.read_text()
+    monkeypatch.chdir(tmp_path)
+
+    result = run_claim_task()
+
+    assert result == {
+        "ok": False,
+        "tag": "master",
+        "task": None,
+        "ready_count": 0,
+        "source": "none",
+        "claimed": False,
+    }
+    assert tasks_file.read_text() == before
+
+
 def test_set_status_updates_subtask_without_auto_done_parent(tmp_path, monkeypatch):
     from prd_taskmaster.task_state import run_set_status
 
@@ -301,6 +351,53 @@ def test_task_state_cli_next_task_and_set_status(tmp_path):
     assert json.loads(out)["kind"] == "task"
     written = json.loads(tasks_file.read_text())
     assert written["master"]["tasks"][0]["status"] == "review"
+
+
+def test_task_state_cli_claim_task_marks_task_in_progress(tmp_path):
+    tasks_file = _write_project(tmp_path, _tagged_payload([_task(1)]))
+
+    code, out, err = _run_cli(tmp_path, "claim-task")
+
+    assert code == 0, err
+    data = json.loads(out)
+    assert data["ok"] is True
+    assert data["claimed"] is True
+    assert data["source"] == "ready"
+    assert data["task"]["id"] == 1
+    assert data["task"]["status"] == "in-progress"
+    written = json.loads(tasks_file.read_text())
+    assert written["master"]["tasks"][0]["status"] == "in-progress"
+
+
+def test_task_state_cli_concurrent_claims_never_duplicate_task_ids(tmp_path):
+    tasks_file = _write_project(
+        tmp_path,
+        _tagged_payload([
+            _task(1, title="First ready", priority="high"),
+            _task(2, title="Second ready", priority="high"),
+        ]),
+    )
+
+    def claim_once():
+        return _run_cli(tmp_path, "claim-task")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: claim_once(), range(2)))
+
+    payloads = []
+    for code, out, err in results:
+        assert code == 0, err
+        payload = json.loads(out)
+        assert payload["ok"] is True
+        assert payload["claimed"] is True
+        payloads.append(payload)
+
+    claimed_ids = [payload["task"]["id"] for payload in payloads]
+    assert len(claimed_ids) == len(set(claimed_ids))
+    assert set(claimed_ids) == {1, 2}
+    written = json.loads(tasks_file.read_text())
+    statuses = {task["id"]: task["status"] for task in written["master"]["tasks"]}
+    assert statuses == {1: "in-progress", 2: "in-progress"}
 
 
 @pytest.mark.skipif(shutil.which("task-master") is None, reason="task-master not on PATH")

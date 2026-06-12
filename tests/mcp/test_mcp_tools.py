@@ -114,6 +114,42 @@ def test_next_task_and_set_task_status_tools(tmp_path, monkeypatch):
     assert json.loads(tasks_file.read_text())["alpha"]["tasks"][0]["status"] == "done"
 
 
+def test_claim_task_tool_marks_task_in_progress(tmp_path, monkeypatch):
+    import server as S
+
+    tasks_dir = tmp_path / ".taskmaster" / "tasks"
+    tasks_dir.mkdir(parents=True)
+    tasks_file = tasks_dir / "tasks.json"
+    tasks_file.write_text(json.dumps({
+        "alpha": {
+            "tasks": [
+                {
+                    "id": 1,
+                    "title": "Start here",
+                    "description": "",
+                    "details": "",
+                    "testStrategy": "",
+                    "status": "pending",
+                    "priority": "high",
+                    "dependencies": [],
+                    "subtasks": [],
+                }
+            ],
+            "metadata": {"description": "Tasks for alpha context"},
+        }
+    }))
+    monkeypatch.chdir(tmp_path)
+
+    result = S.claim_task(tag="alpha")
+
+    assert result["ok"] is True
+    assert result["claimed"] is True
+    assert result["tag"] == "alpha"
+    assert result["task"]["id"] == 1
+    assert result["task"]["status"] == "in-progress"
+    assert json.loads(tasks_file.read_text())["alpha"]["tasks"][0]["status"] == "in-progress"
+
+
 def test_set_task_status_tool_returns_error_dict(tmp_path, monkeypatch):
     import server as S
 
@@ -152,8 +188,8 @@ def test_feedback_submit_and_report_tools(tmp_path, monkeypatch):
     assert (tmp_path / ".atlas-ai" / "feedback.jsonl").is_file()
 
 
-def test_server_registers_30_tools():
-    """Verify server.py declares all 30 expected tool functions at module scope."""
+def test_server_registers_31_tools():
+    """Verify server.py declares all 31 expected tool functions at module scope."""
     import server as S
     expected = {
         "preflight", "current_phase", "advance_phase", "check_gate",
@@ -165,6 +201,7 @@ def test_server_registers_30_tools():
         "engine_preflight",
         "tm_parallel_expand",
         "next_task",
+        "claim_task",
         "set_task_status",
         "backend_detect",
         "init_project",
@@ -174,7 +211,7 @@ def test_server_registers_30_tools():
         "feedback_submit",
         "feedback_report",
     }
-    assert len(expected) == 30
+    assert len(expected) == 31
     public_attrs = {name for name in dir(S) if not name.startswith("_")}
     missing = expected - public_attrs
     assert not missing, f"missing tools: {sorted(missing)}"
