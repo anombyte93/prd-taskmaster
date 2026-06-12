@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """FastMCP server for prd-taskmaster.
 
-Registers 28 tools wrapping the sibling modules (pipeline, capabilities,
+Registers 30 tools wrapping the sibling modules (pipeline, capabilities,
 taskmaster, backend, validation, templates) plus server-native helpers
 (calc_tasks, backup_prd, append_workflow, debrief, log_progress,
-gen_test_tasks, read_state, gen_scripts, compute_fleet_waves).
+gen_test_tasks, read_state, gen_scripts, compute_fleet_waves, feedback).
 
 No explicit process termination — mcp.run() is the event loop and
 returns naturally when the transport closes.
@@ -31,6 +31,7 @@ from prd_taskmaster import batch as B
 from prd_taskmaster import task_state as TS
 from prd_taskmaster import tm_parallel as TMP
 from prd_taskmaster import cli as CLI
+from prd_taskmaster import feedback as FB
 
 mcp = FastMCP("prd-taskmaster")
 
@@ -205,7 +206,7 @@ def rate_tasks(tag: str = "", research: bool = True) -> dict:
     return _backend_tool_call(CLI.run_rate, tag=tag or None, research=research)
 
 
-# ─── Server-native tools (8) ──────────────────────────────────────────────────
+# ─── Server-native tools (10) ─────────────────────────────────────────────────
 
 @mcp.tool()
 def read_state() -> dict:
@@ -317,6 +318,34 @@ def log_progress(task_id: str, title: str) -> dict:
     with progress.open("a") as f:
         f.write(line)
     return {"ok": True, "progress_file": str(progress)}
+
+
+@mcp.tool()
+def feedback_submit(
+    rating: int,
+    agent: str,
+    harness: str,
+    what_went_well: str = "",
+    what_failed: str = "",
+    suggestions: str = "",
+    task_ref: str = "",
+) -> dict:
+    """Append one Atlas agent feedback row to .atlas-ai/feedback.jsonl."""
+    return FB.append_feedback({
+        "rating": rating,
+        "agent": agent,
+        "harness": harness,
+        "what_went_well": what_went_well,
+        "what_failed": what_failed,
+        "suggestions": suggestions,
+        "task_ref": task_ref,
+    })
+
+
+@mcp.tool()
+def feedback_report() -> dict:
+    """Summarize .atlas-ai/feedback.jsonl."""
+    return FB.summarize_feedback()
 
 
 @mcp.tool()

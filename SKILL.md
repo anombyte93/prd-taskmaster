@@ -161,6 +161,14 @@ always fully usable on its own.
 
 **Gate: User chose mode and handoff complete.**
 
+## Feedback
+
+At debrief time, every executing agent records how the run went. Prefer the MCP
+`feedback_submit` tool; fallback is `python3 script.py feedback-add --rating <1-5>
+--agent <name> --harness <claude-code|codex|gemini|api|other> --task-ref <id>
+--well <text> --failed <text> --suggest <text>`. Feedback is stored in
+`.atlas-ai/feedback.jsonl`; summarize it with `python3 script.py feedback-report`.
+
 ## Script Commands Reference
 
 | Command | Purpose |

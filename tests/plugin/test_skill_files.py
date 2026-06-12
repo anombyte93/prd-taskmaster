@@ -95,6 +95,14 @@ def test_orchestrator_skill_defines_normative_backend_operations():
     assert "next/set-status are engine-native under every backend" in content
 
 
+def test_orchestrator_skill_documents_feedback_debrief():
+    content = (REPO_ROOT / "SKILL.md").read_text()
+    assert "## Feedback" in content
+    assert "feedback_submit" in content
+    assert "script.py feedback-add" in content
+    assert ".atlas-ai/feedback.jsonl" in content
+
+
 def test_bare_taskmaster_lifecycle_commands_are_mode_b_only():
     forbidden = ("task-master next", "task-master set-status")
     failures = []

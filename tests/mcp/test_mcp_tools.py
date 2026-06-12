@@ -1,4 +1,4 @@
-"""MCP tool contract tests — the merged server.py registers 28 tools.
+"""MCP tool contract tests — the merged server.py registers 30 tools.
 
 Retargeted from the plugin: server.py now imports from prd_taskmaster.* and
 lives at mcp-server/server.py. We add the repo root (so `prd_taskmaster` is
@@ -130,8 +130,30 @@ def test_set_task_status_tool_returns_error_dict(tmp_path, monkeypatch):
     assert "unknown id" in result["error"].lower()
 
 
-def test_server_registers_28_tools():
-    """Verify server.py declares all 28 expected tool functions at module scope."""
+def test_feedback_submit_and_report_tools(tmp_path, monkeypatch):
+    import server as S
+
+    monkeypatch.chdir(tmp_path)
+
+    submit = S.feedback_submit(
+        rating=5,
+        agent="Codex",
+        harness="codex",
+        what_went_well="MCP wrapper stayed thin.",
+        suggestions="Keep schema stable.",
+        task_ref="task-7",
+    )
+    report = S.feedback_report()
+
+    assert submit["ok"] is True
+    assert report["ok"] is True
+    assert report["total"] == 1
+    assert report["avg_rating"] == 5.0
+    assert (tmp_path / ".atlas-ai" / "feedback.jsonl").is_file()
+
+
+def test_server_registers_30_tools():
+    """Verify server.py declares all 30 expected tool functions at module scope."""
     import server as S
     expected = {
         "preflight", "current_phase", "advance_phase", "check_gate",
@@ -149,8 +171,10 @@ def test_server_registers_28_tools():
         "parse_prd",
         "expand_tasks",
         "rate_tasks",
+        "feedback_submit",
+        "feedback_report",
     }
-    assert len(expected) == 28
+    assert len(expected) == 30
     public_attrs = {name for name in dir(S) if not name.startswith("_")}
     missing = expected - public_attrs
     assert not missing, f"missing tools: {sorted(missing)}"

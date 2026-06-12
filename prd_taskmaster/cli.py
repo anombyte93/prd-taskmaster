@@ -15,6 +15,7 @@ from prd_taskmaster.tasks import cmd_calc_tasks, cmd_backup_prd, cmd_enrich_task
 from prd_taskmaster.taskmaster import cmd_init_taskmaster
 from prd_taskmaster.batch import cmd_engine_preflight
 from prd_taskmaster.economy import cmd_economy_report
+from prd_taskmaster.feedback import HARNESS_CHOICES, cmd_feedback_add, cmd_feedback_report
 from prd_taskmaster import fleet, parallel, task_state, tm_parallel
 
 
@@ -279,6 +280,20 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("economy-report", help="Summarize .atlas-ai/telemetry.jsonl per (op_class, model)")
     p.add_argument("--input", default=None)
 
+    # feedback-add
+    p = sub.add_parser("feedback-add", help="Append one Atlas agent feedback row")
+    p.add_argument("--rating", required=True, type=int)
+    p.add_argument("--agent", required=True)
+    p.add_argument("--harness", required=True, choices=sorted(HARNESS_CHOICES))
+    p.add_argument("--task-ref", default="")
+    p.add_argument("--well", default="")
+    p.add_argument("--failed", default="")
+    p.add_argument("--suggest", default="")
+
+    # feedback-report
+    p = sub.add_parser("feedback-report", help="Summarize .atlas-ai/feedback.jsonl")
+    p.add_argument("--path", default=None)
+
     # fleet-waves
     p = sub.add_parser("fleet-waves", help="Compute Atlas Fleet dependency waves")
     p.add_argument("--concurrency", type=int, default=3)
@@ -328,6 +343,8 @@ DISPATCH = {
     "next-task": task_state.cmd_next_task,
     "set-status": task_state.cmd_set_status,
     "economy-report": cmd_economy_report,
+    "feedback-add": cmd_feedback_add,
+    "feedback-report": cmd_feedback_report,
 }
 
 
