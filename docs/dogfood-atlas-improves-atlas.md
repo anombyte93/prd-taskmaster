@@ -1,7 +1,7 @@
-# Dogfood: Atlas Improves Atlas — 3 Executor Modes
+# Dogfood log: Atlas Improves Atlas
 
-> 2026-06-12 · branch v4-merge · 264 tests green
-> Three improvement cycles, each shipped through Atlas's own loop
+> Started 2026-06-12 · branch v4-merge · 269 tests green and counting
+> An ongoing log — every engine improvement ships through Atlas's own loop
 > (feedback backlog → mini-PRD → engine-generated task graph → validate-tasks →
 > claim/next-task/set-status execution → orchestrator verification gate → commit →
 > feedback row), each in a different executor mode. Every cycle's improvement
@@ -12,6 +12,7 @@
 | 1 | codex-native | Codex CLI agent only (no API keys; agent fulfilled `agent_action_required` itself) | `parse-prd` API success echoes `telemetry_ref`; `append_telemetry` flock-guarded + returns row reference | `0c86292` |
 | 2 | hybrid | Engine generation via native API path; codex executed the graph | atomic `claim-task` (select + mark in-progress in ONE locked transaction) — fixes cycle 1's race finding | `a8e2405` |
 | 3 | APIs only | All generation via engine `llm_client` (gpt-4.1-mini → escalated gpt-4.1); orchestrator applied edits mechanically | TaskMaster-path responses always carry `backend`/`ai` identity — fixes cycle 2's silent-resolution finding | `10bbcbe` |
+| 4 | hybrid | Engine generation via native API path; codex executed via `claim-task` | `context-pack`: ast-extracted signature packs for code-gen prompts — fixes cycle 3's hallucinated-signatures finding | `a22d7d1` |
 
 ## The loop fed itself (evidence chain)
 
@@ -19,6 +20,7 @@
 2. Cycle 2's generation step silently resolved `backend: auto` → TaskMaster with no identity in the response → became cycle 3's PRD.
 3. Cycle 2's generation was the **first production use of cycle 1's `telemetry_ref`** (line-addressable audit ref returned in the parse-prd response).
 4. Cycle 3 executed its graph through **cycle 2's `claim-task`** — orchestrator-verified beforehand with a 6-process race: 6 claims, 6 distinct task ids, zero duplicates.
+5. Cycle 4 shipped the fix for cycle 3's finding (signature hallucination) — and its own graph again ran through `claim-task`.
 
 ## Mode comparison (measured, .atlas-ai/telemetry.jsonl + feedback.jsonl)
 
