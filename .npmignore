@@ -1,0 +1,19 @@
+# Root .npmignore — Python bytecode + dev-loopback marketplace patterns.
+#
+# IMPORTANT (npm 11 behavior): when package.json `files` lists a directory
+# like "mcp-server/" as an allowlist, the root .npmignore is NOT honored
+# for files INSIDE that directory. Filters must live in per-subdirectory
+# .npmignore files to actually take effect.
+#
+# The root entries below are kept defensively for:
+#   - future npm versions that may honor root .npmignore with directory files
+#   - fallback if a subdir .npmignore is ever accidentally deleted
+#   - self-documentation of the filtering intent
+#
+# The ACTUAL working filters live at:
+#   - mcp-server/.npmignore     (excludes __pycache__, *.pyc)
+#   - prd_taskmaster/.npmignore (excludes __pycache__, *.pyc)
+#   - .claude-plugin/.npmignore (excludes marketplace.json dev config)
+**/__pycache__
+*.pyc
+.claude-plugin/marketplace.json

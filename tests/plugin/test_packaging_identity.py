@@ -1,4 +1,8 @@
 import json
+import shutil
+import subprocess
+
+import pytest
 from pathlib import Path
 
 
@@ -55,3 +59,24 @@ def test_product_spec_marks_backend_abstraction_shipped_v41():
     assert "auto|taskmaster|native" in content
     assert "detect/init/parse_prd/expand/rate" in content
     assert "agent_action_required" in content
+
+
+@pytest.mark.skipif(shutil.which("npm") is None, reason="npm not available")
+def test_npm_pack_excludes_python_bytecode():
+    # npm 11 does not honor the root .npmignore inside `files[]`-allowlisted
+    # directories; per-subdir .npmignore files carry the real filtering. This
+    # test guards the tarball against __pycache__/*.pyc regressions.
+    result = subprocess.run(
+        ["npm", "pack", "--dry-run", "--json"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+
+    manifest = json.loads(result.stdout)
+    paths = [entry["path"] for entry in manifest[0]["files"]]
+    offenders = [p for p in paths if ".pyc" in p or "__pycache__" in p]
+    assert offenders == []
+    assert not any("marketplace.json" in p for p in paths)
