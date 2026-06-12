@@ -15,6 +15,7 @@ allowed-tools:
   - Write
   - ToolSearch
   - mcp__atlas-engine
+  - mcp__plugin_prd_go
   - mcp__plugin_prd-taskmaster_go
   - mcp__plugin_atlas-go_go
 ---
@@ -30,7 +31,7 @@ skill.**
 
 ## Entry gate
 
-1. Call `mcp__plugin_prd-taskmaster_go__check_gate(phase="DISCOVER", evidence={})`.
+1. Call `mcp__plugin_prd_go__check_gate(phase="DISCOVER", evidence={})`.
    If the call returns `{gate_passed: false, violations: [...]}`, report the
    violations and stop. The gate protects against re-entering a completed
    phase or skipping ahead from SETUP.
@@ -187,7 +188,7 @@ arbitrary.
 After approval (Interactive) or commit (Autonomous), constraints captured,
 and scale classified:
 
-1. Call `mcp__plugin_prd-taskmaster_go__advance_phase(expected_current="DISCOVER", target="GENERATE", evidence={"user_approved": True, "constraints_captured": True, "scale": "<Solo|Team|Enterprise>", "assumptions_documented": True})`.
+1. Call `mcp__plugin_prd_go__advance_phase(expected_current="DISCOVER", target="GENERATE", evidence={"user_approved": True, "constraints_captured": True, "scale": "<Solo|Team|Enterprise>", "assumptions_documented": True})`.
    The call atomically transitions `pipeline.json` from DISCOVER to GENERATE.
    The `expected_current` field is the compare-and-swap guard;
    `evidence` is stored under `phase_evidence[GENERATE]` for audit.

@@ -12,6 +12,7 @@ allowed-tools:
   - Skill
   - ToolSearch
   - mcp__atlas-engine
+  - mcp__plugin_prd_go
   - mcp__plugin_prd-taskmaster_go
   - mcp__plugin_atlas-go_go
 ---
@@ -27,7 +28,7 @@ only build inside isolated worktrees.
 Before the first wave, all gates must pass. If any gate fails, report the gap
 and stop; do not fall back to solo execution from inside this skill.
 
-1. `mcp__plugin_prd-taskmaster_go__detect_capabilities()` reports
+1. `mcp__plugin_prd_go__detect_capabilities()` reports
    `tier: "premium"` and atlas-launcher MCP registration/aliveness.
 2. `mcp__atlas-launcher__inbox_read` is callable for this session.
 3. `.taskmaster/tasks/tasks.json` exists.
@@ -44,7 +45,7 @@ through TaskMaster or the plugin pipeline MCP, and only after verification.
 
 Repeat until no runnable tasks remain:
 
-1. Call `mcp__plugin_prd-taskmaster_go__compute_fleet_waves(concurrency=<N>, tag=<tag>)`.
+1. Call `mcp__plugin_prd_go__compute_fleet_waves(concurrency=<N>, tag=<tag>)`.
    Use the returned frontier as the only dispatch source. If it reports a
    deadlock, render status, mark the blocked set, and stop dispatching those
    tasks.

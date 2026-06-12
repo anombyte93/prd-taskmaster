@@ -16,6 +16,7 @@ allowed-tools:
   - Skill
   - ToolSearch
   - mcp__atlas-engine
+  - mcp__plugin_prd_go
   - mcp__plugin_prd-taskmaster_go
   - mcp__plugin_atlas-go_go
 ---
@@ -30,7 +31,7 @@ into tasks, expand every task into subtasks. Quality over speed.**
 
 ## Entry gate
 
-1. Call `mcp__plugin_prd-taskmaster_go__check_gate(phase="GENERATE", evidence={})`.
+1. Call `mcp__plugin_prd_go__check_gate(phase="GENERATE", evidence={})`.
    If the call returns `{gate_passed: false, violations: [...]}`, report the
    violations and stop. The gate protects against re-entering a completed
    phase or skipping ahead from DISCOVER.
@@ -70,7 +71,7 @@ Decide based on discovery depth:
 - **Comprehensive**: 4+ detailed answers, complex project, Team / Enterprise scale
 - **Minimal**: thin answers, user wants speed, Solo scale
 
-**MCP (preferred)**: `mcp__plugin_prd-taskmaster_go__load_template(type="comprehensive")`
+**MCP (preferred)**: `mcp__plugin_prd_go__load_template(type="comprehensive")`
 
 **CLI fallback**: `python3 script.py load-template --type comprehensive`
 
@@ -163,7 +164,7 @@ path — downstream tools read from here.
 
 ## Step 3: Validate spec quality
 
-**MCP (preferred)**: `mcp__plugin_prd-taskmaster_go__validate_prd(input_path=".taskmaster/docs/prd.md")`
+**MCP (preferred)**: `mcp__plugin_prd_go__validate_prd(input_path=".taskmaster/docs/prd.md")`
 
 **CLI fallback**: `python3 script.py validate-prd --input .taskmaster/docs/prd.md`
 
@@ -194,7 +195,7 @@ is additive, never a replacement.
 
 Calculate task count first:
 
-**MCP**: `mcp__plugin_prd-taskmaster_go__calc_tasks(requirements_count=<count>)`
+**MCP**: `mcp__plugin_prd_go__calc_tasks(requirements_count=<count>)`
 
 **CLI**: `python3 script.py calc-tasks --requirements <count>`
 
@@ -204,7 +205,7 @@ Then parse through the normative backend operation:
 
 **TaskMaster backend direct methods** (only when explicitly operating that backend):
 - **MCP**: `mcp__task-master-ai__parse_prd(input=".taskmaster/docs/prd.md", numTasks=<recommended>)`
-- **MCP fallback**: `mcp__plugin_prd-taskmaster_go__tm_parse_prd(input_path=".taskmaster/docs/prd.md", num_tasks=<recommended>)`
+- **MCP fallback**: `mcp__plugin_prd_go__tm_parse_prd(input_path=".taskmaster/docs/prd.md", num_tasks=<recommended>)`
 - **CLI**: `task-master parse-prd --input .taskmaster/docs/prd.md --num-tasks <recommended>`
 
 The backend operation writes to `.taskmaster/tasks/tasks.json`. Verify the file exists
@@ -218,7 +219,7 @@ Use the normative backend operation instead of home-rolled classification:
 
 **TaskMaster backend direct methods** (only when explicitly operating that backend):
 - **MCP**: `mcp__task-master-ai__analyze_complexity` (analyzes all tasks)
-- **MCP fallback**: `mcp__plugin_prd-taskmaster_go__tm_analyze_complexity` (wraps the CLI)
+- **MCP fallback**: `mcp__plugin_prd_go__tm_analyze_complexity` (wraps the CLI)
 - **CLI**: `task-master analyze-complexity`
 
 **Important — output location**: the TaskMasterBackend internal
@@ -359,7 +360,7 @@ Generate:
 
 After the evidence gate passes:
 
-1. Call `mcp__plugin_prd-taskmaster_go__advance_phase(expected_current="GENERATE", target="HANDOFF", evidence={"validation_grade": "<EXCELLENT|GOOD|ACCEPTABLE>", "task_count": <int>, "subtask_coverage": <float 0-1>, "placeholders_found": <int>})`.
+1. Call `mcp__plugin_prd_go__advance_phase(expected_current="GENERATE", target="HANDOFF", evidence={"validation_grade": "<EXCELLENT|GOOD|ACCEPTABLE>", "task_count": <int>, "subtask_coverage": <float 0-1>, "placeholders_found": <int>})`.
    The call atomically transitions `pipeline.json` from GENERATE to HANDOFF.
    The `expected_current` field is the compare-and-swap guard;
    `evidence` is stored under `phase_evidence[HANDOFF]` for audit.

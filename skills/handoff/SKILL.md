@@ -18,6 +18,7 @@ allowed-tools:
   - AskUserQuestion
   - ToolSearch
   - mcp__atlas-engine
+  - mcp__plugin_prd_go
   - mcp__plugin_prd-taskmaster_go
   - mcp__plugin_atlas-go_go
 ---
@@ -32,7 +33,7 @@ structured choice, dispatch the chosen mode. Mode D executes only on tier=premiu
 
 ## Entry gate
 
-1. Call `mcp__plugin_prd-taskmaster_go__check_gate(phase="HANDOFF", evidence={})`.
+1. Call `mcp__plugin_prd_go__check_gate(phase="HANDOFF", evidence={})`.
    If the call returns `{gate_passed: false, violations: [...]}`, report the
    violations and stop. The gate protects against re-entering a completed
    phase or skipping ahead from GENERATE.
@@ -64,7 +65,7 @@ HANDOFF CHECKLIST:
 
 ## Step 1: Detect capabilities
 
-**MCP (preferred)**: `mcp__plugin_prd-taskmaster_go__detect_capabilities()`
+**MCP (preferred)**: `mcp__plugin_prd_go__detect_capabilities()`
 
 **CLI fallback**: `python3 script.py detect-capabilities`
 
@@ -151,7 +152,7 @@ Recommended: Plan + Ralph Loop
 ```
 
 **When `tier == "premium"`** (licensed `atlas-launcher` detected): Mode D is a
-real, selectable mode — dispatching it invokes `/prd-taskmaster:execute-fleet`
+real, selectable mode — dispatching it invokes `/prd:execute-fleet`
 (the wave orchestrator skill). Show the unlocked card:
 
 ```
@@ -312,7 +313,7 @@ natural-language affirmatives, no ambiguity.
      (Migrated from `/ralph-loop:ralph-loop` 2026-06-04 — Claude Code's
      built-in `/goal` evaluator structurally solves the controller-wears-
      different-hats triple-verify rot caught in the 2026-06-03 audit.)
-   - **Mode D handoff (tier=premium)**: invoke `/prd-taskmaster:execute-fleet` — it owns the wave loop, worker dispatch, verification, merges, and SHIP_CHECK_OK termination. (free tier: upgrade response only, re-prompt)
+   - **Mode D handoff (tier=premium)**: invoke `/prd:execute-fleet` — it owns the wave loop, worker dispatch, verification, merges, and SHIP_CHECK_OK termination. (free tier: upgrade response only, re-prompt)
 
 ### Hook-blocked fallback (graceful degradation)
 
@@ -399,7 +400,7 @@ Handoff:
 
 After the evidence gate passes:
 
-1. Call `mcp__plugin_prd-taskmaster_go__advance_phase(expected_current="HANDOFF", target="EXECUTE", evidence={"user_mode_choice": "<A|B|C>", "plan_file_exists": True, "capabilities_tier": "<free|premium>"})`.
+1. Call `mcp__plugin_prd_go__advance_phase(expected_current="HANDOFF", target="EXECUTE", evidence={"user_mode_choice": "<A|B|C>", "plan_file_exists": True, "capabilities_tier": "<free|premium>"})`.
    The call atomically transitions `pipeline.json` from HANDOFF to EXECUTE.
    The `expected_current` field is the compare-and-swap guard;
    `evidence` is stored under `phase_evidence[EXECUTE]` for audit.

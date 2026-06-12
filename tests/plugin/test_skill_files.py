@@ -1,6 +1,6 @@
 """Skill file frontmatter validation (retargeted to merged skills/ layout).
 
-Tool-id prefix updated atlas-go -> prd-taskmaster; routes /atlas-go: -> /prd-taskmaster:.
+Tool-id prefix updated atlas-go -> prd-taskmaster; routes /atlas-go: -> /prd:.
 Paths anchored to REPO_ROOT so the suite is cwd-independent.
 """
 import yaml
@@ -34,13 +34,13 @@ def test_orchestrator_skill_has_valid_frontmatter():
 def test_orchestrator_skill_references_phase_skills():
     content = (REPO_ROOT / "skills/go/SKILL.md").read_text()
     for phase in ("setup", "discover", "generate", "handoff", "execute-task"):
-        assert f"/prd-taskmaster:{phase}" in content, f"missing route to {phase}"
+        assert f"/prd:{phase}" in content, f"missing route to {phase}"
 
 
 def test_orchestrator_skill_references_mcp_tools():
     content = (REPO_ROOT / "skills/go/SKILL.md").read_text()
-    assert "mcp__plugin_prd-taskmaster_go__preflight" in content
-    assert "mcp__plugin_prd-taskmaster_go__current_phase" in content
+    assert "mcp__plugin_prd_go__preflight" in content
+    assert "mcp__plugin_prd_go__current_phase" in content
 
 
 def test_setup_skill_has_valid_frontmatter():
@@ -56,8 +56,8 @@ def test_setup_skill_has_valid_frontmatter():
 
 def test_setup_skill_references_gate_mcp_tools():
     content = (REPO_ROOT / "skills/setup/SKILL.md").read_text()
-    assert "mcp__plugin_prd-taskmaster_go__check_gate" in content
-    assert "mcp__plugin_prd-taskmaster_go__advance_phase" in content
+    assert "mcp__plugin_prd_go__check_gate" in content
+    assert "mcp__plugin_prd_go__advance_phase" in content
 
 
 def test_setup_skill_ports_detect_first_rule():
@@ -80,19 +80,24 @@ def test_setup_skill_frames_taskmaster_install_as_backend_unlock():
 
 def test_orchestrator_skill_defines_normative_backend_operations():
     content = (REPO_ROOT / "SKILL.md").read_text()
-    assert "## Backend operations" in content
+    assert "## Engine operations" in content
     assert "This table is normative — instruction sites reference operations by name." in content
-    assert "| Operation | Command (both backends) | Notes |" in content
-    for operation, command in (
-        ("init", "script.py init-project"),
-        ("parse-prd", "script.py parse-prd"),
-        ("rate", "script.py rate"),
-        ("expand", "script.py expand"),
-        ("next", "script.py next-task"),
-        ("set-status", "script.py set-status"),
+    assert "| Operation | MCP tool (MCP-mode) | script.py (CLI-mode / fallback) |" in content
+    for operation, mcp_tool, script_cmd in (
+        ("init", "init_project", "init-project"),
+        ("parse-prd", "parse_prd", "parse-prd"),
+        ("rate", "rate_tasks", "rate"),
+        ("expand", "expand_tasks", "expand"),
+        ("next", "next_task", "next-task"),
+        ("set-status", "set_task_status", "set-status"),
     ):
-        assert f"| `{operation}` | `{command}" in content, f"missing backend op row: {operation}"
-    assert "next/set-status are engine-native under every backend" in content
+        assert f"| `{operation}` | `{mcp_tool}` | `{script_cmd}" in content, (
+            f"missing engine op row: {operation}"
+        )
+    # normalize hard wraps — the sentence spans a line break in the doc
+    flat = " ".join(content.split())
+    assert "`next`/`set-status` are engine-native under every backend" in flat
+    assert "## Script/agent-only operations" in content
 
 
 def test_orchestrator_skill_documents_feedback_debrief():
@@ -132,8 +137,8 @@ def test_discover_skill_has_valid_frontmatter():
 
 def test_discover_skill_references_gate_mcp_tools():
     content = (REPO_ROOT / "skills/discover/SKILL.md").read_text()
-    assert "mcp__plugin_prd-taskmaster_go__check_gate" in content
-    assert "mcp__plugin_prd-taskmaster_go__advance_phase" in content
+    assert "mcp__plugin_prd_go__check_gate" in content
+    assert "mcp__plugin_prd_go__advance_phase" in content
     assert "GENERATE" in content
 
 
@@ -161,8 +166,8 @@ def test_generate_skill_has_valid_frontmatter():
 
 def test_generate_skill_references_gate_mcp_tools():
     content = (REPO_ROOT / "skills/generate/SKILL.md").read_text()
-    assert "mcp__plugin_prd-taskmaster_go__check_gate" in content
-    assert "mcp__plugin_prd-taskmaster_go__advance_phase" in content
+    assert "mcp__plugin_prd_go__check_gate" in content
+    assert "mcp__plugin_prd_go__advance_phase" in content
     assert "HANDOFF" in content
 
 
@@ -217,8 +222,8 @@ def test_handoff_skill_drops_plan_mode():
 
 def test_handoff_skill_references_gate_mcp_tools():
     content = (REPO_ROOT / "skills/handoff/SKILL.md").read_text()
-    assert "mcp__plugin_prd-taskmaster_go__check_gate" in content
-    assert "mcp__plugin_prd-taskmaster_go__advance_phase" in content
+    assert "mcp__plugin_prd_go__check_gate" in content
+    assert "mcp__plugin_prd_go__advance_phase" in content
     assert "EXECUTE" in content
 
 
@@ -251,7 +256,7 @@ def test_expand_tasks_skill_is_user_invocable():
 
 def test_expand_tasks_skill_references_plugin_mcp_and_agent():
     content = (REPO_ROOT / "skills/expand-tasks/SKILL.md").read_text()
-    assert "mcp__plugin_prd-taskmaster_go__" in content
+    assert "mcp__plugin_prd_go__" in content
     assert "task-master" in content
     assert "tasks.json" in content
     assert "parallel" in content.lower()

@@ -17,6 +17,7 @@ allowed-tools:
   - WebSearch
   - ToolSearch
   - mcp__atlas-engine
+  - mcp__plugin_prd_go
   - mcp__plugin_prd-taskmaster_go
   - mcp__plugin_atlas-go_go
 ---
@@ -59,7 +60,7 @@ Resolution procedure, in order:
 1. If a `ToolSearch` tool exists in your session:
    a. `ToolSearch(query="select:mcp__atlas-engine__engine_preflight")`
    b. If no match: `ToolSearch(query="+engine preflight atlas", max_results=10)` — this
-      also catches plugin-scoped ids such as `mcp__plugin_prd-taskmaster_go__engine_preflight`.
+      also catches plugin-scoped ids such as `mcp__plugin_prd_go__engine_preflight`.
    c. If a schema loads → **MCP-mode = ON**. Record the prefix (e.g. `mcp__atlas-engine__`).
       If both user-scope and plugin-scope match, prefer `mcp__atlas-engine__`.
 2. No ToolSearch, but an `engine_preflight` MCP tool is already directly callable →

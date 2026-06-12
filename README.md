@@ -64,7 +64,7 @@ curl -fsSL https://atlas-ai.au/install | bash
 ```bash
 # add the marketplace, then install the plugin
 /plugin marketplace add anombyte93/prd-taskmaster
-/plugin install prd-taskmaster
+/plugin install prd
 
 # optional — unlocks the TaskMaster backend
 npm install -g task-master-ai
@@ -75,7 +75,7 @@ npm install -g task-master-ai
 Open any project in Claude Code and type:
 
 ```
-/atlas      (or /prd-taskmaster, or just say: "I want to build …")
+/atlas      (or /prd:go, or just say: "I want to build …")
 ```
 
 Requires Python 3.11+ and Linux / macOS / WSL. The free engine needs **no paid API key** — it

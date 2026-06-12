@@ -19,6 +19,7 @@ allowed-tools:
   - AskUserQuestion
   - ToolSearch
   - mcp__atlas-engine
+  - mcp__plugin_prd_go
   - mcp__plugin_prd-taskmaster_go
   - mcp__plugin_atlas-go_go
 ---
@@ -37,7 +38,7 @@ MCP research tool.
 ## When to Use
 
 Activate when user says: expand tasks, research tasks, research before coding for all, expand subtasks.
-Do NOT activate for: single task research (use /research-before-coding), PRD generation (use /prd-taskmaster:go).
+Do NOT activate for: single task research (use /research-before-coding), PRD generation (use /prd:go).
 
 ## Native-parallel first (token economy)
 
@@ -52,8 +53,8 @@ research must be repo-grounded (agents can read the codebase; native expand cann
 
 ## Prerequisites
 
-- TaskMaster `tasks.json` must exist (run `/prd-taskmaster:go` first)
-- A research provider is configured — either (a) `task-master models --set-research <model> --<provider>` for any task-master provider family, or (b) an MCP research tool registered in `~/.claude.json` that Claude Code can call directly (for example `mcp__plugin_prd-taskmaster_go__*` tools or an external search/reason MCP)
+- TaskMaster `tasks.json` must exist (run `/prd:go` first)
+- A research provider is configured — either (a) `task-master models --set-research <model> --<provider>` for any task-master provider family, or (b) an MCP research tool registered in `~/.claude.json` that Claude Code can call directly (for example `mcp__plugin_prd_go__*` tools or an external search/reason MCP)
 - At least 1 task in `tasks.json`
 
 ---
@@ -157,7 +158,7 @@ The `gen-prompt` command generates prompts that follow the
 research-before-coding pattern:
 
 1. Agent receives task context (title, description, dependencies, subtasks)
-2. Agent runs 3-5 targeted queries against the user's configured research provider. The `research-expander` agent is tool-agnostic: it picks up whichever research tools are available in the current Claude Code session. This may be `task-master research`, an MCP search/reason tool from `~/.claude.json` (including any `mcp__plugin_prd-taskmaster_go__*` tools registered by this plugin), WebSearch as a last resort, or whatever the user has bound. The skill does not hard-code any specific research MCP.
+2. Agent runs 3-5 targeted queries against the user's configured research provider. The `research-expander` agent is tool-agnostic: it picks up whichever research tools are available in the current Claude Code session. This may be `task-master research`, an MCP search/reason tool from `~/.claude.json` (including any `mcp__plugin_prd_go__*` tools registered by this plugin), WebSearch as a last resort, or whatever the user has bound. The skill does not hard-code any specific research MCP.
 3. Agent distills results into structured summary
 4. Summary returns to main context (~25-40 lines per task)
 
@@ -173,7 +174,7 @@ cleaner outputs with citations.
 |-------|--------|
 | Research provider unreachable or rate-limited | Exit skill, tell user to verify `task-master models` research role is set and reachable |
 | `research-expander` agent returns empty/failed | Re-run that specific task with different queries |
-| `tasks.json` not found | Exit skill, tell user to run `/prd-taskmaster:go` first |
+| `tasks.json` not found | Exit skill, tell user to run `/prd:go` first |
 | Task already expanded | Skip silently unless user forces re-expansion |
 | Agent timeout | Mark task as failed, continue with others |
 
@@ -195,7 +196,7 @@ Action) of the prd-taskmaster workflow. After PRD is parsed into tasks but
 before execution begins.
 
 ```
-/prd-taskmaster:go → generates PRD → parses into tasks
+/prd:go → generates PRD → parses into tasks
     ↓
 /expand-tasks   → research-expander agents run in Parallel waves → writes findings back to tasks.json
     ↓

@@ -37,7 +37,7 @@ def test_execute_fleet_skill_has_valid_frontmatter():
 def test_execute_fleet_skill_references_required_mcp_tools():
     content = _content()
     for tool_id in (
-        "mcp__plugin_prd-taskmaster_go__compute_fleet_waves",
+        "mcp__plugin_prd_go__compute_fleet_waves",
         "mcp__atlas-launcher__session_spawn",
         "mcp__atlas-launcher__session_send",
         "mcp__atlas-launcher__inbox_read",

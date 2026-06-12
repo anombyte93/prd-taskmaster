@@ -22,7 +22,7 @@ def test_gate_enforcer_denies_advance_without_gate_evidence(tmp_path, monkeypatc
     hook_path = REPO_ROOT / "hooks" / "gate_enforcer.py"
     input_json = {
         "hook_event_name": "PreToolUse",
-        "tool_name": "mcp__plugin_prd-taskmaster_go__advance_phase",
+        "tool_name": "mcp__plugin_prd_go__advance_phase",
         "tool_input": {"expected_current": None, "target": "SETUP", "evidence": {}},
         "session_id": "test-session",
     }
@@ -37,7 +37,7 @@ def test_gate_enforcer_allows_with_evidence(tmp_path, monkeypatch):
     hook_path = REPO_ROOT / "hooks" / "gate_enforcer.py"
     input_json = {
         "hook_event_name": "PreToolUse",
-        "tool_name": "mcp__plugin_prd-taskmaster_go__advance_phase",
+        "tool_name": "mcp__plugin_prd_go__advance_phase",
         "tool_input": {
             "expected_current": None,
             "target": "SETUP",

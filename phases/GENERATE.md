@@ -7,7 +7,7 @@ phase file was entered directly), run the Phase 0 procedure now — in Claude Co
 means `ToolSearch(query="select:mcp__atlas-engine__engine_preflight")` (keyword fallback
 `ToolSearch(query="+engine preflight atlas", max_results=10)`) BEFORE any bash. Tool ids
 look like `mcp__atlas-engine__<name>` (user-scoped server) or
-`mcp__plugin_prd-taskmaster_go__<name>` (plugin install). **In MCP-mode, using script.py
+`mcp__plugin_prd_go__<name>` (plugin install). **In MCP-mode, using script.py
 for an MCP-covered op is a compliance failure.** The script.py commands below are the
 CLI-mode path (zero-dependency installs, codex/gemini harnesses).
 

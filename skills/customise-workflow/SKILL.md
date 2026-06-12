@@ -19,6 +19,7 @@ allowed-tools:
   - AskUserQuestion
   - ToolSearch
   - mcp__atlas-engine
+  - mcp__plugin_prd_go
   - mcp__plugin_prd-taskmaster_go
   - mcp__plugin_atlas-go_go
 ---
@@ -38,7 +39,7 @@ Activate when the user says: "customise workflow", "customize workflow",
 "adjust PRD settings", "tune the skill", "change my defaults", or
 "personalise prd-taskmaster".
 
-Skip: generating a new PRD (use `/prd-taskmaster:go`), executing tasks (use
+Skip: generating a new PRD (use `/prd:go`), executing tasks (use
 HANDOFF modes), or running research expansion (use `/expand-tasks`).
 
 ## The One Rule

@@ -19,6 +19,7 @@ allowed-tools:
   - Agent
   - ToolSearch
   - mcp__atlas-engine
+  - mcp__plugin_prd_go
   - mcp__plugin_prd-taskmaster_go
   - mcp__plugin_atlas-go_go
 ---
@@ -203,7 +204,7 @@ to `done`. Do the 13 steps in order. Do not skip.
        (Codified 2026-06-04 — yesterday's run left all 39 subtasks
        `pending` despite 13/13 parent tasks `done`.)
     c. Update `.atlas-ai/state/pipeline.json` per-task: call
-       `mcp__plugin_prd-taskmaster_go__update_pipeline_task_status(task_id=<N>,
+       `mcp__plugin_prd_go__update_pipeline_task_status(task_id=<N>,
        status="done")` if the MCP tool is available. If not, fall back to
        atomic read-modify-write using the pattern in
        `mcp-server/pipeline.py:locked_update()` — read, append `<N>` to

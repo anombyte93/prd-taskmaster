@@ -4,11 +4,28 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — v4.0.0 (in progress)
+## [5.1.0] — 2026-06-13
 
-The v4.0.0 release merges two previously-unpublished internal lines back into this repo and
-re-launches it as an **open-core** product: a free MIT engine plus a commercial **Atlas Pro**
-tier.
+First npm publish (`prd-taskmaster@5.1.0`). This release consolidates the two development
+lines into one artifact and re-launches the repo as an **open-core** product: a free MIT
+engine plus a commercial **Atlas Pro** tier.
+
+**Lineage**: the public v4.x line (this repo) absorbed the private v5.x plugin line
+(`prd-taskmaster-plugin`, internal name "atlas-go", final state `v5-final` @ `f140490`) via
+file-level imports marked with `Imported-From:` commit trailers — state machine, ship-check
+gates, execute-task hardening, npm pack hygiene, and the granular validation test suite.
+Versioning continues from the higher v5.x line so the consolidated artifact supersedes both.
+
+### Added (5.1.0 consolidation)
+- Plugin namespace renamed `prd-taskmaster` → **`prd`** — commands are now `/prd:go` etc.;
+  MCP tool ids are `mcp__plugin_prd_go__*` (old prefixes kept as legacy allowed-tools aliases).
+- Per-directory `.npmignore` files keep Python bytecode out of the npm tarball (npm 11
+  ignores the root `.npmignore` inside `files[]`-allowlisted directories).
+- 21 granular PRD-validation tests ported from the plugin suite (`tests/core/test_validation.py`).
+- Setup/execute-task skills resolve the customizations starter pack and `ship-check.py`
+  from the packaged `${CLAUDE_PLUGIN_ROOT}/skel/` (previously referenced a developer-machine path).
+
+The notes below document the v4.0.0 line that this release ships for the first time.
 
 ### Added
 - **Token economy** (`token_economy`: conservative|balanced|performance) — per-op-class start

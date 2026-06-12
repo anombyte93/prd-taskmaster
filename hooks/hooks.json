@@ -3,7 +3,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "mcp__plugin_prd-taskmaster_go__advance_phase",
+        "matcher": "mcp__plugin_prd_go__advance_phase",
         "hooks": [
           {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/gate_enforcer.py"}
         ]

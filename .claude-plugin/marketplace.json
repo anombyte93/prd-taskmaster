@@ -1,13 +1,13 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "atlas-prd-taskmaster-local",
-  "description": "Local-path marketplace for prd-taskmaster plugin testing (v5.0.2 dev). Single plugin pointing to this worktree.",
+  "description": "Local-path marketplace for the prd plugin testing (v5.1.0 dev). Single plugin pointing to this worktree.",
   "owner": {
     "name": "Atlas-X-AI"
   },
   "plugins": [
     {
-      "name": "prd-taskmaster",
+      "name": "prd",
       "description": "Zero-config goal-to-tasks engine for Claude Code, plugin-native rebuild with CDD-verified execution",
       "source": "./",
       "category": "development"

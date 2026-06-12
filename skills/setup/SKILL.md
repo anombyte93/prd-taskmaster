@@ -13,6 +13,7 @@ allowed-tools:
   - Skill
   - ToolSearch
   - mcp__atlas-engine
+  - mcp__plugin_prd_go
   - mcp__plugin_prd-taskmaster_go
   - mcp__plugin_atlas-go_go
 ---
@@ -24,7 +25,7 @@ Declarative phase skill. Invoked by the prd-taskmaster orchestrator when
 
 ## Entry gate
 
-1. Call `mcp__plugin_prd-taskmaster_go__check_gate(phase="SETUP", evidence={})`.
+1. Call `mcp__plugin_prd_go__check_gate(phase="SETUP", evidence={})`.
    If the call returns `{gate_passed: false, violations: [...]}`, report the
    violations and stop. The gate protects against re-entering a completed
    phase or skipping ahead.
@@ -149,7 +150,7 @@ Research role.
 ### Step 4: Probe test
 
 If tasks already exist, call the MCP tool
-`mcp__plugin_prd-taskmaster_go__validate_setup` or run backend op `rate`:
+`mcp__plugin_prd_go__validate_setup` or run backend op `rate`:
 
 ```bash
 python3 script.py rate
@@ -174,7 +175,7 @@ Setup:
 
 After Steps 1–5 report green:
 
-1. Call `mcp__plugin_prd-taskmaster_go__advance_phase(expected_current="SETUP", target="DISCOVER", evidence={"validate_setup": <Step 4 result dict>, "provider_configured": True})`.
+1. Call `mcp__plugin_prd_go__advance_phase(expected_current="SETUP", target="DISCOVER", evidence={"validate_setup": <Step 4 result dict>, "provider_configured": True})`.
    The call atomically transitions `pipeline.json` from SETUP to DISCOVER.
    The `expected_current` field is the compare-and-swap guard;
    `evidence` is stored under `phase_evidence[DISCOVER]` for audit.

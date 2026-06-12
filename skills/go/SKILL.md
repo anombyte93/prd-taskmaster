@@ -13,6 +13,7 @@ allowed-tools:
   - AskUserQuestion
   - ToolSearch
   - mcp__atlas-engine
+  - mcp__plugin_prd_go
   - mcp__plugin_prd-taskmaster_go
   - mcp__plugin_atlas-go_go
 ---
@@ -23,20 +24,20 @@ Pure routing. Reads pipeline state, dispatches to the correct phase skill.
 
 **Deferred MCP tools:** in Claude Code the engine's MCP tools are often *deferred* — not
 callable until loaded. If a tool below is not directly callable, first run
-`ToolSearch(query="select:mcp__plugin_prd-taskmaster_go__preflight")` (keyword fallback
+`ToolSearch(query="select:mcp__plugin_prd_go__preflight")` (keyword fallback
 `ToolSearch(query="+atlas engine preflight", max_results=10)`) and use whichever prefix
-matches (`mcp__plugin_prd-taskmaster_go__` or `mcp__atlas-engine__`).
+matches (`mcp__plugin_prd_go__` or `mcp__atlas-engine__`).
 
 ## Flow
 
-1. Call `mcp__plugin_prd-taskmaster_go__preflight()` — get environment state
-2. Call `mcp__plugin_prd-taskmaster_go__current_phase()` — get pipeline state
+1. Call `mcp__plugin_prd_go__preflight()` — get environment state
+2. Call `mcp__plugin_prd_go__current_phase()` — get pipeline state
 3. Route via Skill tool:
-   - current_phase is null or SETUP → invoke `/prd-taskmaster:setup`
-   - current_phase is DISCOVER → invoke `/prd-taskmaster:discover`
-   - current_phase is GENERATE → invoke `/prd-taskmaster:generate`
-   - current_phase is HANDOFF → invoke `/prd-taskmaster:handoff`
-   - current_phase is EXECUTE → invoke `/prd-taskmaster:execute-task`
+   - current_phase is null or SETUP → invoke `/prd:setup`
+   - current_phase is DISCOVER → invoke `/prd:discover`
+   - current_phase is GENERATE → invoke `/prd:generate`
+   - current_phase is HANDOFF → invoke `/prd:handoff`
+   - current_phase is EXECUTE → invoke `/prd:execute-task`
 
 4. After phase skill returns, re-check current_phase. If it advanced, route to the next phase. If not, report the blocker.
 
