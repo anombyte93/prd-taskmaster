@@ -124,6 +124,27 @@ def _extract_json(text):
     return None
 
 
+def _usage_int(value):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _usage_fields(provider, data):
+    usage = data.get("usage") if isinstance(data, dict) else None
+    if not isinstance(usage, dict):
+        return {}
+    if provider == "anthropic":
+        tokens_in = _usage_int(usage.get("input_tokens"))
+        tokens_out = _usage_int(usage.get("output_tokens"))
+    else:
+        tokens_in = _usage_int(usage.get("prompt_tokens"))
+        tokens_out = _usage_int(usage.get("completion_tokens"))
+    if tokens_in is None or tokens_out is None:
+        return {}
+    return {"tokens_in": tokens_in, "tokens_out": tokens_out}
+
+
 def _http_call(creds, model, system, prompt, max_tokens, timeout):
     if creds["provider"] == "anthropic":
         url = ANTHROPIC_URL
@@ -157,9 +178,10 @@ def _http_call(creds, model, system, prompt, max_tokens, timeout):
     req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read().decode())
+    usage = _usage_fields(creds["provider"], data)
     if creds["provider"] == "anthropic":
-        return data["content"][0]["text"]
-    return data["choices"][0]["message"]["content"]
+        return data["content"][0]["text"], usage
+    return data["choices"][0]["message"]["content"], usage
 
 
 def generate_json(prompt, *, system="", schema_hint="", model=None, tier=None,
@@ -186,7 +208,7 @@ def generate_json(prompt, *, system="", schema_hint="", model=None, tier=None,
         start = time.monotonic()
         status = None
         try:
-            text = _http_call(creds, resolved_model, system, attempt_prompt, max_tokens, timeout)
+            text, usage = _http_call(creds, resolved_model, system, attempt_prompt, max_tokens, timeout)
             status = 200
         except urllib.error.HTTPError as e:
             status = e.code
@@ -215,7 +237,7 @@ def generate_json(prompt, *, system="", schema_hint="", model=None, tier=None,
 
         result = _extract_json(text)
         _telemetry(op_class, task_id, resolved_model, 0 if result is not None else 1,
-                   start, parse_retry, status)
+                   start, parse_retry, status, usage)
         if result is not None:
             return result
         if parse_retry:
@@ -229,10 +251,10 @@ def generate_json(prompt, *, system="", schema_hint="", model=None, tier=None,
     raise LLMError("http", "attempt budget exhausted")
 
 
-def _telemetry(op_class, task_id, model, exit_code, start, parse_retry, http_status):
+def _telemetry(op_class, task_id, model, exit_code, start, parse_retry, http_status, usage=None):
     from datetime import datetime, timezone
 
-    append_telemetry({
+    row = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "op_class": op_class,
         "task_id": task_id,
@@ -243,4 +265,11 @@ def _telemetry(op_class, task_id, model, exit_code, start, parse_retry, http_sta
         "escalated": False,
         "parse_retry": parse_retry,
         "http_status": http_status,
-    })
+    }
+    if isinstance(usage, dict):
+        tokens_in = _usage_int(usage.get("tokens_in"))
+        tokens_out = _usage_int(usage.get("tokens_out"))
+        if tokens_in is not None and tokens_out is not None:
+            row["tokens_in"] = tokens_in
+            row["tokens_out"] = tokens_out
+    append_telemetry(row)

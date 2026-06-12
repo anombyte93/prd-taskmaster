@@ -14,12 +14,18 @@ class FakeResponse(io.BytesIO):
     def __exit__(self, *a): return False
 
 
-def _anthropic_ok(payload_text):
-    return FakeResponse(json.dumps({"content": [{"text": payload_text}]}).encode())
+def _anthropic_ok(payload_text, usage=None):
+    payload = {"content": [{"text": payload_text}]}
+    if usage is not None:
+        payload["usage"] = usage
+    return FakeResponse(json.dumps(payload).encode())
 
 
-def _openai_ok(payload_text):
-    return FakeResponse(json.dumps({"choices": [{"message": {"content": payload_text}}]}).encode())
+def _openai_ok(payload_text, usage=None):
+    payload = {"choices": [{"message": {"content": payload_text}}]}
+    if usage is not None:
+        payload["usage"] = usage
+    return FakeResponse(json.dumps(payload).encode())
 
 
 # ── discover_key precedence ──────────────────────────────────────────────────
@@ -134,3 +140,43 @@ def test_telemetry_rows_written(monkeypatch, tmp_path):
     L.generate_json("x", task_id=7)
     rows = [json.loads(l) for l in (tmp_path / ".atlas-ai" / "telemetry.jsonl").read_text().splitlines()]
     assert rows and rows[0]["backend"] == "native-api" and rows[0]["task_id"] == 7
+    assert "tokens_in" not in rows[0] and "tokens_out" not in rows[0]
+
+
+def test_anthropic_telemetry_includes_usage_tokens(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setattr(
+        L.urllib.request,
+        "urlopen",
+        lambda req, timeout=None: _anthropic_ok(
+            '{"x": 1}',
+            usage={"input_tokens": 123, "output_tokens": 45},
+        ),
+    )
+
+    L.generate_json("x", task_id=8, model="claude-haiku-4-5-20251001")
+
+    rows = [json.loads(l) for l in (tmp_path / ".atlas-ai" / "telemetry.jsonl").read_text().splitlines()]
+    assert rows[0]["tokens_in"] == 123
+    assert rows[0]["tokens_out"] == 45
+
+
+def test_openai_telemetry_includes_usage_tokens(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.setattr(
+        L.urllib.request,
+        "urlopen",
+        lambda req, timeout=None: _openai_ok(
+            '{"x": 1}',
+            usage={"prompt_tokens": 30, "completion_tokens": 7},
+        ),
+    )
+
+    L.generate_json("x", task_id=9, model="claude-sonnet-4-6")
+
+    rows = [json.loads(l) for l in (tmp_path / ".atlas-ai" / "telemetry.jsonl").read_text().splitlines()]
+    assert rows[0]["tokens_in"] == 30
+    assert rows[0]["tokens_out"] == 7

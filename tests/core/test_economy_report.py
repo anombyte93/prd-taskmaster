@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from prd_taskmaster.economy import summarize_telemetry
 
 
@@ -40,3 +42,63 @@ def test_summarize_skips_malformed_lines(tmp_path):
     f.write_text('{"op_class":"x","model":"m","exit":0,"wall_ms":10}\nnot json\n')
     rep = summarize_telemetry(f)
     assert rep["total_calls"] == 1 and rep["skipped_lines"] == 1
+
+
+def test_summarize_costs_priced_unpriced_unknown_and_corrupt(tmp_path):
+    rows = [
+        {
+            "op_class": "structured_gen",
+            "model": "claude-haiku-4-5-20251001",
+            "exit": 0,
+            "wall_ms": 100,
+            "tokens_in": 1_000_000,
+            "tokens_out": 500_000,
+            "escalated": False,
+        },
+        {
+            "op_class": "structured_gen",
+            "model": "claude-sonnet-4-6",
+            "exit": 0,
+            "wall_ms": 200,
+            "tokens_in": 2_000_000,
+            "tokens_out": 1_000_000,
+            "escalated": True,
+        },
+        {
+            "op_class": "structured_gen",
+            "model": "claude-opus-4-8",
+            "exit": 1,
+            "wall_ms": 300,
+            "escalated": False,
+        },
+        {
+            "op_class": "structured_gen",
+            "model": "unknown-model",
+            "exit": 0,
+            "wall_ms": 400,
+            "tokens_in": 1_000,
+            "tokens_out": 1_000,
+            "escalated": False,
+        },
+    ]
+    f = tmp_path / "telemetry.jsonl"
+    f.write_text("\n".join(json.dumps(r) for r in rows) + "\nnot json\n")
+
+    rep = summarize_telemetry(f)
+
+    assert rep["ok"] is True
+    assert rep["total_calls"] == 4
+    assert rep["skipped_lines"] == 1
+    assert rep["escalations"] == 1
+    groups = {(g["op_class"], g["model"]): g for g in rep["groups"]}
+    assert groups[("structured_gen", "claude-haiku-4-5-20251001")]["calls"] == 1
+    assert groups[("structured_gen", "unknown-model")]["success_rate"] == 1.0
+
+    costs = rep["costs"]
+    assert costs["naive_baseline_model"] == "claude-fable-5"
+    assert costs["est_cost_usd"] == pytest.approx(24.5)
+    assert costs["naive_cost_usd"] == pytest.approx(105.0)
+    assert costs["est_saved_usd"] == pytest.approx(80.5)
+    assert costs["priced_calls"] == 2
+    assert costs["unpriced_calls"] == 2
+    assert costs["token_coverage"] == pytest.approx(0.5)

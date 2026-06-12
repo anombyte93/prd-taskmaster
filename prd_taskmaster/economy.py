@@ -15,6 +15,17 @@ TIER_MODEL_IDS = {
     "fable": "claude-fable-5",
 }
 
+# These price priors rot. Refresh them from docs/product/MODEL-ECONOMY.md
+# section 1 before making cost-saving claims.
+PRICES_PER_MTOK = {
+    "claude-haiku-4-5": (1.0, 5.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-opus-4-8": (5.0, 25.0),
+    "claude-fable-5": (10.0, 50.0),
+}
+
+NAIVE_BASELINE_MODEL = "claude-fable-5"
+
 TELEMETRY = Path(".atlas-ai") / "telemetry.jsonl"
 _TELEMETRY_LOCK = threading.Lock()
 
@@ -89,6 +100,59 @@ def append_telemetry(row, path=None):
             f.write(line)
 
 
+def _token_int(value):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _price_key_for_model(model):
+    if not isinstance(model, str):
+        return None
+    if model in PRICES_PER_MTOK:
+        return model
+    for price_key in PRICES_PER_MTOK:
+        if model.startswith(price_key + "-"):
+            return price_key
+    return None
+
+
+def _estimate_cost_usd(tokens_in, tokens_out, rates):
+    input_per_mtok, output_per_mtok = rates
+    return ((tokens_in * input_per_mtok) + (tokens_out * output_per_mtok)) / 1_000_000
+
+
+def _summarize_costs(rows):
+    est_cost = 0.0
+    naive_cost = 0.0
+    priced_calls = 0
+    unpriced_calls = 0
+    baseline_rates = PRICES_PER_MTOK[NAIVE_BASELINE_MODEL]
+
+    for row in rows:
+        tokens_in = _token_int(row.get("tokens_in"))
+        tokens_out = _token_int(row.get("tokens_out"))
+        price_key = _price_key_for_model(row.get("model"))
+        if tokens_in is None or tokens_out is None or price_key is None:
+            unpriced_calls += 1
+            continue
+
+        priced_calls += 1
+        est_cost += _estimate_cost_usd(tokens_in, tokens_out, PRICES_PER_MTOK[price_key])
+        naive_cost += _estimate_cost_usd(tokens_in, tokens_out, baseline_rates)
+
+    total = priced_calls + unpriced_calls
+    return {
+        "naive_baseline_model": NAIVE_BASELINE_MODEL,
+        "est_cost_usd": est_cost,
+        "naive_cost_usd": naive_cost,
+        "est_saved_usd": naive_cost - est_cost,
+        "priced_calls": priced_calls,
+        "unpriced_calls": unpriced_calls,
+        "token_coverage": (priced_calls / total) if total else 0.0,
+    }
+
+
 # ─── T7: telemetry summary (economy-report) ──────────────────────────────────
 
 def summarize_telemetry(path=None):
@@ -109,7 +173,11 @@ def summarize_telemetry(path=None):
             if not line:
                 continue
             try:
-                rows.append(json.loads(line))
+                row = json.loads(line)
+                if isinstance(row, dict):
+                    rows.append(row)
+                else:
+                    skipped += 1
             except json.JSONDecodeError:
                 skipped += 1
 
@@ -144,6 +212,7 @@ def summarize_telemetry(path=None):
         "skipped_lines": skipped,
         "escalations": escalations,
         "groups": out,
+        "costs": _summarize_costs(rows),
         "telemetry_path": str(p),
     }
 
