@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from prd_taskmaster.economy import summarize_telemetry
+from prd_taskmaster.economy import append_telemetry, summarize_telemetry
 
 
 def _rows():
@@ -103,3 +103,44 @@ def test_summarize_costs_priced_unpriced_unknown_and_corrupt(tmp_path):
     assert costs["unpriced_calls"] == 2
     assert costs["token_coverage"] == pytest.approx(0.75)
     assert costs["priced_coverage"] == pytest.approx(0.5)
+
+
+def test_append_telemetry_returns_row_reference(tmp_path):
+    f = tmp_path / "telemetry.jsonl"
+    first = {
+        "ts": "2026-06-12T00:00:00+00:00",
+        "op_class": "structured_gen",
+        "model": "claude-haiku-4-5-20251001",
+        "backend": "native-api",
+        "exit": 0,
+    }
+    second = {
+        "ts": "2026-06-12T00:00:01+00:00",
+        "op_class": "structured_gen",
+        "model": "claude-sonnet-4-6",
+        "backend": "native-api",
+        "exit": 1,
+    }
+
+    ref1 = append_telemetry(first, f)
+    ref2 = append_telemetry(second, f)
+
+    assert ref1 == {
+        "path": str(f),
+        "line": 1,
+        "ts": first["ts"],
+        "op_class": first["op_class"],
+        "model": first["model"],
+        "backend": first["backend"],
+        "exit": first["exit"],
+    }
+    assert ref2 == {
+        "path": str(f),
+        "line": 2,
+        "ts": second["ts"],
+        "op_class": second["op_class"],
+        "model": second["model"],
+        "backend": second["backend"],
+        "exit": second["exit"],
+    }
+    assert [json.loads(line) for line in f.read_text().splitlines()] == [first, second]

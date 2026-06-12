@@ -369,12 +369,13 @@ class NativeBackend(Backend):
         )
 
         try:
-            candidate = llm_client.generate_json(
+            generated = llm_client.generate_json(
                 prompt,
                 system=system,
                 schema_hint=TASKS_SCHEMA_HINT,
                 tier=tier,
                 op_class="structured_gen",
+                return_telemetry_ref=True,
             )
         except llm_client.LLMError as exc:
             if exc.kind == "no_key":
@@ -383,6 +384,12 @@ class NativeBackend(Backend):
                     "agent_action_required": _agent_parse_action(prd_path, num_tasks, tag),
                 }
             return {"ok": False, "error": str(exc), "kind": exc.kind, "backend": "native"}
+
+        telemetry_ref = None
+        if isinstance(generated, tuple) and len(generated) == 2:
+            candidate, telemetry_ref = generated
+        else:
+            candidate = generated
 
         try:
             tasks, validation = _validate_task_candidate(candidate)
@@ -398,7 +405,7 @@ class NativeBackend(Backend):
         except Exception as exc:
             return {"ok": False, "error": f"failed to write tasks: {exc}", "backend": "native"}
 
-        return {
+        result = {
             "ok": True,
             "task_count": len(tasks),
             "tag": resolved,
@@ -406,6 +413,9 @@ class NativeBackend(Backend):
             "ai": "api",
             "validation": validation,
         }
+        if telemetry_ref is not None:
+            result["telemetry_ref"] = telemetry_ref
+        return result
 
     def expand(self, task_ids=None, research=True, tag=None) -> dict:
         try:

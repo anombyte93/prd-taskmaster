@@ -144,6 +144,42 @@ def test_parse_prd_validates_and_writes_tagged_tasks(tmp_path, monkeypatch):
     assert [task["id"] for task in written["native-tag"]["tasks"]] == [1, 2]
 
 
+def test_parse_prd_success_echoes_telemetry_reference(tmp_path, monkeypatch):
+    from prd_taskmaster.backend import NativeBackend
+
+    monkeypatch.chdir(tmp_path)
+    prd = tmp_path / "prd.md"
+    prd.write_text("# PRD\n\nREQ-001: Build native backend.")
+    monkeypatch.setattr(llm_client, "discover_key", lambda: {"provider": "anthropic", "key": "k"})
+    telemetry_ref = {
+        "path": str(tmp_path / ".atlas-ai" / "telemetry.jsonl"),
+        "line": 1,
+        "ts": "2026-06-12T00:00:00+00:00",
+        "op_class": "structured_gen",
+        "model": "claude-haiku-4-5-20251001",
+        "backend": "native-api",
+        "exit": 0,
+    }
+    calls = []
+
+    def fake_generate_json(prompt, **kwargs):
+        calls.append(kwargs)
+        return _valid_tasks(2), telemetry_ref
+
+    monkeypatch.setattr(llm_client, "generate_json", fake_generate_json)
+
+    result = NativeBackend().parse_prd(prd, 2, tag="native-tag")
+
+    assert result["ok"] is True
+    assert result["task_count"] == 2
+    assert result["tag"] == "native-tag"
+    assert result["backend"] == "native"
+    assert result["ai"] == "api"
+    assert result["validation"]["task_count"] == 2
+    assert result["telemetry_ref"] == telemetry_ref
+    assert calls[0]["return_telemetry_ref"] is True
+
+
 def test_parse_prd_invalid_candidate_returns_error_without_overwrite(tmp_path, monkeypatch):
     from prd_taskmaster.backend import NativeBackend
 

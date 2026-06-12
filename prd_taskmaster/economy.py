@@ -1,8 +1,9 @@
 """Token economy presets, telemetry, and tier helpers for Atlas Fleet routing."""
 
 import json
-import threading
 from pathlib import Path
+
+from prd_taskmaster.lib import locked_update
 
 TIER_ORDER = ["fast", "standard", "capable", "frontier"]
 
@@ -27,7 +28,6 @@ PRICES_PER_MTOK = {
 NAIVE_BASELINE_MODEL = "claude-fable-5"
 
 TELEMETRY = Path(".atlas-ai") / "telemetry.jsonl"
-_TELEMETRY_LOCK = threading.Lock()
 
 ECONOMY_PRESETS = {
     "conservative": {
@@ -91,13 +91,27 @@ def economy_profile(cfg):
 # ─── Telemetry append helper ─────────────────────────────────────────────────
 
 def append_telemetry(row, path=None):
-    """Append one telemetry row to JSONL using the shared in-process lock."""
+    """Append one telemetry row to JSONL and return its stable row reference."""
     p = Path(path) if path else TELEMETRY
-    p.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(row, default=str) + "\n"
-    with _TELEMETRY_LOCK:
-        with p.open("a") as f:
-            f.write(line)
+    ref = {}
+
+    def transform(current: str) -> str:
+        separator = "" if not current or current.endswith("\n") else "\n"
+        row_line = len(current.splitlines()) + 1
+        ref.update({
+            "path": str(p.resolve()),
+            "line": row_line,
+            "ts": row.get("ts"),
+            "op_class": row.get("op_class"),
+            "model": row.get("model"),
+            "backend": row.get("backend"),
+            "exit": row.get("exit"),
+        })
+        return current + separator + line
+
+    locked_update(p, transform)
+    return ref
 
 
 def _token_int(value):

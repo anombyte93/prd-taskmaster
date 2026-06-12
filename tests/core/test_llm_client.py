@@ -180,3 +180,49 @@ def test_openai_telemetry_includes_usage_tokens(monkeypatch, tmp_path):
     rows = [json.loads(l) for l in (tmp_path / ".atlas-ai" / "telemetry.jsonl").read_text().splitlines()]
     assert rows[0]["tokens_in"] == 30
     assert rows[0]["tokens_out"] == 7
+
+
+def test_generate_json_default_return_unchanged(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setattr(
+        L.urllib.request,
+        "urlopen",
+        lambda req, timeout=None: _anthropic_ok('{"ok": true}'),
+    )
+
+    assert L.generate_json("x", task_id=10) == {"ok": True}
+
+
+def test_generate_json_can_return_success_telemetry_ref(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setattr(
+        L.urllib.request,
+        "urlopen",
+        lambda req, timeout=None: _anthropic_ok(
+            '{"ok": true}',
+            usage={"input_tokens": 11, "output_tokens": 3},
+        ),
+    )
+
+    result, telemetry_ref = L.generate_json(
+        "x",
+        task_id=11,
+        model="claude-haiku-4-5-20251001",
+        return_telemetry_ref=True,
+    )
+
+    assert result == {"ok": True}
+    assert telemetry_ref["path"] == str(tmp_path / ".atlas-ai" / "telemetry.jsonl")
+    assert telemetry_ref["line"] == 1
+    assert telemetry_ref["op_class"] == "structured_gen"
+    assert telemetry_ref["model"] == "claude-haiku-4-5-20251001"
+    assert telemetry_ref["backend"] == "native-api"
+    assert telemetry_ref["exit"] == 0
+    assert isinstance(telemetry_ref["ts"], str) and telemetry_ref["ts"]
+
+    rows = [json.loads(l) for l in (tmp_path / ".atlas-ai" / "telemetry.jsonl").read_text().splitlines()]
+    assert rows[0]["task_id"] == 11
+    assert rows[0]["tokens_in"] == 11
+    assert rows[0]["tokens_out"] == 3

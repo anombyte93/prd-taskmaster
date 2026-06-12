@@ -185,7 +185,8 @@ def _http_call(creds, model, system, prompt, max_tokens, timeout):
 
 
 def generate_json(prompt, *, system="", schema_hint="", model=None, tier=None,
-                  max_tokens=8192, timeout=120, op_class="structured_gen", task_id=None):
+                  max_tokens=8192, timeout=120, op_class="structured_gen", task_id=None,
+                  return_telemetry_ref=False):
     """One structured-generation call returning parsed JSON.
 
     Retry policy: ONE retry on invalid JSON (with the parse error fed back);
@@ -236,9 +237,11 @@ def generate_json(prompt, *, system="", schema_hint="", model=None, tier=None,
             continue
 
         result = _extract_json(text)
-        _telemetry(op_class, task_id, resolved_model, 0 if result is not None else 1,
-                   start, parse_retry, status, usage)
+        telemetry_ref = _telemetry(op_class, task_id, resolved_model, 0 if result is not None else 1,
+                                   start, parse_retry, status, usage)
         if result is not None:
+            if return_telemetry_ref:
+                return result, telemetry_ref
             return result
         if parse_retry:
             raise LLMError("invalid_json", "output failed JSON parsing after one retry")
@@ -272,4 +275,4 @@ def _telemetry(op_class, task_id, model, exit_code, start, parse_retry, http_sta
         if tokens_in is not None and tokens_out is not None:
             row["tokens_in"] = tokens_in
             row["tokens_out"] = tokens_out
-    append_telemetry(row)
+    return append_telemetry(row)
