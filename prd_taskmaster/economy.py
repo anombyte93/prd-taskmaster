@@ -127,11 +127,14 @@ def _summarize_costs(rows):
     naive_cost = 0.0
     priced_calls = 0
     unpriced_calls = 0
+    token_calls = 0
     baseline_rates = PRICES_PER_MTOK[NAIVE_BASELINE_MODEL]
 
     for row in rows:
         tokens_in = _token_int(row.get("tokens_in"))
         tokens_out = _token_int(row.get("tokens_out"))
+        if tokens_in is not None and tokens_out is not None:
+            token_calls += 1
         price_key = _price_key_for_model(row.get("model"))
         if tokens_in is None or tokens_out is None or price_key is None:
             unpriced_calls += 1
@@ -149,7 +152,10 @@ def _summarize_costs(rows):
         "est_saved_usd": naive_cost - est_cost,
         "priced_calls": priced_calls,
         "unpriced_calls": unpriced_calls,
-        "token_coverage": (priced_calls / total) if total else 0.0,
+        # token_coverage = calls carrying token counts; priced_coverage = calls
+        # whose model also matched a known price (the $ figures cover only those).
+        "token_coverage": (token_calls / total) if total else 0.0,
+        "priced_coverage": (priced_calls / total) if total else 0.0,
     }
 
 

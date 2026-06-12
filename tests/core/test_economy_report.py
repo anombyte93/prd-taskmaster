@@ -101,4 +101,5 @@ def test_summarize_costs_priced_unpriced_unknown_and_corrupt(tmp_path):
     assert costs["est_saved_usd"] == pytest.approx(80.5)
     assert costs["priced_calls"] == 2
     assert costs["unpriced_calls"] == 2
-    assert costs["token_coverage"] == pytest.approx(0.5)
+    assert costs["token_coverage"] == pytest.approx(0.75)
+    assert costs["priced_coverage"] == pytest.approx(0.5)
