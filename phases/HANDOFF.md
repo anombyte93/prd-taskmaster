@@ -20,6 +20,8 @@ HANDOFF CHECKLIST:
 
 ## Step 1: Detect Capabilities
 
+**MCP-mode** (from SKILL.md Phase 0): `<prefix>detect_capabilities()`
+**CLI-mode**:
 ```bash
 python3 ~/.claude/skills/prd-taskmaster/script.py detect-capabilities
 ```
@@ -107,11 +109,12 @@ Read the project's `./CLAUDE.md`. Append the TaskMaster workflow section if norm
 ```markdown
 ## Task Execution Workflow (prd-taskmaster)
 
-When implementing tasks, use backend operations:
-1. `script.py next-task` -- get next dependency-ready task
-2. `script.py set-status --id <id> --status in-progress` -- mark started
+When implementing tasks, use backend operations (MCP tool when the engine MCP server is
+available — e.g. `mcp__atlas-engine__next_task` — otherwise script.py):
+1. `next` op — MCP `next_task` or `script.py next-task` -- get next dependency-ready task
+2. `set-status` op — MCP `set_task_status(id, status="in-progress")` or `script.py set-status --id <id> --status in-progress` -- mark started
 3. Implement the task (follow the plan step linked to this task)
-4. `script.py set-status --id <id> --status done` -- mark complete
+4. `set-status` op — MCP `set_task_status(id, status="done")` or `script.py set-status --id <id> --status done` -- mark complete
 5. Update TodoWrite with progress
 6. Repeat from step 1
 

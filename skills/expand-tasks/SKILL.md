@@ -17,6 +17,10 @@ allowed-tools:
   - Glob
   - Grep
   - AskUserQuestion
+  - ToolSearch
+  - mcp__atlas-engine
+  - mcp__plugin_prd-taskmaster_go
+  - mcp__plugin_atlas-go_go
 ---
 
 # Expand Tasks with Research v1.0

@@ -11,11 +11,21 @@ allowed-tools:
   - Skill
   - Bash
   - AskUserQuestion
+  - ToolSearch
+  - mcp__atlas-engine
+  - mcp__plugin_prd-taskmaster_go
+  - mcp__plugin_atlas-go_go
 ---
 
 # go (orchestrator)
 
 Pure routing. Reads pipeline state, dispatches to the correct phase skill.
+
+**Deferred MCP tools:** in Claude Code the engine's MCP tools are often *deferred* — not
+callable until loaded. If a tool below is not directly callable, first run
+`ToolSearch(query="select:mcp__plugin_prd-taskmaster_go__preflight")` (keyword fallback
+`ToolSearch(query="+atlas engine preflight", max_results=10)`) and use whichever prefix
+matches (`mcp__plugin_prd-taskmaster_go__` or `mcp__atlas-engine__`).
 
 ## Flow
 

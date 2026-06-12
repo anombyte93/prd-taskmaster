@@ -370,8 +370,18 @@ description: >-
   invokes /atlas, says "I want to build", or asks for a PRD / task-driven build.
 allowed-tools:
   - Read
-  - Skill
+  - Write
+  - Edit
+  - Grep
+  - Glob
   - Bash
+  - Skill
+  - AskUserQuestion
+  - WebSearch
+  - ToolSearch
+  - mcp__atlas-engine
+  - mcp__plugin_prd-taskmaster_go
+  - mcp__plugin_atlas-go_go
 ---
 
 # /atlas — the Atlas engine
@@ -382,8 +392,9 @@ This is a thin alias. Immediately Read and follow the full engine skill:
 Read ${SKILL_DIR}/SKILL.md
 \`\`\`
 
-Then execute that skill's pipeline (Preflight -> Discovery -> Generate -> Handoff)
-exactly as written, carrying over whatever goal or arguments the user provided.
+Then execute that skill's pipeline (Backend Resolution -> Preflight -> Discovery ->
+Generate -> Handoff) exactly as written, carrying over whatever goal or arguments the
+user provided. Do not skip the skill's Phase 0 (engine backend resolution via ToolSearch).
 ALIASEOF
     ok "Installed /atlas alias skill -> ${ALIAS_DIR}"
 

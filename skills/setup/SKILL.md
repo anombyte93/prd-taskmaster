@@ -11,6 +11,10 @@ allowed-tools:
   - Read
   - Bash
   - Skill
+  - ToolSearch
+  - mcp__atlas-engine
+  - mcp__plugin_prd-taskmaster_go
+  - mcp__plugin_atlas-go_go
 ---
 
 # Phase 0: Setup

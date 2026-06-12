@@ -15,11 +15,16 @@ allowed-tools:
   - Skill
   - AskUserQuestion
   - WebSearch
+  - ToolSearch
+  - mcp__atlas-engine
+  - mcp__plugin_prd-taskmaster_go
+  - mcp__plugin_atlas-go_go
 ---
 
 # prd-taskmaster — the Atlas engine
 
-Zero-config goal-to-tasks engine. AI handles discovery and content; `script.py` handles mechanics.
+Zero-config goal-to-tasks engine. AI handles discovery and content; the engine backend (MCP
+server preferred, `script.py` fallback — see Phase 0) handles mechanics.
 
 **Command:** `/atlas` is the canonical invocation (or `/prd-taskmaster`, or just say "I want to
 build …"). The full plugin install also exposes phase skills; this standalone skill runs the whole
@@ -38,17 +43,55 @@ CLI/MCP parsing.
 Activate: PRD, product requirements, taskmaster, task-driven development, "I want to build X", any goal.
 Skip: API docs, test specs, project timelines, PDF creation.
 
+## Phase 0: Engine Backend Resolution (MANDATORY — before any other engine operation)
+
+The engine has two interchangeable backends: the **atlas-engine MCP server** (preferred)
+and **script.py** (zero-dependency fallback). Resolve which one this session uses NOW.
+Do NOT silently default to script.py.
+
+**Claude Code note — deferred tools:** MCP tools are often *deferred*: their names appear
+in a system-reminder list but they are NOT callable until you load their schemas with the
+`ToolSearch` tool. "I don't see a callable engine_preflight tool" does NOT mean the server
+is absent — it almost always means you have not run ToolSearch yet.
+
+Resolution procedure, in order:
+
+1. If a `ToolSearch` tool exists in your session:
+   a. `ToolSearch(query="select:mcp__atlas-engine__engine_preflight")`
+   b. If no match: `ToolSearch(query="+engine preflight atlas", max_results=10)` — this
+      also catches plugin-scoped ids such as `mcp__plugin_prd-taskmaster_go__engine_preflight`.
+   c. If a schema loads → **MCP-mode = ON**. Record the prefix (e.g. `mcp__atlas-engine__`).
+      If both user-scope and plugin-scope match, prefer `mcp__atlas-engine__`.
+2. No ToolSearch, but an `engine_preflight` MCP tool is already directly callable →
+   **MCP-mode = ON** with that prefix.
+3. Otherwise → **MCP-mode = OFF** (CLI-mode).
+
+Announce the result before Phase 1, exactly one line:
+`Engine backend: MCP (<prefix>*)` or `Engine backend: script.py (CLI fallback)`.
+
+Hard rules for the rest of the run:
+
+- **MCP-mode ON:** every operation in the "Engine operations" table below MUST use its MCP
+  tool. Running `python3 script.py <cmd>` for an op that has an MCP tool in this session's
+  prefix is a compliance failure — the only exceptions are ops in the "Script/agent-only"
+  table and ops whose tool is missing from the resolved prefix (some plugin installs expose
+  fewer tools — fall back to script.py for just those ops).
+- **MCP-mode OFF:** use the script.py commands exactly as documented below. Other harnesses
+  (codex, gemini) have no ToolSearch and may have no MCP server — CLI-mode is fully
+  supported and not a degraded experience.
+- If an MCP call errors mid-run (server died/disconnected), say so explicitly, flip to
+  CLI-mode, and continue.
+
 ## Phase 1: Zero-Config Preflight
 
 Run preflight and auto-detect everything. Ask zero setup questions.
 
-**MCP (preferred — ONE batched call, no script spam):** if an `engine_preflight`
-MCP tool is available in your session (plugin install, or the engine's MCP server
-registered), call it once — it covers preflight + taskmaster detection + provider
+**MCP-mode (from Phase 0 — ONE batched call, no script spam):** call
+`<prefix>engine_preflight` once — it covers preflight + taskmaster detection + provider
 configuration + capabilities and returns a `summary` list to present verbatim.
-Skip the individual script calls below entirely.
+Skip every individual script call below entirely.
 
-**CLI fallback (zero-dependency installs):** one batched subcommand, same result:
+**CLI-mode (zero-dependency installs):** one batched subcommand, same result:
 
 ```bash
 python3 ~/.claude/skills/prd-taskmaster/script.py engine-preflight
@@ -163,50 +206,59 @@ always fully usable on its own.
 
 ## Feedback
 
-At debrief time, every executing agent records how the run went. Prefer the MCP
-`feedback_submit` tool; fallback is `python3 script.py feedback-add --rating <1-5>
+At debrief time, every executing agent records how the run went. MCP-mode:
+`<prefix>feedback_submit` / `<prefix>feedback_report`. CLI-mode:
+`python3 script.py feedback-add --rating <1-5>
 --agent <name> --harness <claude-code|codex|gemini|api|other> --task-ref <id>
 --well <text> --failed <text> --suggest <text>`. Feedback is stored in
 `.atlas-ai/feedback.jsonl`; summarize it with `python3 script.py feedback-report`.
 
-## Script Commands Reference
+## Engine operations
+
+This table is normative — instruction sites reference operations by name. In MCP-mode use
+the MCP tool (substitute the Phase-0 prefix); in CLI-mode use the script.py command.
+
+| Operation | MCP tool (MCP-mode) | script.py (CLI-mode / fallback) |
+|-----------|---------------------|---------------------------------|
+| `engine-preflight` | `engine_preflight` | `engine-preflight` |
+| `preflight` | `preflight` | `preflight` |
+| `detect-taskmaster` | `detect_taskmaster` | `detect-taskmaster` |
+| `backend-detect` | `backend_detect` | `backend-detect` |
+| `init` | `init_project` | `init-project` |
+| `init-taskmaster` | `init_taskmaster` | `init-taskmaster` |
+| `validate-setup` | `validate_setup` | (covered by `engine-preflight`) |
+| `detect-capabilities` | `detect_capabilities` | `detect-capabilities` |
+| `load-template` | `load_template` | `load-template --type comprehensive\|minimal` |
+| `calc-tasks` | `calc_tasks` | `calc-tasks --requirements <count> [--scale solo\|team\|enterprise]` |
+| `validate-prd` | `validate_prd` | `validate-prd --input <path>` |
+| `backup-prd` | `backup_prd` | `backup-prd --input <path>` |
+| `parse-prd` | `parse_prd` | `parse-prd --input <path> --num-tasks N [--tag]` |
+| `rate` | `rate_tasks` | `rate [--tag] [--no-research]` |
+| `expand` | `expand_tasks` | `expand [--id N ...] [--no-research] [--tag]` |
+| `tm-parallel` | `tm_parallel_expand` | `tm-parallel` |
+| `next` | `next_task` | `next-task [--tag]` |
+| `set-status` | `set_task_status` | `set-status --id <id> --status <status> [--tag]` |
+| `fleet-waves` | `compute_fleet_waves` | `fleet-waves` |
+| `feedback-add` | `feedback_submit` | `feedback-add --rating <1-5> ...` |
+| `feedback-report` | `feedback_report` | `feedback-report` |
+
+Backend behavior is identical through either interface: the `taskmaster` backend wraps native
+TaskMaster operations safely (init/parse/rate/expand, including `tm-parallel`); the `native`
+backend uses direct API calls or returns `agent_action_required`; `next`/`set-status` are
+engine-native under every backend.
+
+## Script/agent-only operations (no MCP tool — always script.py, any mode)
 
 | Command | Purpose |
 |---------|---------|
-| `engine-preflight` | ONE batched call: preflight + taskmaster + providers + capabilities + summary |
-| `preflight` | Detect environment state |
-| `detect-taskmaster` | Find MCP or CLI taskmaster |
-| `backend-detect` | Detect resolved backend, both backend capabilities, and ai_ops |
-| `init-project` | Initialise the resolved backend project state |
-| `parse-prd --input <path> --num-tasks N [--tag]` | Parse a PRD through the resolved backend |
-| `expand [--id N ...] [--no-research] [--tag]` | Expand selected or all pending tasks through the resolved backend |
-| `rate [--tag] [--no-research]` | Rate task complexity through the resolved backend |
-| `init-taskmaster` | task-master init with `.mcp.json` protection |
 | `configure-providers` | Configure native Claude/Codex + local Perplexity API Free defaults |
 | `detect-providers` | Auto-detect AI providers |
-| `detect-capabilities` | Scan for available skills/tools; returns tier + recommended mode with reason |
-| `load-template --type comprehensive\|minimal` | Load PRD template |
-| `calc-tasks --requirements <count> [--scale solo\|team\|enterprise]` | Recommended task count (scale-banded) |
-| `validate-prd --input <path>` | Quality checks + placeholder detection |
-| `backup-prd --input <path>` | Timestamped backup |
-| `validate-tasks [--input <path>]` | Validate manually-authored tasks.json |
+| `validate-tasks [--input <path>] [--require-phase-config]` | Validate manually-authored tasks.json |
 | `enrich-tasks` | Add phaseConfig metadata to tasks |
 | `parallel-plan [--missing-only]` | Emit per-task research packets for parallel subagents |
 | `parallel-apply --input <results.json>` | Merge parallel research results atomically |
 | `parallel-extract --output <path>` / `parallel-inject --input <path>` | Tagged ⇄ flat tasks bridge |
-
-## Backend operations
-
-This table is normative — instruction sites reference operations by name.
-
-| Operation | Command (both backends) | Notes |
-|-----------|--------------------------|-------|
-| `init` | `script.py init-project` | `taskmaster` backend wraps native TaskMaster initialization safely; `native` backend uses direct API initialization or returns `agent_action_required`. |
-| `parse-prd` | `script.py parse-prd --input <path> --num-tasks N [--tag]` | `taskmaster` backend wraps native TaskMaster PRD parsing; `native` backend uses direct API parsing or returns `agent_action_required`. |
-| `rate` | `script.py rate [--tag] [--no-research]` | `taskmaster` backend wraps native TaskMaster complexity/rating; `native` backend uses direct API rating or returns `agent_action_required`. |
-| `expand` | `script.py expand [--id N ...] [--no-research] [--tag]` | `taskmaster` backend wraps native TaskMaster expansion, including `tm-parallel` for expand; `native` backend uses direct API expansion or returns `agent_action_required`. |
-| `next` | `script.py next-task [--tag]` | Engine-native under every backend; next/set-status are engine-native under every backend. |
-| `set-status` | `script.py set-status --id <id> --status <status> [--tag]` | Engine-native under every backend; next/set-status are engine-native under every backend. |
+| `economy-report` | Summarize telemetry per (op_class, model) |
 
 ## Parallel Research & Complexity
 
@@ -290,3 +342,4 @@ All commands default `--tag` to `.taskmaster/state.json` currentTag and run from
 7. Phase files must be Read explicitly — they are not auto-loaded
 8. Native/free provider defaults are enforced by `configure-providers`; do not drift back to paid Anthropic/Perplexity APIs unless native/free routes are unavailable
 9. Perplexity API Free research must be normalized through `parallel-apply`; native TaskMaster research is only acceptable when it returns valid structured output and validation passes
+10. Phase 0 backend resolution is mandatory — in MCP-mode, script.py is forbidden for any op that has an MCP tool in the resolved prefix

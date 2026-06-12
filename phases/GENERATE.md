@@ -1,13 +1,15 @@
 # Phase: Generate & Validate — Spec Creation and Task Parsing
 
-## Tool preference (applies to every step below)
+## Backend mode (applies to every step below)
 
-The engine's deterministic operations are available as MCP tools when ANY engine
-server is registered — tool ids look like `mcp__atlas-engine__<name>` (user-scoped
-server) or `mcp__plugin_prd-taskmaster_go__<name>` (plugin install). **Always
-prefer the MCP tool over the script.py equivalent** (same names: load_template,
-validate_prd, calc_tasks, engine_preflight, compute_fleet_waves, ...). The
-script.py commands below are the zero-dependency fallback only.
+Backend mode was resolved in SKILL.md Phase 0. If you have NOT resolved it (e.g. this
+phase file was entered directly), run the Phase 0 procedure now — in Claude Code that
+means `ToolSearch(query="select:mcp__atlas-engine__engine_preflight")` (keyword fallback
+`ToolSearch(query="+engine preflight atlas", max_results=10)`) BEFORE any bash. Tool ids
+look like `mcp__atlas-engine__<name>` (user-scoped server) or
+`mcp__plugin_prd-taskmaster_go__<name>` (plugin install). **In MCP-mode, using script.py
+for an MCP-covered op is a compliance failure.** The script.py commands below are the
+CLI-mode path (zero-dependency installs, codex/gemini harnesses).
 
 
 ## The One Rule
@@ -36,6 +38,8 @@ Decide based on discovery depth:
 - **Comprehensive**: 4+ detailed answers, complex project
 - **Minimal**: Quick project, thin answers, user wants speed
 
+**MCP-mode**: `<prefix>load_template(type="comprehensive")`
+**CLI-mode**:
 ```bash
 python3 ~/.claude/skills/prd-taskmaster/script.py load-template --type comprehensive
 ```
@@ -74,6 +78,8 @@ Key rule: Every `[placeholder]`, `{{variable}}`, `[TBD]`, `[TODO]` must be repla
 
 ## Step 3: Validate Spec Quality
 
+**MCP-mode**: `<prefix>validate_prd(input_path=".taskmaster/docs/prd.md")`
+**CLI-mode**:
 ```bash
 python3 ~/.claude/skills/prd-taskmaster/script.py validate-prd --input .taskmaster/docs/prd.md
 ```
@@ -89,6 +95,9 @@ Returns: `score`, `grade`, `checks`, `warnings`, `placeholders_found`.
 ## Step 4: Parse Tasks via Backend
 
 Calculate task count:
+
+**MCP-mode**: `<prefix>calc_tasks(requirements_count=<count>)`
+**CLI-mode**:
 ```bash
 python3 ~/.claude/skills/prd-taskmaster/script.py calc-tasks --requirements <count>
 ```
@@ -96,6 +105,9 @@ python3 ~/.claude/skills/prd-taskmaster/script.py calc-tasks --requirements <cou
 Parse through the normative backend operation:
 
 **backend op parse-prd**:
+
+**MCP-mode**: `<prefix>parse_prd(prd_path=".taskmaster/docs/prd.md", num_tasks=<recommended>)`
+**CLI-mode**:
 ```bash
 python3 ~/.claude/skills/prd-taskmaster/script.py parse-prd --input .taskmaster/docs/prd.md --num-tasks <recommended>
 ```
@@ -185,6 +197,9 @@ free local proxy / no API key /
   TM errors / TM < 0.43          → native/agent path: AGENT-PARALLEL (fallback):
                                      parallel-plan → N research subagents → parallel-apply
 ```
+
+In MCP-mode, the NATIVE-PARALLEL path is `<prefix>tm_parallel_expand` (instead of
+`script.py tm-parallel`) and serial expansion uses `<prefix>rate_tasks` / `<prefix>expand_tasks`.
 
 This keeps TaskMaster's model-agnostic AI (any configured API does the expansion/research) while
 parallelizing it externally. Never run multiple `expand --id` concurrently in ONE directory — the
