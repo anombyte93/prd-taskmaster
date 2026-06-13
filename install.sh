@@ -18,7 +18,7 @@ set -euo pipefail
 REPO_OWNER="anombyte93"
 REPO_NAME="prd-taskmaster"
 SKILL_NAME="prd-taskmaster"
-VERSION="3.0.0"
+VERSION="3.0.1"
 SKILL_DIR="${SKILL_DIR:-${HOME}/.claude/skills/${SKILL_NAME}}"
 
 # ---------------------------------------------------------------------------
