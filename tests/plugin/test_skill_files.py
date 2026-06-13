@@ -80,19 +80,24 @@ def test_setup_skill_frames_taskmaster_install_as_backend_unlock():
 
 def test_orchestrator_skill_defines_normative_backend_operations():
     content = (REPO_ROOT / "SKILL.md").read_text()
-    assert "## Backend operations" in content
+    assert "## Engine operations" in content
     assert "This table is normative — instruction sites reference operations by name." in content
-    assert "| Operation | Command (both backends) | Notes |" in content
-    for operation, command in (
-        ("init", "script.py init-project"),
-        ("parse-prd", "script.py parse-prd"),
-        ("rate", "script.py rate"),
-        ("expand", "script.py expand"),
-        ("next", "script.py next-task"),
-        ("set-status", "script.py set-status"),
+    assert "| Operation | MCP tool (MCP-mode) | script.py (CLI-mode / fallback) |" in content
+    for operation, mcp_tool, script_cmd in (
+        ("init", "init_project", "init-project"),
+        ("parse-prd", "parse_prd", "parse-prd"),
+        ("rate", "rate_tasks", "rate"),
+        ("expand", "expand_tasks", "expand"),
+        ("next", "next_task", "next-task"),
+        ("set-status", "set_task_status", "set-status"),
     ):
-        assert f"| `{operation}` | `{command}" in content, f"missing backend op row: {operation}"
-    assert "next/set-status are engine-native under every backend" in content
+        assert f"| `{operation}` | `{mcp_tool}` | `{script_cmd}" in content, (
+            f"missing engine op row: {operation}"
+        )
+    # normalize hard wraps — the sentence spans a line break in the doc
+    flat = " ".join(content.split())
+    assert "`next`/`set-status` are engine-native under every backend" in flat
+    assert "## Script/agent-only operations" in content
 
 
 def test_orchestrator_skill_documents_feedback_debrief():
