@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import sys
 import re
 from pathlib import Path
 
@@ -223,6 +224,8 @@ def run_validate_prd(input_path: str) -> dict:
         (r'\[INSERT .+?\]', 'insert'),              # [INSERT something]
         (r'<[A-Z][A-Z_ ]+>', 'angle_bracket'),      # <PLACEHOLDER>
         (r'\[(?:Name|Date|Feature|Product|YYYY)\]', 'bracket'),  # [Name], [Date], etc.
+        (r'\bTBD\b', 'bare_tbd'),                   # bare TBD (case-sensitive)
+        (r'\bTODO\b', 'bare_todo'),                 # bare TODO (case-sensitive)
     ]
     placeholders_found = []
     for pattern, ptype in placeholder_patterns:
@@ -235,7 +238,9 @@ def run_validate_prd(input_path: str) -> dict:
             "type": "placeholders",
             "count": len(placeholders_found),
             "items": placeholders_found[:10],  # cap at 10 for readability
-            "suggestion": "Replace all template placeholders with actual content",
+            "suggestion": "Replace all template placeholders with actual content "
+                          "(placeholders are a hard fail: grade is floored to "
+                          "NEEDS_WORK and the CLI exits non-zero)",
         })
 
     # ─── Vague language warnings ─────────────────────────────────────────
@@ -274,10 +279,18 @@ def run_validate_prd(input_path: str) -> dict:
     else:
         grade = "NEEDS_WORK"
 
+    # Placeholders are a hard fail: an unfinished spec must not pass on
+    # accumulated points, whatever the rest of the document scores.
+    hard_fail = None
+    if placeholders_found:
+        grade = "NEEDS_WORK"
+        hard_fail = {"reason": "placeholders", "count": len(placeholders_found)}
+
     passed_count = sum(1 for c in checks if c["passed"])
 
     return {
         "ok": True,
+        "hard_fail": hard_fail,
         "score": score,
         "max_score": max_score,
         "percentage": round(pct, 1),
@@ -295,7 +308,11 @@ def run_validate_prd(input_path: str) -> dict:
 
 def cmd_validate_prd(args: argparse.Namespace) -> None:
     try:
-        emit(run_validate_prd(args.input))
+        result = run_validate_prd(args.input)
+        # emit() always exits 0; hard_fail must surface as a non-zero exit,
+        # so print and choose the exit code explicitly here.
+        print(json.dumps(result, indent=2, default=str))
+        sys.exit(1 if result.get("hard_fail") else 0)
     except CommandError as e:
         fail(e.message, **e.extra)
 

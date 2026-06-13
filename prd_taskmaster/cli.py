@@ -86,7 +86,7 @@ def run_rate(tag: str | None = None, research: bool = True) -> dict:
 
 def _emit_with_status(result: dict) -> None:
     print(json.dumps(result, indent=2, default=str))
-    sys.exit(0 if result.get("ok") else 1)
+    sys.exit(0 if result.get("ok") and not result.get("hard_fail") else 1)
 
 
 def _cmd_backend_call(fn, *args, **kwargs) -> None:

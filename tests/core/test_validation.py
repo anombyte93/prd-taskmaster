@@ -425,3 +425,59 @@ class TestValidatePrd:
         out = run_validate_prd(str(sample_prd))
         assert out["percentage"] >= 83  # At minimum GOOD
         assert out["grade"] in ("EXCELLENT", "GOOD")
+
+
+class TestPlaceholderHardFail:
+    """Placeholders are a hard fail (README contract): grade floored to
+    NEEDS_WORK, result carries hard_fail, CLI exits non-zero."""
+
+    @pytest.mark.parametrize(
+        "token,ptype",
+        [
+            ("{{feature_name}}", "mustache"),
+            ("[TBD]", "tbd"),
+            ("TBD", "bare_tbd"),
+            ("TODO", "bare_todo"),
+        ],
+    )
+    def test_placeholder_floors_grade_and_sets_hard_fail(self, tmp_project, sample_prd, token, ptype):
+        # seed an otherwise-EXCELLENT PRD with one placeholder token
+        prd = tmp_project / ".taskmaster" / "docs" / "prd.md"
+        prd.write_text(sample_prd.read_text() + f"\n\n## Rollout\n\nOwner: {token}\n")
+        out = run_validate_prd(str(prd))
+        assert out["hard_fail"] == {"reason": "placeholders", "count": out["placeholders_found"]}
+        assert out["grade"] == "NEEDS_WORK"
+        assert any(d["type"] == ptype for d in out["placeholder_details"])
+
+    def test_clean_prd_has_no_hard_fail(self, sample_prd):
+        out = run_validate_prd(str(sample_prd))
+        assert out["hard_fail"] is None
+        assert out["grade"] in ("EXCELLENT", "GOOD")
+
+    def test_lowercase_todo_is_not_a_placeholder(self, tmp_project, sample_prd):
+        # prose like "a todo app" must not trip the case-sensitive bare patterns
+        prd = tmp_project / ".taskmaster" / "docs" / "prd.md"
+        prd.write_text(sample_prd.read_text() + "\n\nThe team also maintains a todo app.\n")
+        out = run_validate_prd(str(prd))
+        assert out["hard_fail"] is None
+
+    def test_cli_exits_nonzero_on_hard_fail(self, tmp_project, sample_prd):
+        import subprocess, sys as _sys
+        from pathlib import Path as _P
+        repo = _P(__file__).resolve().parents[2]
+        # sample_prd and prd share the same path — keep a clean copy aside first
+        prd = tmp_project / ".taskmaster" / "docs" / "prd.md"
+        clean = tmp_project / "clean-prd.md"
+        clean.write_text(sample_prd.read_text())
+        prd.write_text(clean.read_text() + "\n\nOwner: TBD\n")
+        r = subprocess.run(
+            [_sys.executable, str(repo / "script.py"), "validate-prd", "--input", str(prd)],
+            capture_output=True, text=True, cwd=tmp_project,
+        )
+        assert r.returncode == 1, r.stdout + r.stderr
+        # clean copy exits 0
+        r2 = subprocess.run(
+            [_sys.executable, str(repo / "script.py"), "validate-prd", "--input", str(clean)],
+            capture_output=True, text=True, cwd=tmp_project,
+        )
+        assert r2.returncode == 0, r2.stdout + r2.stderr
