@@ -161,7 +161,10 @@ configuration is sufficient evidence the pipeline is wired.
 
 ### Step 5: Status line
 
-Emit a compact one-block status:
+Render the preflight progress panel and print it. MCP-mode: call
+`render_status(phase="SETUP")` and print its `rendered` field. CLI-mode:
+`python3 script.py status --phase SETUP`. (Fallback if the renderer is
+unavailable — emit a compact one-block status:)
 
 ```
 Setup:

@@ -1,6 +1,6 @@
 {
   "name": "prd-taskmaster",
-  "version": "5.1.2",
+  "version": "5.2.0",
   "description": "Zero-config goal-to-tasks engine for Claude Code (the Atlas engine)",
   "keywords": [
     "claude-code",

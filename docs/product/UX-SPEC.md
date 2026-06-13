@@ -4,6 +4,12 @@
 > atlas-ai.au/pro pricing page, install/upgrade flows. Living doc — the canonical vocabulary
 > here (§6) governs every user-facing string in the codebase.
 
+> ⚠️ **Pricing superseded (2026-06, v5.1.2).** Atlas Pro is now a **private pilot** — not
+> generally available, not for sale, pricing TBD. Ignore the `$29/mo` figures and "Get your
+> license key" CTAs in the mockups below; the live grammar is "🔒 private pilot — request
+> access" (GitHub Discussions today; `atlas-ai.au/pilot` signup in progress). The shipped
+> renderer (`prd_taskmaster/render.py`) and README already use the pilot framing.
+
 ## 0. Design principles
 
 1. **One screen, one decision.** Every phase ends in exactly one structured choice
@@ -146,17 +152,18 @@ render — the trust line that justifies "walk away".
 │    Plan & Drive        Get the plan, implement it yourself.│
 │                                                            │
 │  ──────────────────────────────────────────────────────    │
-│    Atlas Fleet                              🔒 Pro $29/mo  │
+│    Atlas Fleet                    🔒 private pilot         │
 │    Your 14 tasks split into 3 parallel waves across        │
 │    isolated worktrees (claude ×2, codex ×1), checker-      │
 │    gated merges, one final PR.                             │
 │    Est. ~2h 05m wall-clock, walk-away.   (estimate from    │
 │    your dependency graph — actual time varies)             │
-│    Unlock: atlas-ai.au/pro — resumes this exact handoff.   │
+│    Request pilot access — resumes this exact handoff.      │
 └────────────────────────────────────────────────────────────┘
 ```
-Free mode's estimate is stated first so the comparison is symmetric. Lock = `🔒` + "Pro" + price,
-visually separated below a rule. The honesty parenthetical is mandatory copy.
+Free mode's estimate is stated first so the comparison is symmetric. Lock = `🔒` + "private
+pilot" (no price — Pro is pilot-only), visually separated below a rule. The honesty
+parenthetical is mandatory copy.
 
 **Selecting Fleet while locked:**
 ```

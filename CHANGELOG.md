@@ -4,6 +4,29 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.2.0] — 2026-06-13
+
+Progress visualization — the README/UX-SPEC panels are now real output.
+
+### Added
+- **`status` command + `render_status` MCP tool** that draw the boxed Atlas progress
+  panels from real pipeline state: phase tracker, the GENERATE validation scorecard
+  (grade bar + checks + line-located warnings + placeholders + task/subtask counts),
+  the preflight capability panel, the handoff panel, the execute progress bar, and the
+  ship-check gates panel. `--format boxed|ascii|json`, `--all`, `--phase`.
+- `prd_taskmaster/render.py` (pure renderer, UX-SPEC §7 symbol grammar with ASCII
+  fallbacks via `ATLAS_ASCII=1`; display-width-aware so borders align even with the 🔒
+  emoji) and `prd_taskmaster/status.py` (pure reader of pipeline/tasks/validation state).
+- `validate-prd` now persists its result to `.atlas-ai/state/validation.json` so the
+  scorecard renders without recomputation.
+- Phase skills (setup, generate, handoff, execute-task) render the matching panel at
+  each phase boundary.
+
+### Changed
+- The grade bar floors rather than rounds (49/57 = 86% → 8/10 filled), matching the
+  README mockup and never inflating a grade.
+- UX-SPEC pricing mockups marked superseded by the private-pilot decision (no `$29`).
+
 ## [5.1.2] — 2026-06-13
 
 Honesty + positioning + discoverability.

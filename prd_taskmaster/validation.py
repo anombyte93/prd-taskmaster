@@ -314,9 +314,22 @@ def run_validate_prd(input_path: str) -> dict:
     }
 
 
+def _persist_validation(result: dict) -> None:
+    """Cache the validation result so `status` can render the scorecard as a
+    pure reader. Best-effort: never let persistence break validation."""
+    try:
+        from prd_taskmaster.lib import write_json
+        from prd_taskmaster.pipeline import STATE_DIR
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        write_json(STATE_DIR / "validation.json", result)
+    except Exception:
+        pass
+
+
 def cmd_validate_prd(args: argparse.Namespace) -> None:
     try:
         result = run_validate_prd(args.input)
+        _persist_validation(result)
         # emit() always exits 0; hard_fail must surface as a non-zero exit,
         # so print and choose the exit code explicitly here.
         print(json.dumps(result, indent=2, default=str))

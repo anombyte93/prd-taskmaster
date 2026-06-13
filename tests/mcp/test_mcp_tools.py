@@ -251,3 +251,20 @@ def test_backend_ai_tools_document_agent_action_required():
         doc = getattr(S, name).__doc__ or ""
         assert "agent_action_required" in doc
         assert "ai_ops" in doc
+
+
+def test_render_status_tool_returns_panel(tmp_path, monkeypatch):
+    import json as _json
+    import sys as _sys
+    _sys.path.insert(0, str((tmp_path / "..").resolve()))
+    import server as S
+    state = tmp_path / ".atlas-ai" / "state"
+    state.mkdir(parents=True)
+    (state / "pipeline.json").write_text(_json.dumps({"current_phase": "EXECUTE", "phases_completed": ["SETUP", "DISCOVER", "GENERATE", "HANDOFF"]}))
+    (tmp_path / ".taskmaster" / "tasks").mkdir(parents=True)
+    (tmp_path / ".taskmaster" / "tasks" / "tasks.json").write_text(_json.dumps({"master": {"tasks": [{"id": 1, "status": "done"}]}}))
+    monkeypatch.chdir(tmp_path)
+    r = S.render_status(fmt="boxed")
+    assert r["ok"] is True
+    assert "┌" in r["rendered"] or "│" in r["rendered"]
+    assert r["phase"] == "EXECUTE"

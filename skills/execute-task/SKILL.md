@@ -232,8 +232,10 @@ to `done`. Do the 13 steps in order. Do not skip.
     The ladder is append-only — if `/stepback` surfaces a fix, apply it and
     return to step 3. Only climb if the prior rung did not yield progress.
 
-12. **Render gamify score** — emit the atlas-gamify one-line score for this
-    iteration (tasks done / tasks total, complexity-weighted). This is the
+12. **Render progress** — show the execute progress panel: MCP
+    `render_status(phase="EXECUTE")` → print its `rendered` field; CLI
+    `python3 script.py status --phase EXECUTE`. Then emit the atlas-gamify
+    one-line score (tasks done / tasks total, complexity-weighted). This is the
     human-visible progress signal and also feeds the dogfood debrief.
 
 13. **Loop**: back to step 1 until SHIP_CHECK_OK or a halt condition fires.

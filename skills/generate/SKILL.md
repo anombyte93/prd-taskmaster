@@ -168,7 +168,10 @@ path — downstream tools read from here.
 
 **CLI fallback**: `python3 script.py validate-prd --input .taskmaster/docs/prd.md`
 
-Returns: `score`, `grade`, `checks`, `warnings`, `placeholders_found`.
+Returns: `score`, `grade`, `checks`, `warnings`, `placeholders_found`. The
+validate call persists its result, so render the GENERATE scorecard and print
+it: MCP `render_status(phase="GENERATE")` → print `rendered`; CLI
+`python3 script.py status --phase GENERATE`.
 
 **Optional AI-augmented review** (opt-in): pass `--ai` (CLI) or `ai=True` (MCP)
 to additionally invoke TaskMaster's configured main model for a holistic

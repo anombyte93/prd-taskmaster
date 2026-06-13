@@ -379,5 +379,17 @@ def gen_scripts(output_dir: str = ".atlas-ai/scripts") -> dict:
     return {"ok": True, "created": created}
 
 
+@mcp.tool()
+def render_status(phase: str = "", fmt: str = "boxed") -> dict:
+    """Render Atlas progress panels (phase tracker, validation scorecard,
+    ship-check gates, ...) from real pipeline state. fmt: boxed|ascii|json.
+    The human-readable panel text is in the `rendered` field."""
+    from prd_taskmaster.status import run_render_status
+    try:
+        return run_render_status(phase=phase or None, fmt=fmt)
+    except LIB.CommandError as exc:
+        return {"ok": False, "error": exc.message, **exc.extra}
+
+
 if __name__ == "__main__":
     mcp.run()

@@ -239,7 +239,9 @@ uses HTML-comment sentinels so re-runs are no-ops.
 
 ## Step 4: Display summary
 
-Emit a compact block before the mode picker so the user has full context:
+Render the handoff panel and print it: MCP `render_status(phase="HANDOFF")` →
+print `rendered`; CLI `python3 script.py status --phase HANDOFF`. (Fallback —
+emit a compact block before the mode picker so the user has full context:)
 
 ```
 Spec Generated: .taskmaster/docs/prd.md

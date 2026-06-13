@@ -323,7 +323,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--status", required=True)
     p.add_argument("--tag")
 
+    # status — render progress panels
+    p = sub.add_parser("status", help="Render Atlas progress panels for the current phase")
+    p.add_argument("--phase", default=None, help="Render a specific phase instead of the current one")
+    p.add_argument("--format", default="boxed", choices=["boxed", "ascii", "json"])
+    p.add_argument("--all", action="store_true", help="Render every panel, not just the current phase")
+
     return parser
+
+
+def cmd_status(args) -> None:
+    """Render progress panels. A view command: prints the rendered panel to
+    stdout for boxed/ascii, or structured JSON for --format json."""
+    from prd_taskmaster.status import run_render_status
+    try:
+        result = run_render_status(phase=args.phase, fmt=args.format, show_all=args.all)
+    except CommandError as e:
+        fail(e.message, **e.extra)
+        return
+    if args.format == "json":
+        print(json.dumps(result, indent=2, default=str))
+    else:
+        print(result["rendered"])
+    sys.exit(0)
 
 
 DISPATCH = {
@@ -361,6 +383,7 @@ DISPATCH = {
     "context-pack": cmd_context_pack,
     "feedback-add": cmd_feedback_add,
     "feedback-report": cmd_feedback_report,
+    "status": cmd_status,
 }
 
 

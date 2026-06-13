@@ -92,6 +92,7 @@ def test_orchestrator_skill_defines_normative_backend_operations():
         ("expand", "expand_tasks", "expand"),
         ("next", "next_task", "next-task"),
         ("set-status", "set_task_status", "set-status"),
+        ("status", "render_status", "status"),
     ):
         assert f"| `{operation}` | `{mcp_tool}` | `{script_cmd}" in content, (
             f"missing engine op row: {operation}"

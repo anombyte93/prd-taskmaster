@@ -242,6 +242,10 @@ the MCP tool (substitute the Phase-0 prefix); in CLI-mode use the script.py comm
 | `fleet-waves` | `compute_fleet_waves` | `fleet-waves` |
 | `feedback-add` | `feedback_submit` | `feedback-add --rating <1-5> ...` |
 | `feedback-report` | `feedback_report` | `feedback-report` |
+| `status` | `render_status` | `status [--phase P] [--format boxed\|ascii\|json] [--all]` |
+
+Render the progress panel at each phase boundary (and on demand) via `status` / `render_status`
+— the boxed phase tracker, validation scorecard, ship-check gates, and execute progress.
 
 Backend behavior is identical through either interface: the `taskmaster` backend wraps native
 TaskMaster operations safely (init/parse/rate/expand, including `tm-parallel`); the `native`
