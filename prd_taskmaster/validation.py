@@ -229,9 +229,12 @@ def run_validate_prd(input_path: str) -> dict:
     ]
     placeholders_found = []
     for pattern, ptype in placeholder_patterns:
-        matches = re.findall(pattern, text)
-        for m in matches:
-            placeholders_found.append({"type": ptype, "match": m})
+        for mo in re.finditer(pattern, text):
+            placeholders_found.append({
+                "type": ptype,
+                "match": mo.group(0),
+                "line": text.count("\n", 0, mo.start()) + 1,
+            })
 
     if placeholders_found:
         warnings.append({
@@ -244,13 +247,18 @@ def run_validate_prd(input_path: str) -> dict:
         })
 
     # ─── Vague language warnings ─────────────────────────────────────────
-    all_vague = VAGUE_PATTERN.findall(text)
-    vague_penalty = min(len(all_vague), 5)
-    for match in set(all_vague):
+    vague_lines = {}
+    for mo in VAGUE_PATTERN.finditer(text):
+        term = mo.group(0)
+        vague_lines.setdefault(term, []).append(text.count("\n", 0, mo.start()) + 1)
+    vague_penalty = min(sum(len(v) for v in vague_lines.values()), 5)
+    for term, lines in vague_lines.items():
+        where = ", ".join(str(n) for n in lines)
         warnings.append({
             "type": "vague_language",
-            "term": match,
-            "suggestion": f"Replace '{match}' with a specific, measurable target",
+            "term": term,
+            "lines": lines,
+            "suggestion": f"Replace '{term}' (line {where}) with a specific, measurable target",
         })
 
     # ─── Missing detail warnings ─────────────────────────────────────────

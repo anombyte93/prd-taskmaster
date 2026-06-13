@@ -4,6 +4,24 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.2] — 2026-06-13
+
+Honesty + positioning + discoverability.
+
+### Added
+- **Pre-alpha status** is now stated up front (badge + Project status section): the newer systems
+  (fleet, backend abstraction, token economy, Pro MCPs) are not yet battle-tested; expect
+  breaking changes.
+- PRD validation warnings (vague language + placeholders) now carry **line numbers** — the
+  "quoted + located, not just counted" claim is now executable truth, not just rendering.
+- `package.json` `keywords` for npm search discoverability (factual token-economy /
+  cost-ledger / model-routing mechanism terms — no unproven savings claims).
+
+### Changed
+- **Atlas Pro reframed as a private pilot.** Not generally available, not for sale; pricing
+  removed. Access is granted at discretion during the pilot; "Get Atlas Pro" CTAs become "Request
+  pilot access" pointing at GitHub Discussions (an `atlas-ai.au/pilot` signup page is in progress).
+
 ## [5.1.1] — 2026-06-13
 
 Audit-driven honesty release (dogfood cycle 6 — the engine ran its own pipeline on this work).

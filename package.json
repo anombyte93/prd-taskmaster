@@ -1,7 +1,19 @@
 {
   "name": "prd-taskmaster",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "description": "Zero-config goal-to-tasks engine for Claude Code (the Atlas engine)",
+  "keywords": [
+    "claude-code",
+    "taskmaster",
+    "prd",
+    "ai-agents",
+    "mcp",
+    "code-generation",
+    "token-economy",
+    "cost-ledger",
+    "model-routing",
+    "atlas"
+  ],
   "peerDependencies": {
     "task-master-ai": ">=0.43.0"
   },

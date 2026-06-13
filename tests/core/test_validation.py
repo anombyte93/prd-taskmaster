@@ -481,3 +481,27 @@ class TestPlaceholderHardFail:
             capture_output=True, text=True, cwd=tmp_project,
         )
         assert r2.returncode == 0, r2.stdout + r2.stderr
+
+
+class TestWarningsAreLocated:
+    """README/UI claim: warnings are 'quoted + located, not just counted'.
+    Each vague-language and placeholder finding must carry a line number."""
+
+    def test_vague_warnings_carry_line_numbers(self, tmp_project):
+        prd = tmp_project / ".taskmaster" / "docs" / "prd.md"
+        prd.write_text("# PRD\n\n## Executive Summary\nA summary.\n\n## Requirements\n- it must be fast\n")
+        out = run_validate_prd(str(prd))
+        vague = [w for w in out["warnings"] if w["type"] == "vague_language"]
+        assert vague, "expected a vague-language warning"
+        for w in vague:
+            assert "term" in w                      # quoted
+            assert w.get("lines") and all(isinstance(n, int) for n in w["lines"])  # located
+            assert str(w["lines"][0]) in w["suggestion"]
+
+    def test_placeholder_findings_carry_line_numbers(self, tmp_project):
+        prd = tmp_project / ".taskmaster" / "docs" / "prd.md"
+        prd.write_text("# PRD\n\n## Executive Summary\nA summary.\n\n## Plan\nOwner: TODO\n")
+        out = run_validate_prd(str(prd))
+        assert out["placeholder_details"], "expected a placeholder finding"
+        for pd in out["placeholder_details"]:
+            assert "match" in pd and isinstance(pd.get("line"), int) and pd["line"] >= 1

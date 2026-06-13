@@ -7,6 +7,13 @@ task with **verification evidence** — so "done" means proven, not claimed.
 
 Free and MIT, forever.
 
+> ⚠️ **Pre-alpha — under active development.** Atlas was recently consolidated into this engine
+> and the newer systems (fleet orchestration, backend abstraction, token economy) have **not been
+> fully tested in the wild yet**. Expect rough edges and breaking changes between releases, pin a
+> version if you need stability, and please [report what breaks](https://github.com/anombyte93/prd-taskmaster/issues).
+> No warranty beyond the MIT license. **Atlas Pro is not generally available** — it is a private
+> pilot (see below).
+
 Atlas has four structural moats:
 
 - **cross-vendor fleet** — Claude, Codex, and Gemini run as separate quota pools instead of one
@@ -26,6 +33,7 @@ native backend keeps the same validated task graph available without that prereq
 Grade: GOOD  ▰▰▰▰▰▰▰▰▱▱  49/57 (86%) · 0 placeholders · 14 tasks parsed
 ```
 
+[![status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)](#project-status)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/anombyte93/prd-taskmaster)](https://github.com/anombyte93/prd-taskmaster/stargazers)
 [![works with](https://img.shields.io/badge/works_with-Claude%20%C2%B7%20Codex%20%C2%B7%20Gemini-8A2BE2)](https://atlas-ai.au)
@@ -106,6 +114,17 @@ Most AI coding tools tell you a task is done. This one makes "done" provable:
 
 ---
 
+## Project status
+
+**Pre-alpha.** The deterministic core — graded PRD validation, the task graph, the ship-check
+gate, the CLI — is covered by ~300 tests and is the most stable surface. The newer systems
+around it (cross-vendor fleet, backend abstraction, the token-economy ledger, the bundled Pro
+MCPs) are **recently built and not yet battle-tested**; their numbers (e.g. cost savings) are
+verified-rate *estimates*, not measured guarantees (see
+[`docs/product/MODEL-ECONOMY.md`](docs/product/MODEL-ECONOMY.md)). Expect breaking changes
+between releases; pin a version for stability. Bug reports and use-case notes are the fastest way
+to move it toward stable — [open an issue](https://github.com/anombyte93/prd-taskmaster/issues).
+
 ## Built for the token-shortage era
 
 Every job runs on the cheapest model that can do it — and escalates only when a validator says
@@ -127,7 +146,13 @@ routing gets smarter on YOUR workload — priors and sources in
 
 ## Free vs Atlas Pro
 
-| | Free (MIT) | Atlas Pro — $29/mo |
+> **Atlas Pro is in private pilot — not generally available and not yet for sale.** Pricing is
+> not set. During the pilot, access is granted at our discretion to testers with a strong use
+> case (often free). The table shows what Pro *will* add; the Pro-only rows are **experimental and
+> not fully tested**. Want in? **[Request pilot access →](https://github.com/anombyte93/prd-taskmaster/discussions)**
+> (an on-site signup at `atlas-ai.au/pilot` to be notified at launch is coming).
+
+| | Free (MIT) | Atlas Pro — private pilot |
 |---|:---:|:---:|
 | Discovery interview (adaptive, one question at a time) | ✓ | ✓ |
 | Graded PRD validation + placeholder scan | ✓ | ✓ |
@@ -145,7 +170,7 @@ routing gets smarter on YOUR workload — priors and sources in
 | License & priority support | community | ✓ |
 
 The engine is the whole engine — the free tier is **not a demo**. Pro adds the fleet orchestrator
-and bundled MCPs. [Get Atlas Pro →](https://atlas-ai.au/pro)
+and bundled MCPs (both pilot-stage, not fully tested). [Request pilot access →](https://github.com/anombyte93/prd-taskmaster/discussions)
 
 ---
 
@@ -158,10 +183,10 @@ collects results through a durable inbox rather than trusting an agent's word, a
 sequentially into an integration branch behind a checker gate — never touching `main` until one
 final green PR.
 
-It runs entirely on your machine; only the license key phones home. Cancel anytime — your specs
-and tasks are plain files in your repo, nothing is held hostage.
+It runs entirely on your machine. Your specs and tasks are plain files in your repo, nothing is
+held hostage. **Fleet is pilot-stage and not yet hardened** — treat it as a preview.
 
-[See Atlas Pro →](https://atlas-ai.au/pro)
+[Request pilot access →](https://github.com/anombyte93/prd-taskmaster/discussions)
 
 ---
 
