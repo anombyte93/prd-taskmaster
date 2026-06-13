@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "atlas-prd-taskmaster-local",
-  "description": "Local-path marketplace for the prd plugin testing (v5.1.0 dev). Single plugin pointing to this worktree.",
+  "name": "atlas-prd-taskmaster",
+  "description": "Marketplace manifest for the prd plugin (the Atlas engine). Add with: /plugin marketplace add anombyte93/prd-taskmaster",
   "owner": {
     "name": "Atlas-X-AI"
   },

@@ -79,7 +79,9 @@ Open any project in Claude Code and type:
 ```
 
 Requires Python 3.11+ and Linux / macOS / WSL. The free engine needs **no paid API key** — it
-uses the model CLIs you already have, with a local free-research option.
+uses the model CLIs you already have; an optional local research proxy can be plugged in
+(bring your own — not bundled). npm installs run a `postinstall` step that pip-installs the
+MCP server's Python deps (non-fatal warning if pip is unavailable).
 
 ---
 
@@ -87,10 +89,10 @@ uses the model CLIs you already have, with a local free-research option.
 
 Most AI coding tools tell you a task is done. This one makes "done" provable:
 
-- **Graded PRDs.** Every spec is scored against deterministic checks (EXCELLENT / GOOD / ACCEPTABLE / NEEDS WORK). Bare placeholders (`TBD`, `{{...}}`, `TODO`) are a hard fail.
+- **Graded PRDs.** Every spec is scored against deterministic checks (EXCELLENT / GOOD / ACCEPTABLE / NEEDS WORK). Placeholders (`TBD`, `{{...}}`, `TODO` — bare or bracketed) are a hard fail: the grade floors to NEEDS WORK and `validate-prd` exits non-zero.
 - **A real task graph.** Requirements become backend-neutral `tasks.json` tasks with dependencies, complexity scores, and full subtask coverage — not a flat checklist.
 - **Evidence-gated execution.** Each task is implemented and must produce execution evidence before it counts as done.
-- **A completion token you can trust.** `SHIP_CHECK_OK` is emitted only when every gate passes — and a single non-zero `Exit status` in any evidence file blocks it. It is structurally hard to fake.
+- **A completion token you can trust.** `SHIP_CHECK_OK` is emitted only when every gate passes — and a single non-zero `Exit status` in any evidence file blocks it. It is structurally hard to fake. (One escape hatch exists for incident recovery: an explicit admin override flag that is audit-logged and marks the token `[OVERRIDE]` on stdout — never silent.)
 
 ```
 ┌─ atlas ── PHASE 3/4: GENERATE ─────────────────────────────┐
@@ -181,7 +183,7 @@ execution — the entire engine in this repo. Read every line.
 and tasks are plain files in your repo.
 
 **Do I need a paid API key?** No. The engine uses the model CLIs you already have (Claude Code,
-Codex, Gemini) and a local free-research option.
+Codex, Gemini); an optional local research proxy can be plugged in (bring your own — not bundled).
 
 **Do I need TaskMaster?** No. Atlas speaks TaskMaster natively but doesn't require it —
 Native Mode produces the same validated task graph (validate-tasks + enrich-tasks). Installing

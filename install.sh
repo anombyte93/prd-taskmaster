@@ -20,7 +20,7 @@ set -euo pipefail
 REPO_OWNER="anombyte93"
 REPO_NAME="prd-taskmaster"
 SKILL_NAME="prd-taskmaster"
-VERSION="5.1.0"
+VERSION="5.1.1"
 SKILL_DIR="${SKILL_DIR:-${HOME}/.claude/skills/${SKILL_NAME}}"
 ALIAS_NAME="atlas"
 ALIAS_DIR="${HOME}/.claude/skills/${ALIAS_NAME}"
@@ -277,7 +277,11 @@ install_skill() {
     TMPDIR_SKILL=$(mktemp -d "${TMPDIR:-/tmp}/claude-skill-XXXXXX")
     info "Cloning ${REPO_OWNER}/${REPO_NAME}..."
 
-    git clone --depth 1 --quiet "${CLONE_URL}" "${TMPDIR_SKILL}/repo" 2>/dev/null \
+    # Pin to this installer's own release tag so a fetched installer always
+    # installs the matching tree; fall back to default branch if the tag is
+    # missing (e.g. running from a working copy ahead of the release).
+    git clone --depth 1 --quiet --branch "v${VERSION}" "${CLONE_URL}" "${TMPDIR_SKILL}/repo" 2>/dev/null \
+        || git clone --depth 1 --quiet "${CLONE_URL}" "${TMPDIR_SKILL}/repo" 2>/dev/null \
         || die "Failed to clone repository. Check REPO_OWNER/REPO_NAME and network."
 
     # ------------------------------------------------------------------
