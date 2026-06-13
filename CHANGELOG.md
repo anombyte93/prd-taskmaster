@@ -4,6 +4,23 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.1] — 2026-06-13
+
+Audit-driven honesty release (dogfood cycle 6 — the engine ran its own pipeline on this work).
+
+### Added
+- **Placeholder hard fail.** Any placeholder — `{{...}}`, bracketed, or bare case-sensitive
+  `TBD`/`TODO` — now floors the PRD grade to NEEDS_WORK, sets `hard_fail` in the result, and
+  makes `validate-prd` exit non-zero. The README's rigor claim is now executable truth.
+- Installer pins its clone to its own release tag (`--branch v$VERSION`, branch fallback).
+
+### Fixed
+- `atlas-ai.au/install` and `atlas-ai.au/pro` now resolve (Cloudflare single-redirects) —
+  the recommended install path 404'd at 5.1.0 launch.
+- README discloses the audit-logged ship-check admin override, the npm `postinstall` pip
+  step, and marks the local research proxy bring-your-own.
+- Marketplace manifest description no longer reads as an internal testing artifact.
+
 ## [5.1.0] — 2026-06-13
 
 First npm publish (`prd-taskmaster@5.1.0`). This release consolidates the two development
