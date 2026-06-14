@@ -1,0 +1,100 @@
+"""Pre-relaunch P0 regression tests (docs/audit/AUDIT.md, 2026-06-14).
+
+These encode the three first-run blockers found by the pre-relaunch audit, each
+reproduced firsthand against the 5.2.0 first-run path:
+
+  P0-1  configure-providers no-op on TaskMaster's stock paid defaults
+  P0-2  SETUP gate reports ready=True for a keyless (0-task) config
+  P0-3  expand hard-fails when research provider is down (no structural degrade)
+
+The unifying bias they correct: the prior suite only asserted "leave the user's
+config alone" against EMPTY/customized baselines — never "CORRECT a keyless stock
+default", which is the exact state `task-master init` creates.
+"""
+
+import json
+from pathlib import Path
+
+from prd_taskmaster.providers import run_configure_providers
+
+
+# ── shared fixtures (self-contained; mirror test_dogfood_fixes helpers) ──────
+
+# The exact roles `task-master init` writes by default (the real dogfood config).
+STOCK_PAID_DEFAULTS = {
+    "main": {
+        "provider": "anthropic",
+        "modelId": "claude-sonnet-4-20250514",
+        "maxTokens": 64000,
+        "temperature": 0.2,
+    },
+    "research": {
+        "provider": "perplexity",
+        "modelId": "sonar",
+        "maxTokens": 8700,
+        "temperature": 0.1,
+    },
+    "fallback": {
+        "provider": "anthropic",
+        "modelId": "claude-3-7-sonnet-20250219",
+        "maxTokens": 120000,
+        "temperature": 0.2,
+    },
+}
+
+
+def _seed_taskmaster_config(root: Path, models: dict) -> None:
+    taskmaster = root / ".taskmaster"
+    taskmaster.mkdir(exist_ok=True)
+    (taskmaster / "config.json").write_text(json.dumps({"models": models}, indent=2))
+
+
+def _patch_env(monkeypatch, *, claude: bool = False, codex: bool = False) -> None:
+    def fake_which(name: str) -> str | None:
+        if name == "claude" and claude:
+            return "/fake/bin/claude"
+        if name == "codex" and codex:
+            return "/fake/bin/codex"
+        return None
+
+    monkeypatch.setattr("prd_taskmaster.providers.shutil.which", fake_which)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
+    monkeypatch.delenv("PERPLEXITY_API_BASE_URL", raising=False)
+    monkeypatch.delenv("PERPLEXITY_API_FREE_BASE_URL", raising=False)
+
+
+# ── P0-1: configure must REPAIR keyless stock paid defaults ──────────────────
+
+def test_configure_repairs_keyless_stock_paid_trio_to_free_clis(tmp_path, monkeypatch):
+    """The dogfood failure: init writes the paid anthropic+perplexity trio, the user
+    has no ANTHROPIC_API_KEY/PERPLEXITY_API_KEY but DOES have the claude+codex CLIs.
+    configure-providers must migrate all three unusable roles to the free paths, not
+    no-op on them (which left the first run producing 0 tasks)."""
+    monkeypatch.chdir(tmp_path)
+    _patch_env(monkeypatch, claude=True, codex=True)
+    _seed_taskmaster_config(tmp_path, {k: dict(v) for k, v in STOCK_PAID_DEFAULTS.items()})
+
+    result = run_configure_providers(economy="balanced")
+
+    assert result["models"]["main"]["provider"] == "claude-code"
+    assert result["models"]["fallback"]["provider"] == "codex-cli"
+    # dead paid Perplexity (no key) must yield to the free local proxy
+    assert result["models"]["research"]["provider"] == "openai-compatible"
+    assert "main" in result["changed"]
+    assert "fallback" in result["changed"]
+    assert "research" in result["changed"]
+
+
+def test_configure_preserves_usable_stock_anthropic_when_key_present(tmp_path, monkeypatch):
+    """Repair is scoped to UNUSABLE roles: a stock anthropic main WITH a real key is a
+    working config — leave its provider alone (don't yank a paying user onto the CLI)."""
+    monkeypatch.chdir(tmp_path)
+    _patch_env(monkeypatch, claude=True, codex=True)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-real")
+    _seed_taskmaster_config(tmp_path, {"main": dict(STOCK_PAID_DEFAULTS["main"])})
+
+    result = run_configure_providers(economy="balanced")
+
+    assert result["models"]["main"]["provider"] == "anthropic"
+    assert "main" not in result["changed"]

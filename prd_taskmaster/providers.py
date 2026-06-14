@@ -51,9 +51,57 @@ _STRUCTURED_GEN_TIER_MODELS = {
     "frontier": "fable",
 }
 
+# (provider, modelId) pairs that `task-master init` writes by default. These are
+# NOT user choices — they are stock defaults. When their provider is unusable in
+# the current environment (no key / no CLI) the engine must REPAIR them onto an
+# available free path rather than no-op (the P0-1 first-run failure). Genuine
+# user-customized providers (openai, openrouter, ollama, …) are never in this set
+# and are always preserved.
+KNOWN_STOCK_TASKMASTER_DEFAULTS = {
+    ("anthropic", "claude-sonnet-4-20250514"),
+    ("anthropic", "claude-3-7-sonnet-20250219"),
+    ("perplexity", "sonar"),
+    ("perplexity", "sonar-pro"),
+}
+
 
 def _role_empty(value: object) -> bool:
     return not isinstance(value, dict) or not value
+
+
+def _provider_usable(
+    provider: object,
+    *,
+    has_claude: bool,
+    has_codex: bool,
+    has_anthropic_key: bool,
+    has_openai_key: bool,
+    has_perplexity_key: bool,
+) -> bool:
+    """Can this provider actually run a request in the current environment?
+
+    Presence of a *credential* or *CLI* — not merely a config string. Unknown
+    providers (openrouter, ollama, google, …) are assumed usable: they are
+    deliberate user choices the engine must not clobber.
+    """
+    p = str(provider or "").lower()
+    if p == "anthropic":
+        return has_anthropic_key
+    if p == "openai":
+        return has_openai_key
+    if p == "perplexity":
+        return has_perplexity_key
+    if p == "claude-code":
+        return has_claude
+    if p == "codex-cli":
+        return has_codex
+    return True
+
+
+def _is_stock_taskmaster_default(role: object) -> bool:
+    if not isinstance(role, dict) or not role:
+        return False
+    return (str(role.get("provider", "")).lower(), role.get("modelId")) in KNOWN_STOCK_TASKMASTER_DEFAULTS
 
 
 def _resolve_configure_profile(economy: str | None) -> dict:
@@ -169,11 +217,32 @@ def run_configure_providers(economy: str | None = None) -> dict:
     has_claude = shutil.which("claude") is not None
     has_codex = shutil.which("codex") is not None
     has_anthropic_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    has_openai_key = bool(os.environ.get("OPENAI_API_KEY"))
+    has_perplexity_key = _has_perplexity_api_key()
+
+    def _correctable(role: object) -> bool:
+        """A role the engine may (re)write: empty, OR a stock TaskMaster default
+        whose provider is unusable here. Usable configs and genuine user choices
+        are left untouched."""
+        if _role_empty(role):
+            return True
+        if _is_stock_taskmaster_default(role) and not _provider_usable(
+            role.get("provider") if isinstance(role, dict) else None,
+            has_claude=has_claude,
+            has_codex=has_codex,
+            has_anthropic_key=has_anthropic_key,
+            has_openai_key=has_openai_key,
+            has_perplexity_key=has_perplexity_key,
+        ):
+            return True
+        return False
 
     desired_main = _desired_main_model(has_claude, has_codex, has_anthropic_key)
     start_tier = profile.get("structured_gen_start", "standard")
     current_main = models.get("main")
-    if _role_empty(current_main):
+    if _correctable(current_main):
+        # Provider decision dominates the tier decision (P1-4): resolve a usable
+        # provider first, then apply the economy tier on top of it.
         if desired_main:
             models["main"] = _main_model_for_start_tier(desired_main, start_tier)
             changed.append("main")
@@ -187,7 +256,7 @@ def run_configure_providers(economy: str | None = None) -> dict:
             result_extra["skipped_main"] = "user-configured"
 
     desired_fallback = _desired_fallback_model(has_claude, has_codex, has_anthropic_key)
-    if desired_fallback and _role_empty(models.get("fallback")):
+    if desired_fallback and _correctable(models.get("fallback")):
         models["fallback"] = desired_fallback
         changed.append("fallback")
 
@@ -204,10 +273,9 @@ def run_configure_providers(economy: str | None = None) -> dict:
         or "localhost:8765" in local_proxy_url
         or _local_port_open()
     )
-    if _role_empty(models.get("research")):
+    if _correctable(models.get("research")):
         desired_research = None
         research_choice = profile.get("research_choice", "real_api_if_key")
-        has_perplexity_key = _has_perplexity_api_key()
         if research_choice == "real_api_if_key" and has_perplexity_key:
             desired_research = _perplexity_research_model("sonar")
         elif research_choice == "best_available" and has_perplexity_key:
