@@ -1,7 +1,15 @@
 {
   "name": "prd-taskmaster",
-  "version": "5.2.0",
+  "version": "5.2.1",
   "description": "Zero-config goal-to-tasks engine for Claude Code (the Atlas engine)",
+  "author": {
+    "name": "Atlas AI",
+    "url": "https://atlas-ai.au"
+  },
+  "homepage": "https://github.com/anombyte93/prd-taskmaster#readme",
+  "bugs": {
+    "url": "https://github.com/anombyte93/prd-taskmaster/issues"
+  },
   "keywords": [
     "claude-code",
     "taskmaster",

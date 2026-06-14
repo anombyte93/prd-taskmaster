@@ -1,0 +1,112 @@
+[
+  {
+    "claim": "configure-providers migrates an unusable provider (keyless anthropic / paid perplexity) to an available CLI (claude/codex) or the free local proxy so the first run produces tasks",
+    "source": "prd_taskmaster/providers.py:151-254 run_configure_providers; advertised by setup skill + README zero-config promise; defect-register P0-1",
+    "expectedBehavior": "Given .taskmaster/config.json with the stock task-master init trio (main=anthropic/claude-sonnet-4-20250514, research=perplexity/sonar, fallback=anthropic/claude-3-7-sonnet-20250219), ANTHROPIC_API_KEY and PERPLEXITY_API_KEY unset, claude+codex on PATH, configure-providers REWRITES main to claude-code/codex and research to the local proxy. With no CLI either, it surfaces a critical error rather than silently leaving paid keyless defaults.",
+    "existingCoverage": "tests/core/test_dogfood_fixes.py:113 (seeds claude-code/sonnet, a USABLE provider), :140/:157 (seed EMPTY {} research role), :174 (seeds provider=openai user-custom, asserts NOT touched), :215 (seeds EMPTY {}). None seed the keyless anthropic stock trio.",
+    "verificationCommand": "python3 -m pytest tests/core/test_dogfood_fixes.py -q ; plus repro: seed stock keyless config, run providers.run_configure_providers(economy='balanced') with shutil.which patched to None",
+    "evidenceStrength": "none",
+    "riskIfFalse": "Every stranger who installs via npm/install.sh with ANTHROPIC_API_KEY unset gets 0 tasks on first run — the headline zero-config promise fails at the viral relaunch. configure-providers is a no-op because _role_empty (providers.py:55) returns False for the pre-populated paid roles; gating at :176/:190/:207 skips all rewrites.",
+    "verificationStatus": "passed",
+    "lastVerifiedAt": "2026-06-14T00:00:00+00:00"
+  },
+  {
+    "claim": "The SETUP gate (validate_setup) reports ready=True only when the configured provider can actually produce tasks",
+    "source": "prd_taskmaster/mode_recommend.py:359-511 validate_setup; pipeline.py gates SETUP->DISCOVER on ready+0 critical; defect-register P0-2",
+    "expectedBehavior": "validate_setup() on a keyless anthropic stock config returns ready=False with a critical failure naming the missing credential. It must verify credential/CLI usability, not mere model-id string presence.",
+    "existingCoverage": "tests/core/test_capabilities.py:203 test_validate_setup_passes_with_full_project asserts ready=True for config {main:{modelId:'claude-sonnet-4-5'}} with NO provider field and NO credential; :232 critical_failures_count; pipeline gate tests test_pipeline_state.py:46,51 only feed a literal {ready:True}.",
+    "verificationCommand": "python3 -m pytest 'tests/core/test_capabilities.py::TestValidateSetup' -q ; plus repro driving validate_setup() against keyless stock config",
+    "evidenceStrength": "weak",
+    "riskIfFalse": "The gate that is supposed to block a broken setup actively certifies the 0-task config as ready. Live repro: ready=True, critical_failures=0 on keyless stock paid config. provider_ok=bool(main_model) (mode_recommend.py:459) checks string presence only; zero credential/env checks exist in the module.",
+    "verificationStatus": "passed",
+    "lastVerifiedAt": "2026-06-14T00:00:00+00:00"
+  },
+  {
+    "claim": "expand degrades to structural expand (no --research) when the research provider fails on quota/auth/no-key, so subtasks are still produced (generate/SKILL.md:276-277 'structural always available')",
+    "source": "prd_taskmaster/tm_parallel.py:335 (_run_one_attempt hardcodes --research); backend.py:744-746 serial path; backend.py:727 parallel path; defect-register P0-3",
+    "expectedBehavior": "When `task-master expand --id N --research` fails specifically because research is unavailable (rate_limit/quota/auth/no_key), the engine retries the SAME task WITHOUT --research before declaring failure, and surfaces degraded=True. Subtasks > 0 on a research-only failure.",
+    "existingCoverage": "tests/core/test_tm_parallel.py:184 test_tm_run_failure_retries_with_escalated_config — fake fails on ANY expand (mode='fail', :30-33) regardless of --research; asserts attempts==2 and failed==[1], codifying that the retry re-runs --research and still fails. tests/core/test_backend.py:180 test_expand_serial_branch pins commands to exactly [expand,--id,N,--research]. test_native_backend.py:204 escalates only invalid_json, not research failure.",
+    "verificationCommand": "python3 -m pytest tests/core/test_tm_parallel.py tests/core/test_backend.py::test_expand_serial_branch_runs_binary_and_appends_telemetry -q",
+    "evidenceStrength": "weak",
+    "riskIfFalse": "First real run on a fresh PRD (>3 tasks -> parallel path) hard-fails to 0 subtasks the moment research quota/auth fails — the exact dogfood failure. The serial-path test is worse than absent: it is an ANTI-REGRESSION LOCK. Mutation proof: adding a structural fallback (dropping --research) turns test_expand_serial_branch RED, so the fix is blocked by a passing test.",
+    "verificationStatus": "passed",
+    "lastVerifiedAt": "2026-06-14T00:00:00+00:00"
+  },
+  {
+    "claim": "parse-prd reports failure (ok=false) when the model produced zero tasks",
+    "source": "prd_taskmaster/backend.py:718-722 (returns ok=True,task_count=len(tasks) with no len>0 guard); cli.py exits 0 when ok truthy; defect-register P1-1",
+    "expectedBehavior": "TaskMasterBackend.parse_prd on a returncode==0 run that wrote zero tasks returns ok=False with an explanatory error; CLI exits non-zero.",
+    "existingCoverage": "tests/core/test_backend.py:144 test_parse_prd_runs_taskmaster_and_counts_tasks_json (count=5 only); :245 test_taskmaster_responses_carry_backend_identity (returncode=1 failure only). No test with returncode==0 and 0 tasks.",
+    "verificationCommand": "python3 -m pytest tests/core/test_backend.py -q -k parse_prd",
+    "evidenceStrength": "partial",
+    "riskIfFalse": "A model that warns-to-stderr and exits 0 with zero tasks is reported as success; downstream gate (GENERATE) is documented as bypassable on first entry, so 0 tasks flows through silently.",
+    "verificationStatus": "passed",
+    "lastVerifiedAt": "2026-06-14T00:00:00+00:00"
+  },
+  {
+    "claim": "research_choice 'real_api_if_key' validates the Perplexity key before preferring paid Perplexity over the available free local proxy",
+    "source": "prd_taskmaster/providers.py:209-216 (paid branch evaluated before local_proxy elif); _has_perplexity_api_key presence-only (:125-129); defect-register P1-2",
+    "expectedBehavior": "With an empty research role, a junk PERPLEXITY_API_KEY, and the free proxy reachable, configure prefers the proxy unless the key passes a validity probe.",
+    "existingCoverage": "tests/core/test_dogfood_fixes.py:140/:157 seed empty role + a key and assert paid sonar/sonar-pro is chosen — i.e. they ASSERT the presence-only behavior is correct. No test seeds a junk key with proxy up.",
+    "verificationCommand": "python3 -m pytest tests/core/test_dogfood_fixes.py -q -k research",
+    "evidenceStrength": "weak",
+    "riskIfFalse": "Users with a stale/quota-exhausted Perplexity key get paid research selected over a working free proxy, then expand/rate hard-fail. Latent behind P0-1 (only fires on empty research role).",
+    "verificationStatus": "passed",
+    "lastVerifiedAt": "2026-06-14T00:00:00+00:00"
+  },
+  {
+    "claim": "There is a provider credential validity/health check before writing config or before parse",
+    "source": "providers.py:171/:125 presence-only; lib local-proxy availability is substring-OR-bare-TCP (no HTTP 200); backend shells with no pre-flight; defect-register P1-3",
+    "expectedBehavior": "A shared health probe (which+--version for CLIs, real HTTP 200 for proxy, key sanity/auth ping for paid APIs) runs before configure writes and before parse.",
+    "existingCoverage": "none — no test asserts any reachability/validity probe; local_proxy_available is asserted true purely from the 127.0.0.1:8765 URL substring in test_dogfood_fixes.py:215-237.",
+    "verificationCommand": "grep -rn 'health\\|probe\\|reachab\\|200' tests/core/ (no credential-validity assertions found)",
+    "evidenceStrength": "none",
+    "riskIfFalse": "Out-of-quota / invalid keys (the dogfood reality) are undetectable; the engine writes a config it cannot use.",
+    "verificationStatus": "passed",
+    "lastVerifiedAt": "2026-06-14T00:00:00+00:00"
+  },
+  {
+    "claim": "The parallel expand path (>3 pending) honors the --research / --no-research choice and the requested task ids",
+    "source": "backend.py:724-731 calls tm_parallel.run_tm_parallel(tag=tag) dropping research and task_ids; serial path (:744-746) honors them; defect-register P2-1",
+    "expectedBehavior": "expand(task_ids=[2], research=False) with >3 pending threads research=False and task selection into the parallel run.",
+    "existingCoverage": "tests/core/test_backend.py:160 test_expand_delegates_to_tm_parallel_for_more_than_three_pending asserts only called['tag']=='master'; it captures **kwargs but never asserts research or task_ids were passed — it passes whether or not they are dropped.",
+    "verificationCommand": "python3 -m pytest tests/core/test_backend.py::test_expand_delegates_to_tm_parallel_for_more_than_three_pending -q",
+    "evidenceStrength": "weak",
+    "riskIfFalse": "A fresh viral PRD usually yields >3 tasks -> parallel path -> the --no-research escape hatch is silently ignored exactly when P0-3 bites; the test would pass even after the drop.",
+    "verificationStatus": "passed",
+    "lastVerifiedAt": "2026-06-14T00:00:00+00:00"
+  },
+  {
+    "claim": "The test suite covers correction of a keyless stock default (not just leave-user-config-alone)",
+    "source": "defect-register P2-6; tests/core/test_dogfood_fixes.py overall",
+    "expectedBehavior": "A test seeds the keyless anthropic/perplexity/anthropic stock trio and asserts configure-providers corrects it to a usable provider.",
+    "existingCoverage": "none — 0 grep hits for the stock model IDs in tests/; assertion bias is leave-it-alone against EMPTY or USER-CUSTOM baselines.",
+    "verificationCommand": "grep -rn 'claude-sonnet-4-20250514\\|claude-3-7-sonnet' tests/ (0 hits)",
+    "evidenceStrength": "none",
+    "riskIfFalse": "318 tests stay green while the headline first-run path ships broken — exactly what happened.",
+    "verificationStatus": "passed",
+    "lastVerifiedAt": "2026-06-14T00:00:00+00:00"
+  },
+  {
+    "claim": "route_task selects a model per task from complexity and falls back when a backend is not installed (pure-function model routing)",
+    "source": "prd_taskmaster/fleet.py route_task/available_backends; tests/core/test_model_routing.py",
+    "expectedBehavior": "Given cfg+avail dicts, route_task maps complexityScore/phaseConfig to the right tier model and falls back to claude when the routed backend is absent.",
+    "existingCoverage": "tests/core/test_model_routing.py:9-93 (9 tests, real return-value assertions on synthetic cfg/avail).",
+    "verificationCommand": "python3 -m pytest tests/core/test_model_routing.py -q",
+    "evidenceStrength": "strong",
+    "riskIfFalse": "Mis-routing would degrade cost/quality, but these tests genuinely assert observable routing decisions and would fail on a regression. NOTE: this module never touches credential usability — it is NOT relevant to P0/P1/P2-1 and its strength must not be read as covering the first-run bug.",
+    "verificationStatus": "passed",
+    "lastVerifiedAt": "2026-06-14T00:00:00+00:00"
+  },
+  {
+    "claim": "NativeBackend (no-key) returns agent_action_required instead of silently failing",
+    "source": "prd_taskmaster/backend.py NativeBackend; tests/core/test_native_backend.py:298",
+    "expectedBehavior": "With discover_key()==None, parse/expand/rate return ok=False + agent_action_required payloads.",
+    "existingCoverage": "tests/core/test_native_backend.py:298-323 (real assertions on the agent-action contract).",
+    "verificationCommand": "python3 -m pytest tests/core/test_native_backend.py -q",
+    "evidenceStrength": "partial",
+    "riskIfFalse": "The NATIVE backend's no-key path is genuinely covered, but the SHIPPED first-run path is the TaskMaster-CLI backend (tm_parallel), which has NO equivalent research-failure test. This coverage gives false comfort: it tests a different code path than the one that broke.",
+    "verificationStatus": "passed",
+    "lastVerifiedAt": "2026-06-14T00:00:00+00:00"
+  }
+]

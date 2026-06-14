@@ -1,6 +1,6 @@
 {
   "name": "prd",
-  "version": "5.2.0",
+  "version": "5.2.1",
   "description": "Zero-config goal-to-tasks engine for Claude Code (the Atlas engine). Graded PRD validation, dependency-ordered task graph, and CDD-verified execution.",
   "author": {
     "name": "Atlas AI",

@@ -194,15 +194,20 @@ def test_tm_run_failure_retries_with_escalated_config_and_telemetry(tmp_path, mo
 
     assert run["ok"] is False
     assert run["failed"] == [1]
-    assert run["results"][0]["attempts"] == 2
+    # 2 research-backed attempts (one escalated) + 1 structural degrade attempt.
+    # The structural fallback (P0-3) means a research outage no longer ends at 2
+    # research failures — it always tries a no---research pass before giving up.
+    assert run["results"][0]["attempts"] == 3
     workdir = Path(plan["workdirs"][0]["path"])
     config = _read_json(workdir / ".taskmaster" / "config.json")
     assert config["models"]["main"]["provider"] == "anthropic"
     assert config["models"]["main"]["modelId"] == tm_parallel.TIER_MODEL_IDS["opus"]
     rows = [json.loads(line) for line in Path(".atlas-ai/telemetry.jsonl").read_text().splitlines()]
-    assert [row["task_id"] for row in rows] == [1, 1]
+    assert [row["task_id"] for row in rows] == [1, 1, 1]
     assert rows[0]["exit"] == 1
     assert rows[1]["escalated"] is True
+    # final row is the structural (no-research) degrade attempt
+    assert rows[2].get("degraded") is True
 
 
 def test_tm_run_timeout_records_failure_and_retains_workdir(tmp_path, monkeypatch):

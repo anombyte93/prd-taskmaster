@@ -264,3 +264,56 @@ def test_taskmaster_responses_carry_backend_identity(tmp_path, monkeypatch):
         assert res.get('ok') is False
         assert res.get('backend') == 'taskmaster'
         assert res.get('ai') == 'taskmaster-cli'
+
+
+# ── pre-relaunch P0-3 (serial path) + P1-1 (parse zero-task) ────────────────
+
+def test_expand_serial_degrades_to_structural_on_research_failure(tmp_path, monkeypatch):
+    """Serial (<=3 tasks) path: when expand --research fails (research provider down),
+    retry without --research rather than hard-failing to 0 subtasks. (P0-3)"""
+    from prd_taskmaster.backend import get_backend
+
+    bin_dir = _isolate(tmp_path, monkeypatch, with_binary=False)
+    script = bin_dir / "task-master"
+    script.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "--version" ]; then echo 0.43.1; exit 0; fi\n'
+        'for a in "$@"; do if [ "$a" = "--research" ]; then echo "quota" >&2; exit 1; fi; done\n'
+        "exit 0\n"
+    )
+    script.chmod(0o755)
+    _seed_tasks(tmp_path, 2)
+
+    result = get_backend({"backend": "taskmaster"}).expand(tag="master")
+
+    assert result["ok"] is True
+    assert result["expanded"] == [1, 2]
+    assert result.get("degraded") is True
+
+
+def test_parse_prd_zero_tasks_is_failure(tmp_path, monkeypatch):
+    """parse-prd that exits 0 but produces no tasks must be reported ok=False, not a
+    silent success that the pipeline treats as done. (P1-1)"""
+    from prd_taskmaster.backend import get_backend
+
+    bin_dir = _isolate(tmp_path, monkeypatch, with_binary=False)
+    script = bin_dir / "task-master"
+    script.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "--version" ]; then echo 0.43.1; exit 0; fi\n'
+        'echo "parsed nothing"\n'
+        "exit 0\n"
+    )
+    script.chmod(0o755)
+    tm = tmp_path / ".taskmaster"
+    (tm / "tasks").mkdir(parents=True, exist_ok=True)
+    (tm / "state.json").write_text(json.dumps({"currentTag": "master"}))
+    # parse-prd exits 0 but the model produced no tasks
+    (tm / "tasks" / "tasks.json").write_text(json.dumps({"master": {"tasks": []}}))
+    prd = tmp_path / "prd.md"
+    prd.write_text("# PRD\n")
+
+    result = get_backend({"backend": "taskmaster"}).parse_prd(prd, 5)
+
+    assert result["ok"] is False
+    assert result["task_count"] == 0

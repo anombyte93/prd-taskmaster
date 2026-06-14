@@ -164,6 +164,14 @@ def _current_tag(state: dict, tag_lists: dict[str, list[dict]]) -> str:
     return next(iter(tag_lists), "master")
 
 
+def _fresh_tag(existing: set[str]) -> str:
+    """Deterministic next unused parse tag, so a new PRD does not pollute a stale tag."""
+    n = 1
+    while f"prd-{n}" in existing:
+        n += 1
+    return f"prd-{n}"
+
+
 def _recommended_pending_tag(tag_counts: dict[str, dict[str, int]]) -> str | None:
     ready_tags = [
         (tag, counts)
@@ -200,6 +208,14 @@ def preflight(cwd: Optional[str] = None) -> dict:
     has_taskmaster = TASKMASTER_DIR.exists()
     alternate_pending_tag = _recommended_pending_tag(tag_counts)
 
+    # #13: a non-empty but fully-done current tag is "stale" — parsing a new PRD into
+    # it would pollute the old graph. Flag it and suggest a fresh tag (additive; does
+    # not change the recommended_action ladder).
+    current_tag_stale = bool(tasks_count > 0 and pending_count == 0)
+    suggested_fresh_tag = (
+        _fresh_tag(set(task_lists)) if (current_tag_stale and prd_exists) else None
+    )
+
     if has_taskmaster and pending_count > 0:
         rec = "resume_existing_tasks"
     elif prd_exists and tasks_count == 0:
@@ -229,6 +245,8 @@ def preflight(cwd: Optional[str] = None) -> dict:
         "tasks_path": str(TASKS_FILE) if TASKS_FILE.exists() else None,
         "current_tag": current_tag,
         "recommended_tag": recommended_tag,
+        "current_tag_stale": current_tag_stale,
+        "suggested_fresh_tag": suggested_fresh_tag,
         "tag_counts": tag_counts,
         "recommended_action": rec,
     }

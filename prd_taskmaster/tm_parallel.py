@@ -328,11 +328,17 @@ def _default_concurrency(concurrency: int | None, workdir_count: int, fleet_conf
 _append_telemetry = append_telemetry
 
 
-def _run_one_attempt(binary: str, task_id: Any, workdir: Path, timeout: float) -> tuple[Any, int, str, str]:
+def _run_one_attempt(
+    binary: str, task_id: Any, workdir: Path, timeout: float, research: bool = True
+) -> tuple[Any, int, str, str]:
     start = time.monotonic()
+    args = [binary, "expand", "--id", str(task_id)]
+    if research:
+        args.append("--research")
+    args.append("--force")
     try:
         result = subprocess.run(
-            [binary, "expand", "--id", str(task_id), "--research", "--force"],
+            args,
             cwd=workdir,
             capture_output=True,
             text=True,
@@ -397,6 +403,45 @@ def _run_packet(binary: str, item: dict, timeout: float, fleet_config: dict, pro
             }
         if not can_escalate or attempt == 1:
             break
+
+    # All research-backed attempts failed (e.g. research provider out of quota /
+    # auth down). Degrade to a structural expand (no --research): it does not
+    # depend on the research provider and is always available. A structurally
+    # expanded task is still verifiable — far better than 0 subtasks.
+    exit_code, wall_ms, stdout, stderr = _run_one_attempt(
+        binary, task_id, workdir, timeout, research=False
+    )
+    _append_telemetry({
+        "ts": _now_iso(),
+        "op_class": "structured_gen",
+        "task_id": task_id,
+        "model": model,
+        "backend": "taskmaster-api",
+        "exit": exit_code,
+        "wall_ms": wall_ms,
+        "escalated": False,
+        "degraded": True,
+    })
+    attempts.append({
+        "attempt": len(attempts),
+        "exit": exit_code,
+        "wall_ms": wall_ms,
+        "model": model,
+        "stdout": stdout,
+        "stderr": stderr,
+        "research": False,
+    })
+    if exit_code == 0:
+        return {
+            "task_id": task_id,
+            "exit": 0,
+            "wall_ms": sum(a["wall_ms"] for a in attempts),
+            "attempts": len(attempts),
+            "path": str(workdir),
+            "model": model,
+            "success": True,
+            "degraded": True,
+        }
 
     return {
         "task_id": task_id,

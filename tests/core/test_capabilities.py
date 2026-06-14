@@ -201,26 +201,30 @@ class TestValidateSetup:
         assert result["ready"] is False
 
     def test_validate_setup_passes_with_full_project(self, monkeypatch, tmp_path):
-        """ready=True when CLI exists, project initialized, and main model configured."""
+        """ready=True when CLI exists, project initialized, and the main model's
+        provider is genuinely reachable (a real provider + a usable credential —
+        not merely a model-id string)."""
         # Create fake task-master binary
         fake_bin = tmp_path / "bin" / "task-master"
         fake_bin.parent.mkdir(parents=True)
         fake_bin.write_text("#!/bin/sh\necho 0.99.0\n")
         fake_bin.chmod(0o755)
 
-        # Create .taskmaster/ with config.json
+        # Create .taskmaster/ with config.json — providers named, and a credential
+        # present so the gate's reachability check passes for the right reason.
         tm_dir = tmp_path / "project" / ".taskmaster"
         tm_dir.mkdir(parents=True)
         config = {
             "models": {
-                "main": {"modelId": "claude-sonnet-4-5"},
-                "research": {"modelId": "claude-opus-4"},
-                "fallback": {"modelId": "claude-haiku-3"},
+                "main": {"provider": "anthropic", "modelId": "claude-sonnet-4-5"},
+                "research": {"provider": "anthropic", "modelId": "claude-opus-4"},
+                "fallback": {"provider": "anthropic", "modelId": "claude-haiku-3"},
             }
         }
         (tm_dir / "config.json").write_text(json.dumps(config))
 
         monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         monkeypatch.chdir(tmp_path / "project")
 
         result = validate_setup()
