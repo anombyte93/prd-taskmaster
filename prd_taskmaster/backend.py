@@ -716,6 +716,22 @@ class TaskMasterBackend(Backend):
             d.setdefault("ai", "taskmaster-cli")
             return d
         _resolved, tasks = _load_tasks(tag)
+        if not tasks:
+            # P1-1: a 0-exit parse that produced no tasks is NOT success — it is the
+            # silent failure that lets the pipeline treat an empty graph as "done".
+            d = {
+                "ok": False,
+                "task_count": 0,
+                "exit": result.returncode,
+                "error": (
+                    "parse-prd exited 0 but produced 0 tasks — the model returned no "
+                    "tasks. Check provider credentials (run: python3 script.py "
+                    "configure-providers) and the PRD content."
+                ),
+            }
+            d.setdefault("backend", "taskmaster")
+            d.setdefault("ai", "taskmaster-cli")
+            return d
         d = {"ok": True, "task_count": len(tasks)}
         d.setdefault("backend", "taskmaster")
         d.setdefault("ai", "taskmaster-cli")
@@ -739,6 +755,7 @@ class TaskMasterBackend(Backend):
         results = []
         expanded = []
         failed = []
+        any_degraded = False
         for task in pending:
             task_id = task.get("id")
             cmd = [binary, "expand", "--id", str(task_id)]
@@ -747,6 +764,20 @@ class TaskMasterBackend(Backend):
             start = time.monotonic()
             result = subprocess.run(cmd, capture_output=True, text=True)
             wall_ms = int((time.monotonic() - start) * 1000)
+            degraded = False
+            if result.returncode != 0 and research:
+                # P0-3: research provider down (quota/auth). Degrade to a structural
+                # expand (no --research) — always available, still verifiable —
+                # rather than hard-failing this task to 0 subtasks.
+                s_start = time.monotonic()
+                result = subprocess.run(
+                    [binary, "expand", "--id", str(task_id)],
+                    capture_output=True,
+                    text=True,
+                )
+                wall_ms += int((time.monotonic() - s_start) * 1000)
+                degraded = True
+                any_degraded = True
             append_telemetry({
                 "ts": now_iso(),
                 "op_class": "structured_gen",
@@ -756,6 +787,7 @@ class TaskMasterBackend(Backend):
                 "exit": result.returncode,
                 "wall_ms": wall_ms,
                 "escalated": False,
+                "degraded": degraded,
             })
             item = {
                 "task_id": task_id,
@@ -763,6 +795,7 @@ class TaskMasterBackend(Backend):
                 "wall_ms": wall_ms,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
+                "degraded": degraded,
             }
             results.append(item)
             if result.returncode == 0:
@@ -776,6 +809,8 @@ class TaskMasterBackend(Backend):
             "failed": failed,
             "results": results,
         }
+        if any_degraded:
+            d["degraded"] = True
         d.setdefault("backend", "taskmaster")
         d.setdefault("ai", "taskmaster-cli")
         return d
