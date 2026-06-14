@@ -4,6 +4,39 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.2.1] — 2026-06-14
+
+Pre-relaunch hardening — fixes the first-run failures a multi-agent audit found
+on the documented zero-key path (and reproduced firsthand). See `docs/audit/`.
+
+### Fixed
+- **P0-1 — `configure-providers` now REPAIRS keyless stock defaults.** It previously
+  only filled *empty* model roles, so `task-master init`'s paid `anthropic`+`perplexity`
+  defaults survived untouched and a keyless first run produced **0 tasks**. It now
+  migrates any stock default whose provider is unusable in the current environment to
+  the available `claude`/`codex` CLI or the free local proxy (`KNOWN_STOCK_TASKMASTER_DEFAULTS`
+  + a `_provider_usable` check). Genuine user configs and usable configs are preserved;
+  the provider decision now dominates the tier decision.
+- **P0-2 — the SETUP gate (`validate_setup`) is credential-aware.** It reported
+  `ready=True` whenever a model-id *string* was present — green-lighting the exact
+  0-task config. It now verifies the configured provider is actually reachable
+  (key present / CLI on PATH).
+- **P0-3 — `expand` degrades to a structural pass when the research provider is down.**
+  Both the parallel and serial paths hardcoded `--research`; a quota/auth outage
+  hard-failed tasks to 0 subtasks. They now retry without `--research` (structural
+  expand is always available) and mark the result `degraded`.
+- **P1-1 — `parse_prd` reports `ok=False` on a 0-task parse** (was a silent success).
+- **Nested-session spawn probe (gh #11/#12).** When `main` is a CLI-spawning provider
+  inside a nested Claude Code session, the gate now *probes* whether the spawn works
+  rather than assuming — keeping the free path when it works and surfacing an
+  actionable error (never bare `--claude-code`) when it genuinely fails.
+- **Stale-tag detection (gh #13).** `preflight` now reports `current_tag_stale` +
+  `suggested_fresh_tag` so a new PRD is not parsed into a polluted, fully-done tag.
+
+### Changed
+- `package.json` now carries `author`, `homepage`, and `bugs` so the npm page is not
+  anonymous.
+
 ## [5.2.0] — 2026-06-13
 
 Progress visualization — the README/UX-SPEC panels are now real output.
