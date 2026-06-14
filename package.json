@@ -31,6 +31,8 @@
     }
   },
   "scripts": {
+    "prepublishOnly": "node scripts/check-version-sync.js",
+    "version:check": "node scripts/check-version-sync.js",
     "postinstall": "pip install -r mcp-server/requirements.txt 2>/dev/null || echo 'WARN: Python MCP deps not installed. MCP tools will not start. Run: pip install -r node_modules/prd-taskmaster/mcp-server/requirements.txt'",
     "test": "pytest tests/",
     "test:fast": "pytest tests/ -k 'not integration'",
