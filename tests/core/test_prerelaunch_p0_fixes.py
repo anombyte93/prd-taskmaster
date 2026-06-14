@@ -15,6 +15,7 @@ default", which is the exact state `task-master init` creates.
 import json
 from pathlib import Path
 
+from prd_taskmaster.mode_recommend import validate_setup
 from prd_taskmaster.providers import run_configure_providers
 
 
@@ -98,3 +99,56 @@ def test_configure_preserves_usable_stock_anthropic_when_key_present(tmp_path, m
 
     assert result["models"]["main"]["provider"] == "anthropic"
     assert "main" not in result["changed"]
+
+
+# ── P0-2: SETUP gate must be credential-aware, not string-presence ───────────
+
+def _patch_setup_env(monkeypatch, *, claude=False, codex=False):
+    """Make the task-master binary check pass while controlling CLI/key availability
+    for the provider-usability checks."""
+    def fake_which(name: str) -> str | None:
+        if "task-master" in name or name == "taskmaster":
+            return "/fake/bin/task-master"
+        if name == "claude" and claude:
+            return "/fake/bin/claude"
+        if name == "codex" and codex:
+            return "/fake/bin/codex"
+        return None
+
+    monkeypatch.setattr("prd_taskmaster.mode_recommend.shutil.which", fake_which)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
+
+
+def test_validate_setup_fails_on_keyless_paid_main_provider(tmp_path, monkeypatch):
+    """The gate green-lit the exact 0-task config: a paid 'anthropic' main with no
+    ANTHROPIC_API_KEY and no claude/codex CLI. A model-id string is present but the
+    provider cannot run — ready must be False with a critical failure."""
+    monkeypatch.chdir(tmp_path)
+    _patch_setup_env(monkeypatch, claude=False, codex=False)
+    _seed_taskmaster_config(tmp_path, {k: dict(v) for k, v in STOCK_PAID_DEFAULTS.items()})
+
+    result = validate_setup()
+
+    main_check = next(c for c in result["checks"] if c["id"] == "provider_main")
+    assert main_check["passed"] is False
+    assert result["ready"] is False
+    assert result["critical_failures"] >= 1
+    assert main_check["fix"]  # actionable remediation present
+
+
+def test_validate_setup_passes_when_main_provider_is_usable(tmp_path, monkeypatch):
+    """The corrected free config (main on the claude CLI) must pass the gate."""
+    monkeypatch.chdir(tmp_path)
+    _patch_setup_env(monkeypatch, claude=True, codex=True)
+    _seed_taskmaster_config(tmp_path, {
+        "main": {"provider": "claude-code", "modelId": "sonnet"},
+        "research": {"provider": "claude-code", "modelId": "sonnet"},
+        "fallback": {"provider": "codex-cli", "modelId": "gpt-5.2-codex"},
+    })
+
+    result = validate_setup()
+
+    main_check = next(c for c in result["checks"] if c["id"] == "provider_main")
+    assert main_check["passed"] is True
+    assert result["ready"] is True
