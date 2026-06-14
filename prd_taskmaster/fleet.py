@@ -51,17 +51,40 @@ DEFAULT_FLEET_CONFIG = {
 BACKEND_CHOICES = {"auto", "taskmaster", "native"}
 
 
+ATLAS_CONFIG_PATH = Path(".atlas-ai") / "config" / "atlas.json"
+
+
+def _atlas_config_economy() -> str | None:
+    """token_economy set via /customise-workflow (.atlas-ai/config/atlas.json).
+
+    /customise-workflow is the discoverable customization tool; the economy a user
+    sets there must take effect even though the lower-level routing file is fleet.json.
+    """
+    if not ATLAS_CONFIG_PATH.is_file():
+        return None
+    try:
+        raw = json.loads(ATLAS_CONFIG_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    val = raw.get("token_economy")
+    return val if isinstance(val, str) else None
+
+
 def load_fleet_config(path=None):
     """Load .atlas-ai/fleet.json merged over defaults.
 
     Malformed files and invalid values fall back to defaults silently —
     a broken optional config must never block a fleet run.
+
+    Economy precedence: fleet.json (explicit) > atlas.json (/customise-workflow) > default.
     """
     cfg = {
         "max_concurrency": DEFAULT_FLEET_CONFIG["max_concurrency"],
         "routing": dict(DEFAULT_ROUTING),
         "experimental_backends": DEFAULT_FLEET_CONFIG["experimental_backends"],
-        "token_economy": DEFAULT_FLEET_CONFIG["token_economy"],
+        "token_economy": _atlas_config_economy() or DEFAULT_FLEET_CONFIG["token_economy"],
         "backend": DEFAULT_FLEET_CONFIG["backend"],
     }
     p = Path(path) if path else FLEET_CONFIG_PATH

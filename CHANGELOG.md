@@ -4,6 +4,35 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.2.2] — 2026-06-14
+
+Front-door UX flow fixes (a UX-flow audit found the *journey* still broke before a
+new user reached the 5.2.1 backend fixes). See `docs/audit/UX-FLOW-AUDIT.md`. Also
+syncs the version source-of-truth (`prd_taskmaster/__init__.py`), which 5.2.1 missed.
+
+### Fixed
+- **UX-P0-1 — the README's first command now resolves.** `README` led with `/atlas`,
+  which a fresh `/plugin install prd` does not provide (plugin commands are namespaced
+  `/prd:*`). Added a brand-name `atlas` entrypoint skill (→ `/prd:atlas`, a thin alias
+  that dispatches to the `go` orchestrator) and updated the README first-run to
+  `/prd:atlas` (or `/prd:go`, or natural language).
+- **UX-P0-2 — phase gates no longer document a self-contradicting STOP.** `setup`/
+  `discover`/`generate`/`handoff` opened with "if the gate fails, stop" immediately
+  followed by "it WILL fail on first entry, proceed past it (see morning brief)" — a
+  compliant autonomous agent would halt. Rewritten to explain `check_gate` is an EXIT
+  gate (evidence to advance, not to enter), so a first-entry `false` is expected; the
+  gate is enforced on advance. Removed leaked internal references ("morning brief",
+  "Mum dogfood feedback").
+- **UX-P0-3 — `token_economy` set via `/customise-workflow` is now honored.** It writes
+  `.atlas-ai/config/atlas.json`, but the engine read economy only from
+  `.atlas-ai/fleet.json`. `load_fleet_config` now reads `token_economy` from `atlas.json`
+  when `fleet.json` doesn't set one (fleet.json wins if it does); the config schema doc
+  adds the key.
+
+### Fixed (version hygiene)
+- `prd_taskmaster/__init__.py` version bumped (5.2.1 set `package.json`/`plugin.json` but
+  missed the `__init__.py` source-of-truth the manifest tests check).
+
 ## [5.2.1] — 2026-06-14
 
 Pre-relaunch hardening — fixes the first-run failures a multi-agent audit found

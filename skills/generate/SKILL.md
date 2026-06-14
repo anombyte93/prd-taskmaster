@@ -31,17 +31,17 @@ into tasks, expand every task into subtasks. Quality over speed.**
 
 ## Entry gate
 
-1. Call `mcp__plugin_prd_go__check_gate(phase="GENERATE", evidence={})`.
-   If the call returns `{gate_passed: false, violations: [...]}`, report the
-   violations and stop. The gate protects against re-entering a completed
-   phase or skipping ahead from DISCOVER.
+1. Call `mcp__plugin_prd_go__check_gate(phase="GENERATE", evidence={})` for diagnostics.
 
-   **Known issue (Mum dogfood feedback [10] — WORST):** check_gate(GENERATE)
-   currently checks `task_count > 0`, `subtask_coverage >= 1.0`, and
-   `validation_grade in (EXCELLENT, GOOD)` — all of which are GENERATE's
-   OWN OUTPUTS, not entry preconditions. First-time entry deadlocks. State
-   machine LEGAL_TRANSITIONS already prevents illegal entry — proceed past
-   this gate on first entry. Semantic fix in flight (see morning brief).
+   `check_gate` is an EXIT gate: it checks `task_count > 0`, `subtask_coverage >= 1.0`,
+   and `validation_grade in (EXCELLENT, GOOD)` — all of which are GENERATE's OWN OUTPUTS,
+   i.e. evidence to *advance*, not preconditions to *enter*. On first entry none exist
+   yet, so a `gate_passed: false` here is EXPECTED — the state machine's legal
+   transitions already guarantee only legal entry.
+
+   - **First entry** (no evidence yet): note the result and continue with the Procedure.
+   - **Re-entry**: if the gate reports violations, report them and stop — it protects
+     against re-running a completed phase or skipping ahead from DISCOVER.
 2. Read the DISCOVER output (discovery summary + `CONSTRAINTS CAPTURED` block
    + scale classification). If any of these are missing, report and stop — the
    gate should have caught this, but belt-and-braces.

@@ -142,10 +142,11 @@ just that key, re-validate, and re-write.
 
 ## Config Schema
 
-`.atlas-ai/config/atlas.json` has 6 top-level keys:
+`.atlas-ai/config/atlas.json` has 7 top-level keys:
 
 ```json
 {
+  "token_economy": "conservative|balanced|performance",
   "provider": {
     "main": "gemini-cli|claude-code|anthropic|openai|openrouter|ollama|...",
     "model_main": "gemini-3-pro-preview|sonnet|gpt-4o|...",
@@ -183,6 +184,10 @@ just that key, re-validate, and re-write.
 Phase files (`skills/setup`, `skills/discover`, `skills/generate`,
 `skills/handoff`, `skills/execute-task`) read this config at runtime and apply
 user preferences before falling back to documented defaults.
+
+`token_economy` here is honored by the engine itself: `load_fleet_config` reads it
+from this file when `.atlas-ai/fleet.json` does not set one (fleet.json wins if it
+does), so the economy you pick via this skill actually drives model-tier routing.
 
 ## Customizations directory
 
