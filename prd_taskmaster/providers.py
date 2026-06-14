@@ -3,6 +3,7 @@
 import argparse
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 from prd_taskmaster.economy import TIER_MODEL_IDS, economy_profile
@@ -102,6 +103,47 @@ def _is_stock_taskmaster_default(role: object) -> bool:
     if not isinstance(role, dict) or not role:
         return False
     return (str(role.get("provider", "")).lower(), role.get("modelId")) in KNOWN_STOCK_TASKMASTER_DEFAULTS
+
+
+# Providers that run by spawning a local CLI child (no API key / HTTP). Inside a
+# nested Claude Code session the recursive `claude -p` spawn is refused on SOME
+# Claude versions (gh #11) and works on others — so we PROBE it, never assume.
+_SPAWNING_PROVIDERS = {"claude-code", "codex-cli", "gemini-cli"}
+_SPAWN_PROBE_CLI = {"claude-code": "claude", "codex-cli": "codex", "gemini-cli": "gemini"}
+_SPAWN_PROBE_TIMEOUT = 60
+
+
+def _is_nested_claude() -> bool:
+    """Are we running inside another Claude Code / MCP session? Gate on the strong
+    signals (CLAUDECODE / CLAUDE_CODE_CHILD_SESSION); CLAUDE_CODE_ENTRYPOINT alone
+    can be 'sdk'/'mcp' in non-nested contexts, so it is not used as a primary."""
+    return bool(os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_CODE_CHILD_SESSION"))
+
+
+def _is_spawning_provider(provider: object) -> bool:
+    return str(provider or "").lower() in _SPAWNING_PROVIDERS
+
+
+def _probe_spawn(provider: object) -> bool:
+    """Actually verify a CLI-spawning provider can run a child here. Returns True
+    when it can (or when it is not a spawning provider). Catches the nested-session
+    spawn refusal empirically instead of assuming it (which would wrongly reroute
+    off the free subscription path on versions where nested spawn works)."""
+    cli = _SPAWN_PROBE_CLI.get(str(provider or "").lower())
+    if not cli:
+        return True
+    binary = shutil.which(cli)
+    if not binary:
+        return False
+    try:
+        if cli == "claude":
+            probe = [binary, "-p", "ok"]
+        else:
+            probe = [binary, "--version"]
+        result = subprocess.run(probe, capture_output=True, text=True, timeout=_SPAWN_PROBE_TIMEOUT)
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
 
 
 def _resolve_configure_profile(economy: str | None) -> dict:

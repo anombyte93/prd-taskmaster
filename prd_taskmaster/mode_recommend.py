@@ -16,7 +16,13 @@ from pathlib import Path
 from typing import Any
 
 from prd_taskmaster.lib import emit_json_error
-from prd_taskmaster.providers import _has_perplexity_api_key, _provider_usable
+from prd_taskmaster.providers import (
+    _has_perplexity_api_key,
+    _is_nested_claude,
+    _is_spawning_provider,
+    _probe_spawn,
+    _provider_usable,
+)
 
 # ---------------------------------------------------------------------------
 # Constants (mirrored from v4 script.py)
@@ -463,6 +469,7 @@ def validate_setup() -> dict:
     research_model: str | None = None
     research_provider: str | None = None
     main_usable = False
+    nested_spawn_block = False
     if has_config:
         try:
             with open(config_file) as f:
@@ -477,8 +484,22 @@ def validate_setup() -> dict:
             research_model = research.get("modelId")
             fallback_model = fallback.get("modelId")
             main_usable = _provider_usable(main_provider, **usable_kwargs)
+            # #11/#12: a CLI-spawning provider may pass the credential check (CLI on
+            # PATH) yet still be unable to spawn a child inside a nested Claude
+            # session. PROBE it — don't assume either way.
+            nested_spawn_block = False
+            if main_usable and _is_spawning_provider(main_provider) and _is_nested_claude():
+                if not _probe_spawn(main_provider):
+                    main_usable = False
+                    nested_spawn_block = True
             provider_ok = bool(main_model) and main_usable
-            if bool(main_model) and not main_usable:
+            if nested_spawn_block:
+                provider_detail = (
+                    f"main={main_provider}/{main_model}: the '{main_provider}' CLI cannot spawn a "
+                    "child inside this nested Claude Code session — parse/expand would die with "
+                    "exit 1 and write no tasks"
+                )
+            elif bool(main_model) and not main_usable:
                 provider_detail = (
                     f"main={main_provider or '?'}/{main_model} configured, but provider "
                     f"'{main_provider}' has no usable credential/CLI here — would produce 0 tasks"
@@ -499,10 +520,18 @@ def validate_setup() -> dict:
         "detail": provider_detail,
         "fix": (
             (
-                "python3 script.py configure-providers"
-                "  # migrate the unusable provider to your installed claude/codex CLI (or set its API key)"
-                if (main_model and not main_usable)
-                else "task-master models --set-main sonnet --claude-code"
+                (
+                    "Run Atlas from a plain shell (outside Claude Code), OR set ANTHROPIC_API_KEY "
+                    "to use the Anthropic API instead of the CLI spawn, OR run: "
+                    "python3 script.py configure-providers"
+                )
+                if nested_spawn_block
+                else (
+                    "python3 script.py configure-providers"
+                    "  # migrate the unusable provider to your installed claude/codex CLI (or set its API key)"
+                    if (main_model and not main_usable)
+                    else "task-master models --set-main sonnet --claude-code"
+                )
             )
             if not provider_ok else None
         ),

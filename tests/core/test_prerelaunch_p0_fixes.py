@@ -120,6 +120,9 @@ def _patch_setup_env(monkeypatch, *, claude=False, codex=False):
     monkeypatch.setattr("prd_taskmaster.mode_recommend.shutil.which", fake_which)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
+    # base setup tests are non-nested + deterministic; nested tests opt in explicitly
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_CHILD_SESSION", raising=False)
 
 
 def test_validate_setup_fails_on_keyless_paid_main_provider(tmp_path, monkeypatch):
@@ -208,3 +211,59 @@ def test_expand_packet_fails_when_structural_also_fails(tmp_path):
     result = _run_packet(str(script), item, timeout=30, fleet_config={}, profile=profile)
 
     assert result["success"] is False
+
+
+# ── #11/#12: nested-session spawn PROBE (verify, don't assume) ───────────────
+
+def test_is_nested_claude_detects_env(monkeypatch):
+    from prd_taskmaster.providers import _is_nested_claude
+
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_CHILD_SESSION", raising=False)
+    assert _is_nested_claude() is False
+
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert _is_nested_claude() is True
+
+
+def test_validate_setup_fails_when_nested_claude_code_spawn_probe_fails(tmp_path, monkeypatch):
+    """#11/#12: if the claude-code main provider genuinely cannot spawn in this nested
+    session (probe fails), the gate must fail with an actionable error — NOT silently
+    pass and let parse_prd die with exit 1 / no tasks. (Probe, not assume.)"""
+    monkeypatch.chdir(tmp_path)
+    _patch_setup_env(monkeypatch, claude=True, codex=True)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setattr("prd_taskmaster.mode_recommend._probe_spawn", lambda provider: False)
+    _seed_taskmaster_config(tmp_path, {
+        "main": {"provider": "claude-code", "modelId": "sonnet"},
+        "research": {"provider": "perplexity", "modelId": "sonar"},
+        "fallback": {"provider": "codex-cli", "modelId": "gpt-5.2-codex"},
+    })
+
+    result = validate_setup()
+
+    main_check = next(c for c in result["checks"] if c["id"] == "provider_main")
+    assert main_check["passed"] is False
+    assert result["ready"] is False
+    assert "--claude-code" not in (main_check["fix"] or "")
+    assert "nest" in (main_check["detail"] or "").lower()
+
+
+def test_validate_setup_passes_when_nested_claude_code_spawn_probe_succeeds(tmp_path, monkeypatch):
+    """The contradicting case: nested but claude-code spawns fine (current versions).
+    The gate must NOT regress the free working path to a forced reroute."""
+    monkeypatch.chdir(tmp_path)
+    _patch_setup_env(monkeypatch, claude=True, codex=True)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setattr("prd_taskmaster.mode_recommend._probe_spawn", lambda provider: True)
+    _seed_taskmaster_config(tmp_path, {
+        "main": {"provider": "claude-code", "modelId": "sonnet"},
+        "research": {"provider": "perplexity", "modelId": "sonar"},
+        "fallback": {"provider": "claude-code", "modelId": "sonnet"},
+    })
+
+    result = validate_setup()
+
+    main_check = next(c for c in result["checks"] if c["id"] == "provider_main")
+    assert main_check["passed"] is True
+    assert result["ready"] is True
