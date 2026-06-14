@@ -25,19 +25,18 @@ Declarative phase skill. Invoked by the prd-taskmaster orchestrator when
 
 ## Entry gate
 
-1. Call `mcp__plugin_prd_go__check_gate(phase="SETUP", evidence={})`.
-   If the call returns `{gate_passed: false, violations: [...]}`, report the
-   violations and stop. The gate protects against re-entering a completed
-   phase or skipping ahead.
+1. Call `mcp__plugin_prd_go__check_gate(phase="SETUP", evidence={})` for diagnostics.
 
-   **Known issue (Mum dogfood feedback [4]):** check_gate semantics are
-   structurally an EXIT gate (verifies evidence sufficient to advance) but
-   wired here as an ENTRY gate. On first entry, evidence=`{}` will fail
-   the SETUP gate's `validate_setup.ready=true` requirement (which Step 4
-   below produces). State machine LEGAL_TRANSITIONS (`None: ["SETUP"]`)
-   already prevents illegal entry — proceed past this gate on first entry
-   and rely on the exit gate for evidence verification. Semantic fix in
-   flight (see morning brief).
+   `check_gate` is an EXIT gate: it verifies you have the evidence to *advance*, not to
+   *enter*. On first entry you have no evidence yet (Step 4 below produces
+   `validate_setup.ready=true`), so a `gate_passed: false` result here is EXPECTED — the
+   state machine's legal transitions (`None → SETUP`) already guarantee only legal entry.
+
+   - **First entry** (no evidence yet): note the result and continue with the Procedure.
+   - **Re-entry**: if the gate reports violations, report them and stop — it protects
+     against re-running a completed phase or skipping ahead.
+
+   Enforce the gate when you ADVANCE (after the procedure), not on entry.
 
 ## Procedure (5 steps, abort on hard failure)
 

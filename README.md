@@ -83,7 +83,7 @@ npm install -g task-master-ai
 Open any project in Claude Code and type:
 
 ```
-/atlas      (or /prd:go, or just say: "I want to build …")
+/prd:atlas      (or /prd:go, or just say: "I want to build …")
 ```
 
 Requires Python 3.11+ and Linux / macOS / WSL. The free engine needs **no paid API key** — it

@@ -31,18 +31,17 @@ skill.**
 
 ## Entry gate
 
-1. Call `mcp__plugin_prd_go__check_gate(phase="DISCOVER", evidence={})`.
-   If the call returns `{gate_passed: false, violations: [...]}`, report the
-   violations and stop. The gate protects against re-entering a completed
-   phase or skipping ahead from SETUP.
+1. Call `mcp__plugin_prd_go__check_gate(phase="DISCOVER", evidence={})` for diagnostics.
 
-   **Known issue (Mum dogfood feedback [4]):** check_gate is structurally
-   an EXIT gate. On first DISCOVER entry, evidence=`{}` will fail the
-   `user_approved=true OR auto_classification=CLEAR with assumptions_documented`
-   requirement (which the User Approval Gate / Self-Approval Gate below
-   produces). State machine LEGAL_TRANSITIONS already prevents illegal
-   entry — proceed past this gate on first entry. Semantic fix in flight
-   (see morning brief).
+   `check_gate` is an EXIT gate: it verifies the evidence to *advance*, not to *enter*.
+   On first DISCOVER entry you have no evidence yet (the User Approval / Self-Approval
+   Gate below produces `user_approved=true` OR `auto_classification=CLEAR with
+   assumptions_documented`), so a `gate_passed: false` here is EXPECTED — the state
+   machine's legal transitions already guarantee only legal entry.
+
+   - **First entry** (no evidence yet): note the result and continue with the Procedure.
+   - **Re-entry**: if the gate reports violations, report them and stop — it protects
+     against re-running a completed phase or skipping ahead from SETUP.
 2. Detect execution context. If any of the following signals are present,
    switch to Autonomous Mode:
    - `.claude/ralph-loop.local.md` exists in the project root

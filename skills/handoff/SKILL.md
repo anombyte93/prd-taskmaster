@@ -33,16 +33,16 @@ structured choice, dispatch the chosen mode. Mode D executes only on tier=premiu
 
 ## Entry gate
 
-1. Call `mcp__plugin_prd_go__check_gate(phase="HANDOFF", evidence={})`.
-   If the call returns `{gate_passed: false, violations: [...]}`, report the
-   violations and stop. The gate protects against re-entering a completed
-   phase or skipping ahead from GENERATE.
+1. Call `mcp__plugin_prd_go__check_gate(phase="HANDOFF", evidence={})` for diagnostics.
 
-   **Known issue (Mum dogfood feedback [4]/[10]):** check_gate(HANDOFF)
-   requires `user_mode_choice` and `plan_file_exists` — both produced by
-   HANDOFF itself. On first entry, evidence=`{}` will fail. State machine
-   LEGAL_TRANSITIONS already prevents illegal entry — proceed past this
-   gate on first entry. Semantic fix in flight (see morning brief).
+   `check_gate` is an EXIT gate: it requires `user_mode_choice` and `plan_file_exists` —
+   both produced by HANDOFF itself, i.e. evidence to *advance*, not to *enter*. On first
+   entry neither exists yet, so a `gate_passed: false` here is EXPECTED — the state
+   machine's legal transitions already guarantee only legal entry.
+
+   - **First entry** (no evidence yet): note the result and continue with the Procedure.
+   - **Re-entry**: if the gate reports violations, report them and stop — it protects
+     against re-running a completed phase or skipping ahead from GENERATE.
 2. Read the GENERATE outputs — `.taskmaster/docs/prd.md`, `.taskmaster/tasks/tasks.json`,
    `.taskmaster/reports/task-complexity-report.json`. If any are missing,
    report and stop. The gate should have caught this, but belt-and-braces.
