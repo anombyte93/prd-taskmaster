@@ -267,3 +267,46 @@ def test_validate_setup_passes_when_nested_claude_code_spawn_probe_succeeds(tmp_
     main_check = next(c for c in result["checks"] if c["id"] == "provider_main")
     assert main_check["passed"] is True
     assert result["ready"] is True
+
+
+# ── #13: preflight flags a stale (all-done) tag + suggests a fresh one ───────
+
+def test_preflight_flags_stale_tag_and_suggests_fresh(tmp_path, monkeypatch):
+    """A non-empty but fully-done current tag is 'stale': parsing a new PRD into it
+    would pollute the old graph. preflight must flag it and suggest a fresh tag."""
+    from prd_taskmaster.pipeline import preflight
+
+    monkeypatch.chdir(tmp_path)
+    tm = tmp_path / ".taskmaster"
+    (tm / "docs").mkdir(parents=True)
+    (tm / "tasks").mkdir(parents=True)
+    (tm / "docs" / "prd.md").write_text("# New PRD\n")
+    (tm / "state.json").write_text('{"currentTag":"master"}')
+    (tm / "tasks" / "tasks.json").write_text(
+        '{"master":{"tasks":[{"id":1,"title":"old","status":"done"}]}}'
+    )
+
+    result = preflight()
+
+    assert result["current_tag_stale"] is True
+    assert result["suggested_fresh_tag"]
+    assert result["suggested_fresh_tag"] != "master"
+
+
+def test_preflight_not_stale_when_pending_work_remains(tmp_path, monkeypatch):
+    from prd_taskmaster.pipeline import preflight
+
+    monkeypatch.chdir(tmp_path)
+    tm = tmp_path / ".taskmaster"
+    (tm / "docs").mkdir(parents=True)
+    (tm / "tasks").mkdir(parents=True)
+    (tm / "docs" / "prd.md").write_text("# PRD\n")
+    (tm / "state.json").write_text('{"currentTag":"master"}')
+    (tm / "tasks" / "tasks.json").write_text(
+        '{"master":{"tasks":[{"id":1,"title":"todo","status":"pending"}]}}'
+    )
+
+    result = preflight()
+
+    assert result["current_tag_stale"] is False
+    assert result["suggested_fresh_tag"] is None
