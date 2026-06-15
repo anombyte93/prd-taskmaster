@@ -456,7 +456,8 @@ class NativeBackend(Backend):
         except Exception as exc:
             return {"ok": False, "error": str(exc), "backend": "native"}
 
-        if not llm_client.discover_key():
+        handle = resolve_provider("main")
+        if handle.kind == "plan":
             return {
                 "ok": False,
                 "tag": resolved,
@@ -472,7 +473,7 @@ class NativeBackend(Backend):
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = [
-                executor.submit(self._expand_packet, packet, profile, research)
+                executor.submit(self._expand_packet, packet, profile, research, handle, config)
                 for packet in packets
             ]
             for future in as_completed(futures):
@@ -504,10 +505,12 @@ class NativeBackend(Backend):
             "failed": failed,
             "results": outcomes,
             "backend": "native",
-            "ai": "api",
+            "ai": handle.kind,
         }
 
-    def _expand_packet(self, packet: dict, profile: dict, research: bool) -> dict:
+    def _expand_packet(
+        self, packet: dict, profile: dict, research: bool, handle: Any, config: dict | None = None
+    ) -> dict:
         task_id = packet.get("id")
         start_tier = profile.get("structured_gen_start", "standard")
         prompt = packet.get("prompt", "")
@@ -517,6 +520,29 @@ class NativeBackend(Backend):
             "You are the prd-taskmaster native backend expansion engine. Return "
             "one strict JSON result object for parallel.apply_results."
         )
+
+        if handle.kind == "cli":
+            try:
+                result = cli_agent.generate_json_via_cli(
+                    handle.provider,
+                    prompt,
+                    system=system,
+                    schema_hint=PARALLEL_RESULT_SCHEMA_HINT,
+                    model=handle.model,
+                    op_class="structured_gen",
+                    task_id=task_id,
+                    timeout=_cli_timeout(config),
+                    structured_json=_cli_structured_mode(config),
+                )
+            except cli_agent.CliAgentError as exc:
+                return {
+                    "ok": False,
+                    "task_id": task_id,
+                    "error": str(exc),
+                    "kind": exc.kind,
+                    "escalated": False,
+                }
+            return self._packet_success(packet, result, escalated=False)
 
         try:
             result = llm_client.generate_json(

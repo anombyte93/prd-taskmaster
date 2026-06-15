@@ -412,3 +412,112 @@ def test_parse_prd_cli_agent_error_falls_back_to_plan(tmp_path, monkeypatch):
     assert result["ok"] is False
     # CLI failure must demote to the plan floor, not hard-error.
     assert result["agent_action_required"]["op"] == "parse_prd"
+
+
+def test_expand_cli_kind_drives_cli_agent_and_produces_graph(tmp_path, monkeypatch):
+    from prd_taskmaster import backend as backend_mod
+    from prd_taskmaster.backend import NativeBackend
+
+    monkeypatch.chdir(tmp_path)
+    tasks_path = _seed_project(tmp_path, [_pending_task()])
+    monkeypatch.setattr(
+        backend_mod, "resolve_provider", lambda role, *a, **k: _stub_handle("cli", "claude-code", role)
+    )
+    monkeypatch.setattr(
+        llm_client, "generate_json", lambda *a, **k: pytest.fail("api path taken on cli kind")
+    )
+
+    cli_calls = []
+
+    def fake_cli(provider, prompt, **kwargs):
+        cli_calls.append({"provider": provider, **kwargs})
+        return {
+            "id": 1,
+            "complexityScore": 8,
+            "recommendedSubtasks": 2,
+            "reasoning": "Needs careful backend integration.",
+            "researchNotes": "Reuse parallel.apply_results for the merge.",
+            "subtasks": [
+                {"title": "Write expansion test", "description": "Cover merge.",
+                 "details": "Assert once.", "dependencies": []},
+                {"title": "Implement expansion", "description": "Apply packet.",
+                 "details": "CLI path.", "dependencies": [1]},
+            ],
+        }
+
+    monkeypatch.setattr(backend_mod.cli_agent, "generate_json_via_cli", fake_cli)
+
+    result = NativeBackend().expand(tag="master")
+
+    assert result["ok"] is True
+    assert result["applied"] == [1]
+    assert result["failed"] == []
+    assert result["ai"] == "cli"
+    assert len(cli_calls) == 1
+    assert cli_calls[0]["provider"] == "claude-code"
+    merged = json.loads(tasks_path.read_text())
+    titles = [s["title"] for s in merged["master"]["tasks"][0]["subtasks"]]
+    assert titles == ["Write expansion test", "Implement expansion"]
+
+
+def test_expand_plan_kind_returns_agent_action_required(tmp_path, monkeypatch):
+    from prd_taskmaster import backend as backend_mod
+    from prd_taskmaster.backend import NativeBackend
+
+    monkeypatch.chdir(tmp_path)
+    _seed_project(tmp_path, [_pending_task()])
+    monkeypatch.setattr(
+        backend_mod, "resolve_provider", lambda role, *a, **k: _stub_handle("plan", role=role)
+    )
+    monkeypatch.setattr(
+        backend_mod.cli_agent,
+        "generate_json_via_cli",
+        lambda *a, **k: pytest.fail("cli path taken on plan kind"),
+    )
+
+    result = NativeBackend().expand(tag="master")
+
+    assert result["ok"] is False
+    assert result["agent_action_required"]["op"] == "expand"
+    assert result["agent_action_required"]["packets"]
+
+
+def test_expand_cli_kind_fans_out_in_parallel(tmp_path, monkeypatch):
+    """Three packets must be in flight concurrently on the cli path."""
+    import threading
+    from prd_taskmaster import backend as backend_mod
+    from prd_taskmaster.backend import NativeBackend
+
+    monkeypatch.chdir(tmp_path)
+    _seed_project(tmp_path, [_pending_task(1), _pending_task(2), _pending_task(3)])
+    monkeypatch.setattr(
+        backend_mod, "resolve_provider", lambda role, *a, **k: _stub_handle("cli", "claude-code", role)
+    )
+    # Force >=3 workers regardless of profile defaults.
+    monkeypatch.setattr(backend_mod, "_native_concurrency", lambda n, c, p: max(n, 3))
+
+    barrier = threading.Barrier(3, timeout=5)
+
+    def fake_cli(provider, prompt, **kwargs):
+        # If fan-out were serial, the 2nd/3rd never arrive and this times out.
+        barrier.wait()
+        tid = kwargs["task_id"]
+        return {
+            "id": tid,
+            "complexityScore": 5,
+            "recommendedSubtasks": 2,
+            "reasoning": "parallel proof",
+            "researchNotes": "n/a",
+            "subtasks": [
+                {"title": "a", "description": "x", "details": "y", "dependencies": []},
+                {"title": "b", "description": "x", "details": "y", "dependencies": [1]},
+            ],
+        }
+
+    monkeypatch.setattr(backend_mod.cli_agent, "generate_json_via_cli", fake_cli)
+
+    result = NativeBackend().expand(tag="master")
+
+    assert result["ok"] is True
+    assert sorted(result["applied"]) == [1, 2, 3]
+    assert result["ai"] == "cli"
