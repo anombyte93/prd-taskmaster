@@ -92,3 +92,28 @@ test("CLI: no-token path exits non-zero with a FAIL message and does not hang", 
   // Prove it exited BEFORE any whoami network probe.
   assert.doesNotMatch(out, /authenticated to npm registry/, "must not have reached whoami");
 });
+
+test("CLI: still runs main() (fail-closed) when the script path contains spaces (I1 regression)", () => {
+  // A naive `file://${argv[1]}` entry guard silently SKIPS main() when the path
+  // has spaces (percent-encoding mismatch) — which would let a publish proceed
+  // with NO auth check. pathToFileURL() fixes it. Prove main() still fires here.
+  const spacesDir = fs.mkdtempSync(path.join(os.tmpdir(), "npm auth spaces-"));
+  const copied = path.join(spacesDir, "check-npm-auth.mjs");
+  fs.copyFileSync(SCRIPT, copied);
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "npmauth-home-"));
+  fs.writeFileSync(path.join(tmpHome, ".npmrc"), "", "utf8");
+
+  const env = { ...process.env };
+  delete env.NPM_TOKEN;
+  delete env.NODE_AUTH_TOKEN;
+  env.HOME = tmpHome;
+  env.USERPROFILE = tmpHome;
+
+  const res = spawnSync(process.execPath, [copied], { env, encoding: "utf8", timeout: 20000 });
+
+  fs.rmSync(spacesDir, { recursive: true, force: true });
+  fs.rmSync(tmpHome, { recursive: true, force: true });
+
+  assert.equal(res.status, 1, "main() must run (exit 1) even from a path containing spaces");
+  assert.match(`${res.stdout}\n${res.stderr}`, /FAIL/);
+});
