@@ -12,10 +12,12 @@ Contract differences from the plugin's 14-check validate_prd:
 - missing file raises CommandError instead of returning {"ok": False}
 """
 
+import json
+
 import pytest
 
 from prd_taskmaster.lib import CommandError
-from prd_taskmaster.validation import run_validate_prd
+from prd_taskmaster.validation import run_validate_prd, run_validate_tasks
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -505,3 +507,177 @@ class TestWarningsAreLocated:
         assert out["placeholder_details"], "expected a placeholder finding"
         for pd in out["placeholder_details"]:
             assert "match" in pd and isinstance(pd.get("line"), int) and pd["line"] >= 1
+
+
+# ─── Helpers for run_validate_tasks tests ─────────────────────────────────────
+
+def _make_tasks_file(tmp_path, tasks: list) -> str:
+    """Write a tasks.json and return the path string."""
+    p = tmp_path / "tasks.json"
+    p.write_text(json.dumps({"tasks": tasks}))
+    return str(p)
+
+
+def _good_task(**overrides) -> dict:
+    """Return a minimal valid task, optionally overriding fields."""
+    base = {
+        "id": 1,
+        "title": "Implement user authentication flow",
+        "description": "Add JWT-based authentication to the REST API endpoints.",
+        "details": "Use PyJWT library, store tokens in Redis with 24h TTL.",
+        "testStrategy": "Write unit tests for token creation and expiry.",
+        "status": "pending",
+        "priority": "high",
+        "dependencies": [],
+    }
+    base.update(overrides)
+    return base
+
+
+# ─── Regression tests for angle-bracket false-positive (Bug: IGNORECASE) ─────
+
+def _validate_tasks_problems(path: str) -> list[str]:
+    """Run run_validate_tasks and return the list of problem strings.
+
+    run_validate_tasks raises CommandError when problems are found; that error
+    carries the list in e.extra["problems"].  When the file is valid it returns
+    {"ok": True, ...} with no problems key.
+    """
+    from prd_taskmaster.lib import CommandError as _CE
+    try:
+        run_validate_tasks(path, allow_empty_subtasks=True, require_phase_config=False)
+        return []
+    except _CE as exc:
+        return exc.extra.get("problems", [])
+
+
+class TestAngleBracketPlaceholderRegex:
+    """Regression suite for the IGNORECASE false-positive in the angle-bracket
+    placeholder sub-pattern (<[A-Z][A-Z_ ]+> compiled with re.IGNORECASE).
+
+    Technical tokens like <code>, <lines>, <bytes>, <filename> are LEGITIMATE
+    in task titles / descriptions (URL path params, wc output format) and must
+    NOT be treated as placeholders.
+
+    True template placeholders like <PLACEHOLDER>, <API_KEY>, <YOUR_VALUE>
+    MUST still be caught.
+    """
+
+    # ── MUST NOT flag (legitimate technical tokens) ────────────────────────
+
+    def test_url_path_param_code_in_title_not_flagged(self, tmp_path):
+        """GET /<code> in a task title must not trigger placeholder detection."""
+        task = _good_task(title="Implement GET /<code> Redirect Endpoint")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"<code> in title was falsely flagged as placeholder: {placeholder_probs}"
+        )
+
+    def test_wc_format_tokens_in_details_not_flagged(self, tmp_path):
+        """<lines> <words> <bytes> <filename> in details must not be flagged."""
+        task = _good_task(
+            details="The wc command output format is: <lines> <words> <bytes> <filename>"
+        )
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"wc format tokens were falsely flagged: {placeholder_probs}"
+        )
+
+    def test_lowercase_angle_token_code_not_flagged(self, tmp_path):
+        """Standalone <code> token must not be flagged."""
+        task = _good_task(description="Returns HTTP <code> on success.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"<code> in description was falsely flagged: {placeholder_probs}"
+        )
+
+    def test_lowercase_angle_token_id_not_flagged(self, tmp_path):
+        """<id> in a task field must not be flagged."""
+        task = _good_task(description="Fetch resource by <id> from the store.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"<id> in description was falsely flagged: {placeholder_probs}"
+        )
+
+    def test_lowercase_angle_token_file_not_flagged(self, tmp_path):
+        """<file> in a task field must not be flagged."""
+        task = _good_task(testStrategy="Run: process <file> and assert exit code is 0.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"<file> in testStrategy was falsely flagged: {placeholder_probs}"
+        )
+
+    # ── MUST still flag (real template placeholders) ───────────────────────
+
+    def test_uppercase_placeholder_flagged(self, tmp_path):
+        """<PLACEHOLDER> must be caught as a placeholder."""
+        task = _good_task(title="Set up <PLACEHOLDER> integration")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "<PLACEHOLDER> was not caught as a placeholder"
+
+    def test_uppercase_api_key_flagged(self, tmp_path):
+        """<API_KEY> must be caught as a placeholder."""
+        task = _good_task(details="Set the env var to <API_KEY> before deploying.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "<API_KEY> was not caught as a placeholder"
+
+    def test_uppercase_your_value_flagged(self, tmp_path):
+        """<YOUR_VALUE> must be caught as a placeholder."""
+        task = _good_task(testStrategy="Replace <YOUR_VALUE> with the real token.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "<YOUR_VALUE> was not caught as a placeholder"
+
+    def test_mustache_placeholder_flagged(self, tmp_path):
+        """{{variable}} mustache tokens must still be caught."""
+        task = _good_task(description="Connect to {{database_url}} endpoint.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "{{variable}} was not caught as a placeholder"
+
+    def test_bracketed_todo_placeholder_flagged(self, tmp_path):
+        """[TODO] token in a task field must still be caught."""
+        task = _good_task(description="[TODO] fill in the implementation details.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "[TODO] was not caught as a placeholder"
+
+    def test_bracketed_tbd_placeholder_flagged(self, tmp_path):
+        """[TBD] token in a task field must still be caught."""
+        task = _good_task(title="Integrate auth [TBD]")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "[TBD] was not caught as a placeholder"
+
+    def test_insert_placeholder_flagged(self, tmp_path):
+        """[INSERT something] token in a task field must still be caught."""
+        task = _good_task(details="Contact [INSERT team name] for review.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "[INSERT ...] was not caught as a placeholder"
+
+    # ── PRD-level: validate_prd must also not false-flag lowercase tokens ──
+
+    def test_prd_lowercase_angle_tokens_not_flagged(self, tmp_project):
+        """run_validate_prd must not false-flag <code>, <lines> etc. in PRD text."""
+        prd = tmp_project / ".taskmaster" / "docs" / "prd.md"
+        prd.write_text(
+            "# PRD\n\n## Executive Summary\nA summary.\n\n"
+            "## Functional Requirements\n"
+            "### API Endpoints\n"
+            "- `GET /<code>` — redirect by short code\n"
+            "- wc output: `<lines> <words> <bytes> <filename>`\n"
+        )
+        out = run_validate_prd(str(prd))
+        angle_bracket_details = [d for d in out.get("placeholder_details", [])
+                                  if d.get("type") == "angle_bracket"]
+        assert angle_bracket_details == [], (
+            f"PRD false-flagged angle-bracket tokens: {angle_bracket_details}"
+        )

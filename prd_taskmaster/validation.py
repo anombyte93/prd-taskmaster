@@ -19,6 +19,19 @@ from prd_taskmaster.lib import (
     _resolve_tasks_payload,
 )
 
+# Angle-bracket placeholder sub-pattern: matches only TRUE placeholders like
+# <PLACEHOLDER>, <API_KEY>, <YOUR_VALUE> — NOT lowercase/technical tokens like
+# <code>, <id>, <lines>, <bytes>, <filename>.
+#
+# Rules:
+#   • First char MUST be uppercase ASCII letter [A-Z] (no re.IGNORECASE)
+#   • Remaining chars MUST be uppercase letters, digits, or underscores
+#   • Minimum total length inside brackets: 3 chars  (e.g. <KEY> matches, <AB> doesn't)
+#
+# This intentionally excludes common HTTP/CLI/doc tokens (`<code>`, `<file>`,
+# etc.) which are legitimate in task descriptions and PRD body text.
+_ANGLE_BRACKET_PLACEHOLDER = r'<[A-Z][A-Z0-9_]{2,}>'
+
 
 def run_validate_prd(input_path: str) -> dict:
     """Run 13 quality checks on a PRD file."""
@@ -222,7 +235,7 @@ def run_validate_prd(input_path: str) -> dict:
         (r'\[TBD\]', 'tbd'),                       # [TBD]
         (r'\[TODO\]', 'todo'),                      # [TODO]
         (r'\[INSERT .+?\]', 'insert'),              # [INSERT something]
-        (r'<[A-Z][A-Z_ ]+>', 'angle_bracket'),      # <PLACEHOLDER>
+        (_ANGLE_BRACKET_PLACEHOLDER, 'angle_bracket'),  # <PLACEHOLDER>, <API_KEY>
         (r'\[(?:Name|Date|Feature|Product|YYYY)\]', 'bracket'),  # [Name], [Date], etc.
         (r'\bTBD\b', 'bare_tbd'),                   # bare TBD (case-sensitive)
         (r'\bTODO\b', 'bare_todo'),                 # bare TODO (case-sensitive)
@@ -363,8 +376,7 @@ def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, requi
     ids = []
 
     placeholder_re = re.compile(
-        r'(\{\{[^}]+\}\}|\[TBD\]|\[TODO\]|\[INSERT .+?\]|<[A-Z][A-Z_ ]+>|\[(?:Name|Date|Feature|Product|YYYY)\])',
-        re.IGNORECASE,
+        r'(\{\{[^}]+\}\}|\[TBD\]|\[TODO\]|\[INSERT .+?\]|' + _ANGLE_BRACKET_PLACEHOLDER + r'|\[(?:Name|Date|Feature|Product|YYYY)\])',
     )
     generic_re = re.compile(
         r'^\s*(implement|build|create|add|fix)\s+(feature|functionality|task|thing|stuff)\s*$',
