@@ -53,19 +53,23 @@ def test_engine_preflight_never_mutates_without_project(tmp_path, monkeypatch):
     assert list(tmp_path.iterdir()) == []
 
 
-def test_engine_preflight_reports_auto_taskmaster_backend(tmp_path, monkeypatch):
+def test_engine_preflight_reports_auto_native_even_with_taskmaster_binary(tmp_path, monkeypatch):
+    # flipped: spec §9.2 — auto is always native, even with the task-master binary
+    # present. The binary is still DETECTED (reported available), but it is no
+    # longer SELECTED; native is the sole generator.
     _clean_env(monkeypatch, tmp_path, with_binary=True)
 
     result = run_engine_preflight()
 
-    assert result["backend"]["selected"] == "taskmaster"
+    assert result["backend"]["selected"] == "native"
     assert result["backend"]["source"] == "auto"
+    # the binary is still on PATH and detected, just not selected
     assert result["backend"]["taskmaster"]["available"] is True
     assert result["backend"]["taskmaster"]["version"] == "0.43.1"
     assert result["backend"]["taskmaster"]["min_ok"] is True
     assert result["backend"]["native"]["agent_fallback"] is True
-    assert result["backend"]["ai_ops"] == "taskmaster-api"
-    assert "Backend: taskmaster v0.43.1 (auto)" in result["summary"]
+    assert result["backend"]["ai_ops"] == "agent"
+    assert "Backend: native (agent-driven)" in result["summary"]
 
 
 def test_engine_preflight_reports_auto_native_agent_backend(tmp_path, monkeypatch):
