@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """FastMCP server for prd-taskmaster.
 
-Registers 29 tools wrapping the sibling modules (pipeline, capabilities,
+Registers 31 tools wrapping the sibling modules (pipeline, capabilities,
 taskmaster, backend, validation, templates) plus server-native helpers
 (calc_tasks, backup_prd, append_workflow, debrief, log_progress,
 gen_test_tasks, read_state, gen_scripts, compute_fleet_waves, context_pack,
-feedback).
+feedback, suggestion).
 
 No explicit process termination — mcp.run() is the event loop and
 returns naturally when the transport closes.
@@ -33,6 +33,7 @@ from prd_taskmaster import batch as B
 from prd_taskmaster import task_state as TS
 from prd_taskmaster import cli as CLI
 from prd_taskmaster import feedback as FB
+from prd_taskmaster import suggestions as SG
 from prd_taskmaster.context_pack import build_context_pack
 
 _mcp = FastMCP("prd-taskmaster")
@@ -405,6 +406,37 @@ def feedback_submit(
 def feedback_report() -> dict:
     """Summarize .atlas-ai/feedback.jsonl."""
     return FB.summarize_feedback()
+
+
+@mcp.tool()
+def suggestion(
+    text: str,
+    context: str = "",
+    source_repo: str = "",
+    session: str = "",
+    agent: str = "",
+) -> dict:
+    """Capture a free-text improvement suggestion about using the Atlas engine.
+
+    Appends a row to the suggestions log (``.atlas-ai/suggestions.jsonl`` by
+    default, or ``ATLAS_SUGGESTIONS_PATH`` if set — point it at a shared file to
+    unify with the launcher's suggestion log). For dogfooding pain points,
+    missing tools, and rough edges so they are durably recorded, not lost in a
+    transcript. Use ``feedback_submit`` instead for structured 1-5 ratings.
+    """
+    return SG.append_suggestion({
+        "text": text,
+        "context": context,
+        "source_repo": source_repo,
+        "session": session,
+        "agent": agent,
+    })
+
+
+@mcp.tool()
+def suggestion_report() -> dict:
+    """Summarize the suggestions log (counts, by-repo, last 5)."""
+    return SG.summarize_suggestions()
 
 
 @mcp.tool()

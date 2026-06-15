@@ -1,4 +1,4 @@
-"""MCP tool contract tests — the merged server.py registers 30 tools.
+"""MCP tool contract tests — the merged server.py registers 31 tools.
 
 Retargeted from the plugin: server.py now imports from prd_taskmaster.* and
 lives at mcp-server/server.py. We add the repo root (so `prd_taskmaster` is
@@ -244,11 +244,12 @@ def test_context_pack_tool_returns_core_pack(tmp_path):
     }
 
 
-def test_server_registers_29_tools():
-    """Verify server.py declares all 29 expected tool functions at module scope.
+def test_server_registers_31_tools():
+    """Verify server.py declares all 31 expected tool functions at module scope.
 
     The task-master backend was removed (spec §9.4): the init_taskmaster,
     tm_parallel_expand, and backend_detect MCP tools were deleted (32 -> 29).
+    The suggestion + suggestion_report tools were then added (29 -> 31).
     """
     import server as S
     expected = {
@@ -269,8 +270,10 @@ def test_server_registers_29_tools():
         "context_pack",
         "feedback_submit",
         "feedback_report",
+        "suggestion",
+        "suggestion_report",
     }
-    assert len(expected) == 29
+    assert len(expected) == 31
     public_attrs = {name for name in dir(S) if not name.startswith("_")}
     missing = expected - public_attrs
     assert not missing, f"missing tools: {sorted(missing)}"
