@@ -100,6 +100,44 @@ def _validate(mode: str | None) -> dict:
     return validate_setup(provider_mode=mode)
 
 
+def _live_probe(provider: str) -> dict:
+    """One-token liveness probe for a chosen provider. Surfaces a real
+    401/ENOENT BEFORE the pipeline. Spawning CLIs only; API/proxy providers
+    are validated by validate_setup's credential checks, so they pass here."""
+    cmd = _PROBE_CMD.get(provider)
+    if not cmd:
+        return {"provider": provider, "ok": True, "skipped": "no live probe for this provider"}
+    binary = shutil.which(cmd[0])
+    if not binary:
+        return {"provider": provider, "ok": False, "error": f"{cmd[0]} not found in PATH"}
+    probe = [binary, *cmd[1:]]
+    try:
+        proc = subprocess.run(probe, capture_output=True, text=True, timeout=_PROBE_TIMEOUT)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return {"provider": provider, "ok": False, "error": f"probe failed: {exc}"}
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip().splitlines()
+        return {"provider": provider, "ok": False, "error": err[-1] if err else f"exit {proc.returncode}"}
+    return {"provider": provider, "ok": True}
+
+
+def _run_validate_step(recommendation: dict, mode: str | None) -> dict:
+    """validate_setup (credential-aware checks) PLUS a live one-token probe per
+    chosen provider. A failed live probe demotes `ready` to False — that is the
+    'surfaces a real 401 before the pipeline' differentiator."""
+    base = _validate(mode)
+    probed = set()
+    live_probes = []
+    for role in ("main", "fallback", "research"):
+        provider = recommendation.get(role, {}).get("provider", "")
+        if provider in _PROBE_CMD and provider not in probed:
+            probed.add(provider)
+            live_probes.append(_live_probe(provider))
+    live_ok = all(p["ok"] for p in live_probes)
+    ready = bool(base.get("ready")) and live_ok
+    return {**base, "ready": ready, "live_probes": live_probes}
+
+
 def run_setup(accept_default: bool = False, validate_only: bool = False) -> dict:
     """Drive the wizard. Returns a dict; never exits, never raises on the
     happy path. Non-interactive when accept_default or validate_only is set."""
@@ -114,5 +152,20 @@ def run_setup(accept_default: bool = False, validate_only: bool = False) -> dict
         "recommendation": recommendation,
         "tier": caps.get("tier", "free"),
     }
-    # Accept / customise / add-key / validate are layered in Tasks 3–4.
+
+    mode = fleet.engine_config().get("provider_mode", "hybrid")
+
+    if validate_only:
+        result["validation"] = _run_validate_step(recommendation, mode)
+        return result
+
+    if accept_default:
+        configured = run_configure_providers()
+        result["accepted"] = True
+        result["configured"] = configured
+        result["validation"] = _run_validate_step(recommendation, mode)
+        return result
+
+    # Interactive branch is layered in Task 4 (Customise / Add-key prompts).
+    result["validation"] = _run_validate_step(recommendation, mode)
     return result
