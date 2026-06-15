@@ -321,3 +321,94 @@ def test_no_key_operations_return_agent_action_required(tmp_path, monkeypatch):
     assert rate["ok"] is False
     assert rate["agent_action_required"]["op"] == "rate"
     assert "scoring_rubric" in rate["agent_action_required"]
+
+
+def _stub_handle(kind, provider="", role="main", model=None, reason="test"):
+    from prd_taskmaster.provider_resolver import ProviderHandle
+    return ProviderHandle(kind=kind, provider=provider, role=role, model=model, reason=reason)
+
+
+def test_parse_prd_cli_kind_drives_cli_agent(tmp_path, monkeypatch):
+    from prd_taskmaster import backend as backend_mod
+    from prd_taskmaster.backend import NativeBackend, TASKS_SCHEMA_HINT
+
+    monkeypatch.chdir(tmp_path)
+    prd = tmp_path / "prd.md"
+    prd.write_text("# PRD\n\nREQ-001: Build native backend.")
+    # Even if a key existed, cli kind must win — prove the resolver, not discover_key, decides.
+    monkeypatch.setattr(llm_client, "discover_key", lambda: {"provider": "anthropic", "key": "k"})
+    monkeypatch.setattr(
+        backend_mod, "resolve_provider", lambda role, *a, **k: _stub_handle("cli", "claude-code", role)
+    )
+
+    cli_calls = []
+
+    def fake_cli(provider, prompt, **kwargs):
+        cli_calls.append({"provider": provider, "prompt": prompt, **kwargs})
+        return _valid_tasks(2)
+
+    monkeypatch.setattr(backend_mod.cli_agent, "generate_json_via_cli", fake_cli)
+    # If the api path were taken this would blow up the test.
+    monkeypatch.setattr(
+        llm_client, "generate_json", lambda *a, **k: pytest.fail("api path taken on cli kind")
+    )
+
+    result = NativeBackend().parse_prd(prd, 2, tag="native-tag")
+
+    assert result["ok"] is True
+    assert result["task_count"] == 2
+    assert result["backend"] == "native"
+    assert result["ai"] == "cli"
+    assert len(cli_calls) == 1
+    assert cli_calls[0]["provider"] == "claude-code"
+    assert cli_calls[0]["model"] is None  # plan-kind handle has model=None; contract must thread it through
+    assert cli_calls[0]["schema_hint"] == TASKS_SCHEMA_HINT
+    assert cli_calls[0]["op_class"] == "structured_gen"
+    written = json.loads((tmp_path / ".taskmaster" / "tasks" / "tasks.json").read_text())
+    assert [task["id"] for task in written["native-tag"]["tasks"]] == [1, 2]
+
+
+def test_parse_prd_plan_kind_returns_agent_action_required(tmp_path, monkeypatch):
+    from prd_taskmaster import backend as backend_mod
+    from prd_taskmaster.backend import NativeBackend, TASKS_SCHEMA_HINT
+
+    monkeypatch.chdir(tmp_path)
+    prd = tmp_path / "prd.md"
+    prd.write_text("# PRD\n")
+    monkeypatch.setattr(
+        backend_mod, "resolve_provider", lambda role, *a, **k: _stub_handle("plan", role=role)
+    )
+    monkeypatch.setattr(
+        backend_mod.cli_agent,
+        "generate_json_via_cli",
+        lambda *a, **k: pytest.fail("cli path taken on plan kind"),
+    )
+
+    result = NativeBackend().parse_prd(prd, 1, tag="master")
+
+    assert result["ok"] is False
+    assert result["agent_action_required"]["op"] == "parse_prd"
+    assert result["agent_action_required"]["schema_hint"] == TASKS_SCHEMA_HINT
+
+
+def test_parse_prd_cli_agent_error_falls_back_to_plan(tmp_path, monkeypatch):
+    from prd_taskmaster import backend as backend_mod
+    from prd_taskmaster.backend import NativeBackend
+
+    monkeypatch.chdir(tmp_path)
+    prd = tmp_path / "prd.md"
+    prd.write_text("# PRD\n")
+    monkeypatch.setattr(
+        backend_mod, "resolve_provider", lambda role, *a, **k: _stub_handle("cli", "claude-code", role)
+    )
+
+    def boom(provider, prompt, **kwargs):
+        raise backend_mod.cli_agent.CliAgentError("spawn_refused", "nested claude refused")
+
+    monkeypatch.setattr(backend_mod.cli_agent, "generate_json_via_cli", boom)
+
+    result = NativeBackend().parse_prd(prd, 1, tag="master")
+
+    assert result["ok"] is False
+    # CLI failure must demote to the plan floor, not hard-error.
+    assert result["agent_action_required"]["op"] == "parse_prd"

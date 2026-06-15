@@ -12,8 +12,9 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import prd_taskmaster
-from prd_taskmaster import fleet, llm_client, parallel, taskmaster, tm_parallel
+from prd_taskmaster import cli_agent, fleet, llm_client, parallel, taskmaster, tm_parallel
 from prd_taskmaster.economy import append_telemetry, economy_profile, shift_tier
+from prd_taskmaster.provider_resolver import resolve_provider
 from prd_taskmaster.lib import CommandError, _detect_taskmaster_method, now_iso
 from prd_taskmaster.validation import run_validate_tasks
 
@@ -301,6 +302,14 @@ def _report_candidates(tag: str | None) -> list[Path]:
     return paths
 
 
+def _cli_timeout(config: dict | None = None) -> int:
+    return int(fleet.engine_config(config)["cli_agent"]["per_call_timeout_s"])
+
+
+def _cli_structured_mode(config: dict | None = None) -> str:
+    return str(fleet.engine_config(config)["cli_agent"]["structured_json"])
+
+
 class NativeBackend(Backend):
     name = "native"
 
@@ -342,7 +351,8 @@ class NativeBackend(Backend):
         }
 
     def parse_prd(self, prd_path, num_tasks, tag=None) -> dict:
-        if not llm_client.discover_key():
+        handle = resolve_provider("main")
+        if handle.kind == "plan":
             return {
                 "ok": False,
                 "agent_action_required": _agent_parse_action(prd_path, num_tasks, tag),
@@ -369,28 +379,47 @@ class NativeBackend(Backend):
             "the Native Mode tasks.json path."
         )
 
-        try:
-            generated = llm_client.generate_json(
-                prompt,
-                system=system,
-                schema_hint=TASKS_SCHEMA_HINT,
-                tier=tier,
-                op_class="structured_gen",
-                return_telemetry_ref=True,
-            )
-        except llm_client.LLMError as exc:
-            if exc.kind == "no_key":
+        telemetry_ref = None
+        if handle.kind == "cli":
+            try:
+                candidate = cli_agent.generate_json_via_cli(
+                    handle.provider,
+                    prompt,
+                    system=system,
+                    schema_hint=TASKS_SCHEMA_HINT,
+                    model=handle.model,
+                    op_class="structured_gen",
+                    timeout=_cli_timeout(config),
+                    structured_json=_cli_structured_mode(config),
+                )
+            except cli_agent.CliAgentError:
                 return {
                     "ok": False,
                     "agent_action_required": _agent_parse_action(prd_path, num_tasks, tag),
                 }
-            return {"ok": False, "error": str(exc), "kind": exc.kind, "backend": "native"}
-
-        telemetry_ref = None
-        if isinstance(generated, tuple) and len(generated) == 2:
-            candidate, telemetry_ref = generated
+            ai_label = "cli"
         else:
-            candidate = generated
+            try:
+                generated = llm_client.generate_json(
+                    prompt,
+                    system=system,
+                    schema_hint=TASKS_SCHEMA_HINT,
+                    tier=tier,
+                    op_class="structured_gen",
+                    return_telemetry_ref=True,
+                )
+            except llm_client.LLMError as exc:
+                if exc.kind == "no_key":
+                    return {
+                        "ok": False,
+                        "agent_action_required": _agent_parse_action(prd_path, num_tasks, tag),
+                    }
+                return {"ok": False, "error": str(exc), "kind": exc.kind, "backend": "native"}
+            if isinstance(generated, tuple) and len(generated) == 2:
+                candidate, telemetry_ref = generated
+            else:
+                candidate = generated
+            ai_label = "api"
 
         try:
             tasks, validation = _validate_task_candidate(candidate)
@@ -411,7 +440,7 @@ class NativeBackend(Backend):
             "task_count": len(tasks),
             "tag": resolved,
             "backend": "native",
-            "ai": "api",
+            "ai": ai_label,
             "validation": validation,
         }
         if telemetry_ref is not None:
