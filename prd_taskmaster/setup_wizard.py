@@ -13,9 +13,11 @@ so the function is non-interactive under --yes and in tests.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from prd_taskmaster import fleet
@@ -235,10 +237,6 @@ def run_setup(accept_default: bool = False, validate_only: bool = False, choose=
         result["accepted"] = True
     result["validation"] = _run_validate_step(recommendation, mode)
     return result
-
-
-import json
-import sys
 
 
 def cmd_setup(args) -> None:

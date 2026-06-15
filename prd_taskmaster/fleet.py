@@ -158,8 +158,13 @@ def save_engine_config(updates):
     is preserved. A missing/unreadable/non-dict file is treated as empty. One
     level of nested-dict merge (matching the engine block's shape) is applied so
     a partial `{"cli_agent": {...}}` update does not clobber sibling cli_agent
-    keys. The returned block is normalized through `engine_config` (defaults +
-    validation) so callers see exactly what a fresh load would.
+    keys.
+
+    The RETURNED block is normalized via `engine_config` (defaults + validation)
+    so callers see exactly what a fresh load would return. The value written to
+    the file is the raw merged dict as supplied by the caller; it is not
+    pre-validated — callers are expected to pass already-valid values, and
+    `engine_config` corrects any malformed entries on the next read.
     """
     path = FLEET_CONFIG_PATH
     path.parent.mkdir(parents=True, exist_ok=True)

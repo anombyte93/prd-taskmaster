@@ -368,6 +368,13 @@ def detect_capabilities() -> dict:
 def validate_setup(provider_mode: str | None = None) -> dict:
     """Run all Phase 0 SETUP checks and return per-check pass/fail + fix hints.
 
+    `provider_mode` controls whether the task-master binary is a hard
+    requirement ("plan_only") or advisory. When None, it defaults to the engine
+    default ("hybrid") via `engine_config()` — which returns compiled-in
+    defaults, NOT the persisted value in fleet.json. Callers that need the
+    persisted mode must read it from `fleet.load_fleet_config()` and pass it
+    explicitly.
+
     Returns EXACTLY 6 checks (spec §5):
       binary          — task-master CLI installed
       version         — task-master version >= TASKMASTER_MIN_VERSION
