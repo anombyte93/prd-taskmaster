@@ -521,3 +521,72 @@ def test_expand_cli_kind_fans_out_in_parallel(tmp_path, monkeypatch):
     assert result["ok"] is True
     assert sorted(result["applied"]) == [1, 2, 3]
     assert result["ai"] == "cli"
+
+
+def _complexity_payload():
+    return {
+        "complexityAnalysis": [
+            {
+                "taskId": 1,
+                "taskTitle": "Task 1",
+                "complexityScore": 5,
+                "recommendedSubtasks": 3,
+                "expansionPrompt": "Expand Task 1",
+                "reasoning": "Moderate implementation work.",
+            }
+        ]
+    }
+
+
+def test_rate_cli_kind_drives_cli_agent(tmp_path, monkeypatch):
+    from prd_taskmaster import backend as backend_mod
+    from prd_taskmaster.backend import NativeBackend
+
+    monkeypatch.chdir(tmp_path)
+    _seed_project(tmp_path, [_pending_task()])
+    monkeypatch.setattr(
+        backend_mod, "resolve_provider", lambda role, *a, **k: _stub_handle("cli", "claude-code", role)
+    )
+    monkeypatch.setattr(
+        llm_client, "generate_json", lambda *a, **k: pytest.fail("api path taken on cli kind")
+    )
+
+    cli_calls = []
+
+    def fake_cli(provider, prompt, **kwargs):
+        cli_calls.append({"provider": provider, **kwargs})
+        return _complexity_payload()
+
+    monkeypatch.setattr(backend_mod.cli_agent, "generate_json_via_cli", fake_cli)
+
+    result = NativeBackend().rate(tag="master")
+
+    assert result["ok"] is True
+    assert result["ai"] == "cli"
+    assert result["complexityAnalysis"][0]["taskId"] == 1
+    assert len(cli_calls) == 1
+    assert cli_calls[0]["provider"] == "claude-code"
+    report = tmp_path / ".taskmaster" / "reports" / "task-complexity-report.json"
+    assert report.is_file()
+
+
+def test_rate_plan_kind_returns_agent_action_required(tmp_path, monkeypatch):
+    from prd_taskmaster import backend as backend_mod
+    from prd_taskmaster.backend import NativeBackend
+
+    monkeypatch.chdir(tmp_path)
+    _seed_project(tmp_path, [_pending_task()])
+    monkeypatch.setattr(
+        backend_mod, "resolve_provider", lambda role, *a, **k: _stub_handle("plan", role=role)
+    )
+    monkeypatch.setattr(
+        backend_mod.cli_agent,
+        "generate_json_via_cli",
+        lambda *a, **k: pytest.fail("cli path taken on plan kind"),
+    )
+
+    result = NativeBackend().rate(tag="master")
+
+    assert result["ok"] is False
+    assert result["agent_action_required"]["op"] == "rate"
+    assert "scoring_rubric" in result["agent_action_required"]

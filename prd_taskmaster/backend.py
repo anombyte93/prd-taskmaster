@@ -641,7 +641,8 @@ class NativeBackend(Backend):
             return {"ok": False, "error": str(exc), "backend": "native"}
 
         summaries = _task_summaries(tasks)
-        if not llm_client.discover_key():
+        handle = resolve_provider("main")
+        if handle.kind == "plan":
             return {
                 "ok": False,
                 "tag": resolved,
@@ -662,22 +663,43 @@ class NativeBackend(Backend):
             "You are the prd-taskmaster native backend complexity engine. Return "
             "strict JSON in TaskMaster complexity report format."
         )
-        try:
-            candidate = llm_client.generate_json(
-                prompt,
-                system=system,
-                schema_hint=COMPLEXITY_REPORT_SCHEMA_HINT,
-                tier=tier,
-                op_class="structured_gen",
-            )
-        except llm_client.LLMError as exc:
-            if exc.kind == "no_key":
+        if handle.kind == "cli":
+            try:
+                candidate = cli_agent.generate_json_via_cli(
+                    handle.provider,
+                    prompt,
+                    system=system,
+                    schema_hint=COMPLEXITY_REPORT_SCHEMA_HINT,
+                    model=handle.model,
+                    op_class="structured_gen",
+                    timeout=_cli_timeout(config),
+                    structured_json=_cli_structured_mode(config),
+                )
+            except cli_agent.CliAgentError:
                 return {
                     "ok": False,
                     "tag": resolved,
                     "agent_action_required": _agent_rate_action(resolved, summaries),
                 }
-            return {"ok": False, "error": str(exc), "kind": exc.kind, "backend": "native"}
+            ai_label = "cli"
+        else:
+            try:
+                candidate = llm_client.generate_json(
+                    prompt,
+                    system=system,
+                    schema_hint=COMPLEXITY_REPORT_SCHEMA_HINT,
+                    tier=tier,
+                    op_class="structured_gen",
+                )
+            except llm_client.LLMError as exc:
+                if exc.kind == "no_key":
+                    return {
+                        "ok": False,
+                        "tag": resolved,
+                        "agent_action_required": _agent_rate_action(resolved, summaries),
+                    }
+                return {"ok": False, "error": str(exc), "kind": exc.kind, "backend": "native"}
+            ai_label = "api"
 
         if isinstance(candidate, dict):
             analysis = candidate.get("complexityAnalysis")
@@ -716,7 +738,7 @@ class NativeBackend(Backend):
             "complexityAnalysis": analysis,
             "raw": report,
             "backend": "native",
-            "ai": "api",
+            "ai": ai_label,
         }
 
 
