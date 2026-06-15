@@ -184,6 +184,57 @@ def test_enrich_tasks_adds_phase_config(tmp_path):
     assert "acceptanceCriteria" in task["phaseConfig"]
 
 
+def test_enrich_tasks_honors_current_tag_over_flat_key(tmp_path):
+    """BUG2 (end-to-end via the CLI shim): with state.json currentTag set and a
+    coexisting legacy flat 'tasks' key, enrich-tasks must enrich the active
+    tag's tasks and leave the flat tasks untouched."""
+    tm = tmp_path / ".taskmaster"
+    (tm / "tasks").mkdir(parents=True)
+    (tm / "state.json").write_text(json.dumps({"currentTag": "productization"}))
+    flat = [{"id": 9, "title": "legacy", "description": "d", "priority": "high",
+             "status": "pending", "subtasks": []}]
+    prod = [{"id": i, "title": f"prod {i}", "description": "d", "priority": "high",
+             "status": "pending", "subtasks": []} for i in range(1, 4)]
+    (tm / "tasks" / "tasks.json").write_text(
+        json.dumps({"tasks": flat, "productization": {"tasks": prod}})
+    )
+
+    data = run_cli("enrich-tasks", cwd=tmp_path)
+    assert data["ok"] is True
+    assert data["tag"] == "productization"
+    assert data["total_tasks"] == 3
+
+    written = json.loads((tm / "tasks" / "tasks.json").read_text())
+    assert all("phaseConfig" in t for t in written["productization"]["tasks"])
+    assert all("phaseConfig" not in t for t in written["tasks"])  # flat untouched
+
+
+def test_validate_tasks_explicit_tag_flag(tmp_path):
+    """BUG2: the --tag flag is wired on validate-tasks and selects that tag."""
+    tm = tmp_path / ".taskmaster"
+    (tm / "tasks").mkdir(parents=True)
+    (tm / "state.json").write_text(json.dumps({"currentTag": "master"}))
+
+    def vtask(tid):
+        return {"id": tid, "title": f"t{tid}", "description": "d", "details": "dd",
+                "testStrategy": "verify", "status": "pending", "priority": "high",
+                "dependencies": [],
+                "subtasks": [{"id": 1, "title": "s", "description": "d",
+                              "status": "pending", "dependencies": []},
+                             {"id": 2, "title": "s2", "description": "d",
+                              "status": "pending", "dependencies": [1]}]}
+
+    (tm / "tasks" / "tasks.json").write_text(json.dumps({
+        "master": {"tasks": [vtask(1), vtask(2)]},
+        "productization": {"tasks": [vtask(i) for i in range(1, 6)]},
+    }))
+
+    data = run_cli("validate-tasks", "--tag", "productization", cwd=tmp_path)
+    assert data["ok"] is True
+    assert data["tag"] == "productization"
+    assert data["task_count"] == 5
+
+
 def test_backend_command_parser_entries():
     from prd_taskmaster.cli import build_parser
 

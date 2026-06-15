@@ -17,6 +17,7 @@ from prd_taskmaster.lib import (
     has_section,
     word_count,
     _resolve_tasks_payload,
+    _current_taskmaster_tag,
 )
 
 # Angle-bracket placeholder sub-pattern: matches only TRUE placeholders like
@@ -351,8 +352,18 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
         fail(e.message, **e.extra)
 
 
-def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, require_phase_config: bool) -> dict:
-    """Validate a manually-authored TaskMaster-compatible tasks.json file."""
+def run_validate_tasks(
+    input_path: str | None,
+    allow_empty_subtasks: bool,
+    require_phase_config: bool,
+    tag: str | None = None,
+) -> dict:
+    """Validate a manually-authored TaskMaster-compatible tasks.json file.
+
+    Honors the active TaskMaster tag: an explicit ``tag`` argument wins, else
+    ``state.json``'s ``currentTag``; the validated task list is resolved from
+    the tagged block so manual/native mode does not silently validate a stale
+    legacy flat ``tasks`` key (BUG2)."""
     tasks_path = Path(input_path) if input_path else TASKMASTER_TASKS / "tasks.json"
     if not tasks_path.is_file():
         raise CommandError(f"tasks.json not found: {tasks_path}")
@@ -363,7 +374,7 @@ def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, requi
     except json.JSONDecodeError as e:
         raise CommandError(f"Failed to parse {tasks_path}: {e}")
 
-    tasks, _ = _resolve_tasks_payload(raw)
+    tasks, _ = _resolve_tasks_payload(raw, tag=tag)
     if not isinstance(tasks, list):
         raise CommandError(
             "tasks.json must be a list, a flat object with a 'tasks' list, or a tagged TaskMaster object",
@@ -497,6 +508,7 @@ def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, requi
     return {
         "ok": True,
         "tasks_path": str(tasks_path),
+        "tag": tag or _current_taskmaster_tag(),
         "task_count": len(tasks),
         "subtask_count": sum(len(t.get("subtasks", []) or []) for t in tasks if isinstance(t, dict)),
         "message": "Task file is valid for manual prd-taskmaster mode",
@@ -505,6 +517,11 @@ def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, requi
 
 def cmd_validate_tasks(args: argparse.Namespace) -> None:
     try:
-        emit(run_validate_tasks(args.input, args.allow_empty_subtasks, args.require_phase_config))
+        emit(run_validate_tasks(
+            args.input,
+            args.allow_empty_subtasks,
+            args.require_phase_config,
+            tag=getattr(args, "tag", None),
+        ))
     except CommandError as e:
         fail(e.message, **e.extra)

@@ -681,3 +681,87 @@ class TestAngleBracketPlaceholderRegex:
         assert angle_bracket_details == [], (
             f"PRD false-flagged angle-bracket tokens: {angle_bracket_details}"
         )
+
+
+def _task(tid, *, subtasks=2):
+    """Build a minimally-valid manual-mode task."""
+    subs = [
+        {"id": i, "title": f"sub {i}", "description": "d", "status": "pending",
+         "dependencies": ([i - 1] if i > 1 else [])}
+        for i in range(1, subtasks + 1)
+    ]
+    return {
+        "id": tid, "title": f"task {tid}", "description": "d", "details": "dd",
+        "testStrategy": "verify X", "status": "pending", "priority": "high",
+        "dependencies": [], "subtasks": subs,
+    }
+
+
+class TestValidateTasksTagResolution:
+    """BUG2: validate-tasks must honor the active tag (explicit --tag, else
+    state.json currentTag) and NOT silently validate a coexisting stale flat
+    'tasks' key."""
+
+    def _project(self, tmp_path, current_tag, *, flat=None, tagged=None):
+        tm = tmp_path / ".taskmaster"
+        (tm / "tasks").mkdir(parents=True)
+        if current_tag is not None:
+            (tm / "state.json").write_text(json.dumps({"currentTag": current_tag}))
+        data = {}
+        if flat is not None:
+            data["tasks"] = flat
+        for tag, tasks in (tagged or {}).items():
+            data[tag] = {"tasks": tasks}
+        (tm / "tasks" / "tasks.json").write_text(json.dumps(data, indent=2))
+        return tm / "tasks" / "tasks.json"
+
+    def test_currenttag_wins_over_coexisting_flat_key(self, tmp_path, monkeypatch):
+        # flat key has 1 INVALID task (no subtasks); productization has 3 valid.
+        flat = [{"id": 9, "title": "legacy", "description": "d", "details": "dd",
+                 "testStrategy": "t", "status": "pending", "priority": "high",
+                 "dependencies": [], "subtasks": []}]
+        tagged = {"productization": [_task(i) for i in range(1, 4)]}
+        path = self._project(tmp_path, "productization", flat=flat, tagged=tagged)
+        monkeypatch.chdir(tmp_path)
+
+        out = run_validate_tasks(str(path), allow_empty_subtasks=False,
+                                 require_phase_config=False)
+        assert out["ok"] is True
+        assert out["tag"] == "productization"
+        assert out["task_count"] == 3  # the tagged block, NOT the 1 flat task
+
+    def test_explicit_tag_overrides_currenttag(self, tmp_path, monkeypatch):
+        tagged = {
+            "master": [_task(i) for i in range(1, 3)],
+            "productization": [_task(i) for i in range(1, 6)],
+        }
+        path = self._project(tmp_path, "master", tagged=tagged)
+        monkeypatch.chdir(tmp_path)
+
+        out = run_validate_tasks(str(path), allow_empty_subtasks=False,
+                                 require_phase_config=False, tag="productization")
+        assert out["ok"] is True
+        assert out["tag"] == "productization"
+        assert out["task_count"] == 5
+
+    def test_explicit_missing_tag_errors_not_silent_flat_fallback(self, tmp_path, monkeypatch):
+        flat = [_task(1)]
+        tagged = {"productization": [_task(i) for i in range(1, 3)]}
+        path = self._project(tmp_path, "productization", flat=flat, tagged=tagged)
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(CommandError) as exc:
+            run_validate_tasks(str(path), allow_empty_subtasks=False,
+                               require_phase_config=False, tag="nope")
+        assert "not found" in str(exc.value).lower()
+        assert "productization" in exc.value.extra.get("available_tags", [])
+
+    def test_flat_only_backward_compat(self, tmp_path, monkeypatch):
+        flat = [_task(i) for i in range(1, 4)]
+        path = self._project(tmp_path, None, flat=flat)
+        monkeypatch.chdir(tmp_path)
+
+        out = run_validate_tasks(str(path), allow_empty_subtasks=False,
+                                 require_phase_config=False)
+        assert out["ok"] is True
+        assert out["task_count"] == 3

@@ -251,6 +251,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Require every task to include phaseConfig metadata after enrich-tasks",
     )
+    p.add_argument(
+        "--tag",
+        default=None,
+        help="TaskMaster tag to validate (default: state.json currentTag, else flat/master)",
+    )
 
     # enrich-tasks
     p = sub.add_parser("enrich-tasks", help="Add phaseConfig metadata to tasks.json")
@@ -258,6 +263,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--input",
         default=None,
         help="Path to tasks.json (default: .taskmaster/tasks/tasks.json)",
+    )
+    p.add_argument(
+        "--tag",
+        default=None,
+        help="TaskMaster tag to enrich (default: state.json currentTag, else flat/master)",
     )
 
     # ─── parallel research bridge (agent-parallel research fan-out) ───────────

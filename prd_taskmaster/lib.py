@@ -349,20 +349,48 @@ def _current_taskmaster_tag() -> str:
     return "master"
 
 
-def _resolve_tasks_payload(raw: object) -> tuple[list | None, object]:
-    """Return the active task list and write-back wrapper for flat or tagged TaskMaster files."""
+def _resolve_tasks_payload(raw: object, tag: str | None = None) -> tuple[list | None, object]:
+    """Return the active task list and write-back wrapper for flat or tagged TaskMaster files.
+
+    Resolution order (tagged structures win over a coexisting legacy flat key):
+      1. An explicit ``tag`` argument, if that tag exists as ``raw[tag]["tasks"]``.
+      2. ``state.json``'s ``currentTag``, if that tag exists as ``raw[tag]["tasks"]``.
+      3. The legacy flat top-level ``raw["tasks"]`` list (backward-compat).
+      4. The first tagged ``{... : {"tasks": [...]}}`` block found.
+
+    The critical invariant: when a file holds BOTH a legacy flat ``tasks`` key
+    AND a tagged structure, an explicit/currentTag selection must operate on the
+    tagged block — not silently fall through to the stale flat tasks. The flat
+    key is only honored when no requested tag resolves (true legacy files).
+    """
     if isinstance(raw, list):
         return raw, {"tasks": raw}
     if not isinstance(raw, dict):
         return None, raw
-    if isinstance(raw.get("tasks"), list):
-        return raw["tasks"], raw
 
-    tag = _current_taskmaster_tag()
-    tagged = raw.get(tag)
+    # 1 + 2: a requested tag (explicit arg, else currentTag) that actually exists
+    # takes precedence over a coexisting legacy flat ``tasks`` key.
+    requested = tag if (isinstance(tag, str) and tag) else _current_taskmaster_tag()
+    tagged = raw.get(requested)
     if isinstance(tagged, dict) and isinstance(tagged.get("tasks"), list):
         return tagged["tasks"], raw
 
+    # An EXPLICIT tag that does not exist is an error, not a silent flat fallback —
+    # otherwise --tag would be a misleading no-op (the BUG2 failure mode).
+    if isinstance(tag, str) and tag:
+        raise CommandError(
+            f"requested tag {tag!r} not found in tasks.json",
+            {"available_tags": sorted(
+                k for k, v in raw.items()
+                if isinstance(v, dict) and isinstance(v.get("tasks"), list)
+            )},
+        )
+
+    # 3: legacy flat format (no tagged block matched the active tag).
+    if isinstance(raw.get("tasks"), list):
+        return raw["tasks"], raw
+
+    # 4: first tagged block as a last resort.
     for value in raw.values():
         if isinstance(value, dict) and isinstance(value.get("tasks"), list):
             return value["tasks"], raw

@@ -14,6 +14,7 @@ from prd_taskmaster.lib import (
     emit,
     fail,
     _resolve_tasks_payload,
+    _current_taskmaster_tag,
 )
 
 
@@ -225,7 +226,7 @@ def _generate_acceptance_criteria(task: dict, complexity: str) -> list:
     return criteria
 
 
-def run_enrich_tasks(input_path: str | None) -> dict:
+def run_enrich_tasks(input_path: str | None, tag: str | None = None) -> dict:
     """Enrich tasks.json with phaseConfig metadata.
 
     Classifies each task's complexity (SIMPLE/MEDIUM/COMPLEX/RESEARCH/VALIDATION),
@@ -234,6 +235,10 @@ def run_enrich_tasks(input_path: str | None) -> dict:
 
     This is intentionally a direct write — TaskMaster CLI cannot inject structured
     JSON metadata, so we own the enrichment as a post-parse step.
+
+    Honors the active TaskMaster tag (explicit ``tag`` arg, else ``state.json``
+    ``currentTag``) so the enrichment lands on the active tag's tasks rather than
+    a stale legacy flat ``tasks`` key (BUG2).
     """
     tasks_path = Path(input_path) if input_path else TASKMASTER_TASKS / "tasks.json"
     if not tasks_path.is_file():
@@ -246,7 +251,7 @@ def run_enrich_tasks(input_path: str | None) -> dict:
         raise CommandError(f"Failed to parse {tasks_path}: {e}")
 
     # Support {tasks: [...]}, tagged {"master": {"tasks": [...]}}, and bare list formats.
-    tasks, wrapper = _resolve_tasks_payload(raw)
+    tasks, wrapper = _resolve_tasks_payload(raw, tag=tag)
     if not isinstance(tasks, list):
         raise CommandError(
             "tasks.json must be a list, a flat object with a 'tasks' list, or a tagged TaskMaster object",
@@ -279,6 +284,7 @@ def run_enrich_tasks(input_path: str | None) -> dict:
     return {
         "ok": True,
         "tasks_path": str(tasks_path),
+        "tag": tag or _current_taskmaster_tag(),
         "total_tasks": len(tasks),
         "enriched": enriched_count,
         "already_enriched": len(tasks) - enriched_count,
@@ -287,6 +293,6 @@ def run_enrich_tasks(input_path: str | None) -> dict:
 
 def cmd_enrich_tasks(args: argparse.Namespace) -> None:
     try:
-        emit(run_enrich_tasks(args.input))
+        emit(run_enrich_tasks(args.input, tag=getattr(args, "tag", None)))
     except CommandError as e:
         fail(e.message, **e.extra)
