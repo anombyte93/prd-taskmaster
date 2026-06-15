@@ -6,6 +6,7 @@ import json
 import subprocess
 import tempfile
 import time
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -934,11 +935,21 @@ def get_backend(cfg=None) -> Backend:
     backend = config.get("backend", "auto") if isinstance(config, dict) else "auto"
 
     if backend == "taskmaster":
+        # Deprecated path: kept for ONE release so existing fleet.json files with
+        # an explicit "backend": "taskmaster" do not hard-break on upgrade. The
+        # TaskMaster binary + this branch are deleted in the gated migration task
+        # (spec §9.4) once golden parity is green.
+        warnings.warn(
+            "backend='taskmaster' is deprecated and will be removed in the next "
+            "release; the native engine is now the sole generator. Remove the "
+            "'backend' key from .atlas-ai/fleet.json (or set it to 'native') to "
+            "silence this warning.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return TaskMasterBackend(_FACTORY_TOKEN)
-    if backend == "native":
-        return NativeBackend()
 
-    taskmaster_backend = TaskMasterBackend(_FACTORY_TOKEN)
-    if taskmaster_backend.detect().get("available"):
-        return taskmaster_backend
+    # backend == "native" OR "auto" (the default): the native engine is the sole
+    # generator. 'auto' no longer probes for the task-master binary — it resolves
+    # to NativeBackend unconditionally (spec §9.2).
     return NativeBackend()

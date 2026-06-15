@@ -120,9 +120,10 @@ def test_backend_factory_precedence_and_auto_detection(tmp_path, monkeypatch):
     auto_fallback = get_backend({"backend": "auto"})
     assert isinstance(auto_fallback, NativeBackend)
 
+    # flipped: spec §9.2 — auto is always native, even with the task-master binary present
     _write_fake_taskmaster(tmp_path / "bin")
     auto = get_backend({"backend": "auto"})
-    assert isinstance(auto, TaskMasterBackend)
+    assert isinstance(auto, NativeBackend)
 
 
 def test_backend_detect_shape_and_version_gate(tmp_path, monkeypatch):
