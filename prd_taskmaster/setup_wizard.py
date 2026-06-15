@@ -235,3 +235,20 @@ def run_setup(accept_default: bool = False, validate_only: bool = False, choose=
         result["accepted"] = True
     result["validation"] = _run_validate_step(recommendation, mode)
     return result
+
+
+import json
+import sys
+
+
+def cmd_setup(args) -> None:
+    """CLI wrapper for `atlas setup`. Emits the result JSON; exit code mirrors
+    validation readiness (0 = ready, 1 = not ready) so CI / dispatch can gate."""
+    result = run_setup(
+        accept_default=bool(getattr(args, "yes", False)),
+        validate_only=bool(getattr(args, "validate", False)),
+    )
+    print(json.dumps(result, indent=2, default=str))
+    validation = result.get("validation") or {}
+    ready = validation.get("ready", True)
+    sys.exit(0 if result.get("ok") and ready else 1)

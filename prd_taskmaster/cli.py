@@ -9,6 +9,7 @@ from prd_taskmaster.lib import CommandError, fail
 from prd_taskmaster.preflight import cmd_preflight, cmd_detect_taskmaster
 from prd_taskmaster.providers import cmd_configure_providers, cmd_detect_providers
 from prd_taskmaster.capabilities import cmd_detect_capabilities
+from prd_taskmaster.setup_wizard import cmd_setup
 from prd_taskmaster.templates import cmd_load_template
 from prd_taskmaster.validation import cmd_validate_prd, cmd_validate_tasks
 from prd_taskmaster.tasks import cmd_calc_tasks, cmd_backup_prd, cmd_enrich_tasks
@@ -182,6 +183,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     # detect-capabilities
     sub.add_parser("detect-capabilities", help="Scan for available skills and tools")
+
+    # setup — guided provider/setup wizard (better than task-master models --setup)
+    p = sub.add_parser("setup", help="Guided provider setup wizard (detect, recommend, validate)")
+    p.add_argument("--yes", action="store_true", help="Accept the recommendation non-interactively (CI/dispatch)")
+    p.add_argument("--validate", action="store_true", help="Dry-run gate: validate_setup + a live one-token probe per provider")
 
     # load-template
     p = sub.add_parser("load-template", help="Load PRD template")
@@ -360,6 +366,7 @@ DISPATCH = {
     "configure-providers": cmd_configure_providers,
     "detect-providers": cmd_detect_providers,
     "detect-capabilities": cmd_detect_capabilities,
+    "setup": cmd_setup,
     "load-template": cmd_load_template,
     "validate-prd": cmd_validate_prd,
     "calc-tasks": cmd_calc_tasks,

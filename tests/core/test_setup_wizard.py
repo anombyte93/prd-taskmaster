@@ -186,3 +186,48 @@ def test_add_key_blank_value_is_noop(tmp_path, monkeypatch):
     assert result["ok"] is False
     assert not (tmp_path / ".env").exists() or 'ANTHROPIC_API_KEY' not in (tmp_path / ".env").read_text()
     assert result["asked_keyless"] is False
+
+
+import os
+import subprocess as _sp
+import sys
+from pathlib import Path as _Path
+
+REPO_ROOT = _Path(__file__).resolve().parents[2]
+SCRIPT = REPO_ROOT / "script.py"
+
+
+def _clean_env(tmp_path):
+    env = os.environ.copy()
+    for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "PERPLEXITY_API_KEY"):
+        env.pop(k, None)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    env["PATH"] = str(bin_dir)
+    env["HOME"] = str(tmp_path / "home")
+    return env
+
+
+def test_cli_setup_validate_runs_and_emits_json(tmp_path):
+    """`script.py setup --validate` exits cleanly and emits a validation block.
+    No claude/codex on PATH → live probes are skipped/absent, validate runs."""
+    env = _clean_env(tmp_path)
+    proc = _sp.run(
+        [sys.executable, str(SCRIPT), "setup", "--validate"],
+        capture_output=True, text=True, cwd=str(tmp_path), env=env,
+    )
+    # exit code mirrors readiness; with no project it is not ready -> exit 1.
+    assert proc.returncode in (0, 1), proc.stderr
+    payload = json.loads(proc.stdout)
+    assert "validation" in payload
+    assert "panel" in payload
+    assert isinstance(payload["panel"], list)
+
+
+def test_cli_setup_subcommand_registered():
+    """`setup` is a real subcommand (argparse help lists it)."""
+    proc = _sp.run(
+        [sys.executable, str(SCRIPT), "--help"],
+        capture_output=True, text=True, cwd=str(REPO_ROOT),
+    )
+    assert "setup" in proc.stdout
