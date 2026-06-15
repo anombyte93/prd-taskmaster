@@ -92,3 +92,65 @@ def test_key_first_demotes_to_cli_when_no_key(monkeypatch):
     _patch(monkeypatch, role_provider="claude-code", usable=True, probe=True, key=None)
     h = pr.resolve_provider("main", fleet_config=_engine(keyless_default=False))
     assert h.kind == "cli"
+
+
+def test_api_only_ignores_usable_cli(monkeypatch):
+    # CLI is usable, but api_only must use the key and never the CLI.
+    _patch(monkeypatch, role_provider="claude-code", usable=True, probe=True,
+           key={"provider": "anthropic"})
+    h = pr.resolve_provider("main", fleet_config=_engine(provider_mode="api_only"))
+    assert h.kind == "api"
+
+
+def test_api_only_with_no_key_falls_to_plan(monkeypatch):
+    # api_only + no key -> CLI tier is not allowed, so plan floor (not cli).
+    _patch(monkeypatch, role_provider="claude-code", usable=True, probe=True, key=None)
+    h = pr.resolve_provider("main", fleet_config=_engine(provider_mode="api_only"))
+    assert h.kind == "plan"
+
+
+def test_cli_only_ignores_key(monkeypatch):
+    # cli_only with a usable CLI uses it even though a key exists.
+    _patch(monkeypatch, role_provider="claude-code", usable=True, probe=True,
+           key={"provider": "anthropic"})
+    h = pr.resolve_provider("main", fleet_config=_engine(provider_mode="cli_only"))
+    assert h.kind == "cli"
+
+
+def test_cli_only_with_refused_spawn_falls_to_plan(monkeypatch):
+    # cli_only + spawn refused -> api tier not allowed, so plan floor (not api),
+    # even with a key present.
+    _patch(monkeypatch, role_provider="claude-code", usable=True, probe=False,
+           key={"provider": "anthropic"})
+    h = pr.resolve_provider("main", fleet_config=_engine(provider_mode="cli_only"))
+    assert h.kind == "plan"
+
+
+def test_spawn_refused_demotes_to_api_in_hybrid(monkeypatch):
+    # hybrid, CLI usable per config but _probe_spawn_cached refuses -> demote to
+    # the key API tier (the nested-claude gh#11 case). This is the core demote.
+    _patch(monkeypatch, role_provider="claude-code", usable=True, probe=False,
+           key={"provider": "anthropic"})
+    h = pr.resolve_provider("main", fleet_config=_engine())  # hybrid, keyless null
+    assert h.kind == "api"
+    assert h.provider == "anthropic"
+    assert "spawn" not in h.reason or h.kind == "api"  # reason reflects api tier
+
+
+def test_non_spawning_role_provider_skips_cli_tier(monkeypatch):
+    # Role provider is a raw-key provider (anthropic), not a spawning CLI. The
+    # CLI tier is skipped on provider identity; with a key it resolves to api.
+    _patch(monkeypatch, role_provider="anthropic", role_model="claude-sonnet-4-20250514",
+           usable=True, probe=True, key={"provider": "anthropic"})
+    h = pr.resolve_provider("main", fleet_config=_engine())
+    assert h.kind == "api"
+
+
+def test_unusable_cli_demotes_to_api(monkeypatch):
+    # Spawning provider in config, probe would pass, but _provider_usable is
+    # False (e.g. binary absent) -> demote to api.
+    _patch(monkeypatch, role_provider="codex-cli", usable=False, probe=True,
+           key={"provider": "anthropic"})
+    h = pr.resolve_provider("fallback", fleet_config=_engine())
+    assert h.kind == "api"
+    assert h.role == "fallback"
