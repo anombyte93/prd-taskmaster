@@ -79,12 +79,14 @@ def _provider_usable(
     has_anthropic_key: bool,
     has_openai_key: bool,
     has_perplexity_key: bool,
+    has_google_key: bool = False,
 ) -> bool:
     """Can this provider actually run a request in the current environment?
 
-    Presence of a *credential* or *CLI* — not merely a config string. Unknown
-    providers (openrouter, ollama, google, …) are assumed usable: they are
-    deliberate user choices the engine must not clobber.
+    Presence of a *credential* or *CLI* — not merely a config string. google/gemini
+    are raw-API providers gated on a Google key. Genuinely unknown providers
+    (openrouter, ollama, …) are assumed usable: deliberate user choices the engine
+    must not clobber.
     """
     p = str(provider or "").lower()
     if p == "anthropic":
@@ -97,6 +99,8 @@ def _provider_usable(
         return has_claude
     if p == "codex-cli":
         return has_codex
+    if p in ("google", "gemini"):
+        return has_google_key
     return True
 
 

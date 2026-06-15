@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 from prd_taskmaster.fleet import engine_config
-from prd_taskmaster.lib import emit_json_error
 from prd_taskmaster.providers import (
     _has_perplexity_api_key,
     _is_nested_claude,
@@ -38,15 +37,18 @@ ATLAS_FLEET_REASON = "Atlas Fleet — atlas-launcher detected (parallel multi-se
 # Private helpers
 # ---------------------------------------------------------------------------
 
-def _parse_version(v: str) -> tuple[int, ...]:
-    """Parse a semver-ish string into a comparable tuple.
+def _parse_version(v: str) -> tuple[int, int, int]:
+    """Parse a semver-ish string into a fixed-length 3-tuple of ints.
 
-    Strips leading 'v' and ignores any pre-release suffix after '-'.
-    Returns (0, 0, 0) on parse failure so comparison is always safe.
+    Strips leading 'v' and ignores any pre-release suffix after '-'. Pads missing
+    components with 0 and truncates extras to 3, so equal versions compare equal
+    ("1.2" == "1.2.0"). Returns (0, 0, 0) on parse failure so comparison is safe.
     """
     try:
         v = v.strip().lstrip("v").split("-")[0]
-        return tuple(int(x) for x in v.split("."))
+        parts = [int(x) for x in v.split(".")]
+        parts = (parts + [0, 0, 0])[:3]
+        return (parts[0], parts[1], parts[2])
     except Exception:
         return (0, 0, 0)
 
@@ -486,6 +488,7 @@ def validate_setup(provider_mode: str | None = None) -> dict:
         "has_anthropic_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
         "has_openai_key": bool(os.environ.get("OPENAI_API_KEY")),
         "has_perplexity_key": _has_perplexity_api_key(),
+        "has_google_key": bool(os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")),
     }
     provider_ok = False
     provider_detail = "Cannot read config"
