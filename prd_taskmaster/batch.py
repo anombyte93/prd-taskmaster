@@ -9,7 +9,7 @@ whole phase and return a human-presentable summary.
 import json
 
 from prd_taskmaster import fleet
-from prd_taskmaster.backend import get_backend
+from prd_taskmaster.backend import NativeBackend, TaskMasterBackend, _FACTORY_TOKEN, get_backend
 from prd_taskmaster.capabilities import run_detect_capabilities
 from prd_taskmaster.lib import CommandError, emit, fail
 from prd_taskmaster.preflight import run_detect_taskmaster, run_preflight
@@ -40,8 +40,11 @@ def _backend_ai_ops(selected: str, taskmaster_detect: dict, native_detect: dict)
 def _backend_block() -> dict:
     cfg = fleet.load_fleet_config()
     selected = get_backend(cfg).name
-    taskmaster_detect = get_backend({"backend": "taskmaster"}).detect()
-    native_detect = get_backend({"backend": "native"}).detect()
+    # Construct TaskMasterBackend directly to probe binary availability without
+    # triggering the user-facing DeprecationWarning — this is an internal
+    # diagnostic, not a user opt-in to the deprecated backend.
+    taskmaster_detect = TaskMasterBackend(_FACTORY_TOKEN).detect()
+    native_detect = NativeBackend().detect()
     return {
         "selected": selected,
         "source": _backend_source(),

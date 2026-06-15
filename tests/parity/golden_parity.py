@@ -89,10 +89,22 @@ def diff_graphs(gold: dict, new: dict, intended: set[str] | None = None) -> dict
 
     A diff path in `intended` is recorded in intended_applied and does NOT
     count against parity (skill: only explicitly-intended diffs allowed).
+
+    Parity requires BOTH graphs to have task_count >= 1. Empty-vs-empty is
+    not a valid green gate — it means capture produced no tasks at all.
     """
     intended = intended or set()
     diffs: list[str] = []
     intended_applied: list[str] = []
+
+    gold_count = gold.get("task_count", 0) or 0
+    new_count = new.get("task_count", 0) or 0
+    if gold_count < 1:
+        diffs.append("empty graph — capture produced no tasks (gold)")
+    if new_count < 1:
+        diffs.append("empty graph — capture produced no tasks (new)")
+    if diffs:
+        return {"parity": False, "diffs": diffs, "intended_applied": intended_applied}
 
     if gold.get("task_count") != new.get("task_count"):
         diffs.append(

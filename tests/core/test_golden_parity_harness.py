@@ -94,6 +94,38 @@ def test_diff_honors_intended_whitelist():
     assert result["intended_applied"] == ["tasks[1].title"]
 
 
+def test_diff_empty_vs_empty_fails_gate():
+    """Empty-vs-empty must NOT pass the parity gate.
+
+    Two empty graphs compare structurally equal, but passing them means
+    capture produced no tasks at all — which is a broken capture, not parity.
+    The gate must fail with a clear reason for both sides.
+    """
+    empty = normalize_graph({"tasks": []})
+    result = diff_graphs(empty, empty)
+    assert result["parity"] is False
+    assert any("empty graph" in d and "gold" in d for d in result["diffs"])
+    assert any("empty graph" in d and "new" in d for d in result["diffs"])
+
+
+def test_diff_empty_gold_fails_gate():
+    """An empty gold graph must fail the gate even when new has tasks."""
+    empty = normalize_graph({"tasks": []})
+    populated = normalize_graph(_graph("A", "B"))
+    result = diff_graphs(empty, populated)
+    assert result["parity"] is False
+    assert any("empty graph" in d and "gold" in d for d in result["diffs"])
+
+
+def test_diff_empty_new_fails_gate():
+    """An empty new graph must fail the gate even when gold has tasks."""
+    populated = normalize_graph(_graph("A", "B"))
+    empty = normalize_graph({"tasks": []})
+    result = diff_graphs(populated, empty)
+    assert result["parity"] is False
+    assert any("empty graph" in d and "new" in d for d in result["diffs"])
+
+
 def test_extract_reads_tasks_from_disk_not_from_parse_result(tmp_path, monkeypatch):
     """REGRESSION GUARD for the disk-vs-result bug: parse_prd returns a dict with
     {ok, task_count} and NO "tasks"/"raw" key (backend.py:409-419, 735-738).
