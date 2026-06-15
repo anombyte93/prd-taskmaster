@@ -134,7 +134,8 @@ def test_spawn_refused_demotes_to_api_in_hybrid(monkeypatch):
     h = pr.resolve_provider("main", fleet_config=_engine())  # hybrid, keyless null
     assert h.kind == "api"
     assert h.provider == "anthropic"
-    assert "spawn" not in h.reason or h.kind == "api"  # reason reflects api tier
+    # reason must name the API tier, not the refused spawn path
+    assert "api" in h.reason.lower() or "API" in h.reason
 
 
 def test_non_spawning_role_provider_skips_cli_tier(monkeypatch):

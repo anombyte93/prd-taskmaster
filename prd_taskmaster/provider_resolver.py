@@ -81,6 +81,7 @@ def _plan_floor(role: str, model, reason: str) -> ProviderHandle:
 
 
 def resolve_provider(role, op_class="structured_gen", *, fleet_config=None) -> ProviderHandle:
+    # op_class is reserved for Chunk 4 op-class routing; accepted here but not yet used.
     """Resolve the provider tier for one role. See module docstring for precedence."""
     engine = engine_config(fleet_config)
     mode = engine.get("provider_mode", "hybrid")

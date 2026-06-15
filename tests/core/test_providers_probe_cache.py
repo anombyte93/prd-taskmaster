@@ -65,6 +65,27 @@ def test_false_result_is_not_cached(monkeypatch):
     assert calls["n"] == 2  # the False was never cached
 
 
+def test_ttl_boundary_exact_expires(monkeypatch):
+    """At elapsed == ttl_s the entry is expired (strict < check), so a re-probe
+    occurs.  A mutant that changes < to <= would serve the cache and keep calls at
+    1 -- this test catches that by asserting calls["n"] == 2 at the exact boundary."""
+    _reset_cache()
+    calls = {"n": 0}
+
+    def fake_probe(provider):
+        calls["n"] += 1
+        return True
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(providers, "_probe_spawn", fake_probe)
+    monkeypatch.setattr(providers.time, "monotonic", lambda: clock["t"])
+
+    assert providers._probe_spawn_cached("claude-code", 900) is True  # primes cache at t=1000
+    clock["t"] = 1900.0  # elapsed == ttl_s exactly (1900 - 1000 == 900)
+    assert providers._probe_spawn_cached("claude-code", 900) is True
+    assert calls["n"] == 2  # strict < means boundary is expired -> re-probed
+
+
 def test_distinct_providers_are_cached_independently(monkeypatch):
     _reset_cache()
     seen = []
