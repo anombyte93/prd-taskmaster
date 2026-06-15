@@ -303,6 +303,10 @@ def test_no_key_operations_return_agent_action_required(tmp_path, monkeypatch):
     prd.write_text("# PRD\n")
     _seed_project(tmp_path, [_pending_task()])
     monkeypatch.setattr(llm_client, "discover_key", lambda: None)
+    from prd_taskmaster import backend as backend_mod
+    monkeypatch.setattr(
+        backend_mod, "resolve_provider", lambda role, *a, **k: _stub_handle("plan", role=role)
+    )
 
     parse = NativeBackend().parse_prd(prd, 1, tag="master")
     assert parse["ok"] is False
