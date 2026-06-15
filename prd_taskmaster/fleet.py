@@ -164,6 +164,7 @@ def load_fleet_config(path=None):
         "experimental_backends": DEFAULT_FLEET_CONFIG["experimental_backends"],
         "token_economy": _atlas_config_economy() or DEFAULT_FLEET_CONFIG["token_economy"],
         "backend": DEFAULT_FLEET_CONFIG["backend"],
+        "engine": engine_config(None),
     }
     p = Path(path) if path else FLEET_CONFIG_PATH
     if not p.is_file():
@@ -209,6 +210,8 @@ def load_fleet_config(path=None):
         if resolved:
             resolved.setdefault("enabled", True)
             cfg["escalation"] = resolved
+
+    cfg["engine"] = engine_config(raw)
 
     return cfg
 

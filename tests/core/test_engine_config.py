@@ -147,3 +147,91 @@ def test_engine_config_non_dict_cfg_returns_defaults():
     assert engine_config("garbage")["provider_mode"] == "hybrid"
     assert engine_config(42)["provider_mode"] == "hybrid"
     assert engine_config([])["provider_mode"] == "hybrid"
+
+
+# ─── load_fleet_config merges the engine block ───────────────────────────────
+
+def test_load_fleet_config_has_engine_defaults_without_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    cfg = load_fleet_config()
+    assert cfg["engine"]["provider_mode"] == "hybrid"
+    assert cfg["engine"]["keyless_default"] is None
+    assert cfg["engine"]["cli_agent"]["probe_cache_ttl_s"] == 900
+    assert cfg["engine"]["concurrency"]["ram_aware"] is False
+
+
+def test_load_fleet_config_merges_engine_from_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    d = tmp_path / ".atlas-ai"
+    d.mkdir()
+    (d / "fleet.json").write_text(json.dumps({
+        "max_concurrency": 5,
+        "engine": {
+            "provider_mode": "cli_only",
+            "keyless_default": True,
+            "cli_agent": {"per_call_timeout_s": 45},
+            "concurrency": {"ram_aware": True},
+        },
+    }))
+    cfg = load_fleet_config()
+    # legacy keys still work
+    assert cfg["max_concurrency"] == 5
+    # engine merged
+    assert cfg["engine"]["provider_mode"] == "cli_only"
+    assert cfg["engine"]["keyless_default"] is True
+    assert cfg["engine"]["cli_agent"]["per_call_timeout_s"] == 45
+    # untouched engine sub-keys keep defaults
+    assert cfg["engine"]["cli_agent"]["probe_cache_ttl_s"] == 900
+    assert cfg["engine"]["concurrency"]["ram_aware"] is True
+
+
+def test_load_fleet_config_engine_malformed_file_falls_back(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    d = tmp_path / ".atlas-ai"
+    d.mkdir()
+    (d / "fleet.json").write_text("{not json")
+    cfg = load_fleet_config()
+    assert cfg["engine"]["provider_mode"] == "hybrid"
+    assert cfg["engine"]["keyless_default"] is None
+
+
+def test_load_fleet_config_engine_invalid_values_ignored(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    d = tmp_path / ".atlas-ai"
+    d.mkdir()
+    (d / "fleet.json").write_text(json.dumps({
+        "engine": {
+            "provider_mode": "warp_drive",          # invalid -> hybrid
+            "keyless_default": "yes",                # invalid -> None
+            "cli_agent": {"probe_cache_ttl_s": 0},   # invalid -> 900
+            "concurrency": {"structured_gen": -1},   # invalid -> None
+        },
+    }))
+    cfg = load_fleet_config()
+    assert cfg["engine"]["provider_mode"] == "hybrid"
+    assert cfg["engine"]["keyless_default"] is None
+    assert cfg["engine"]["cli_agent"]["probe_cache_ttl_s"] == 900
+    assert cfg["engine"]["concurrency"]["structured_gen"] is None
+
+
+def test_load_fleet_config_engine_block_independent_per_call(tmp_path, monkeypatch):
+    # Mutating one returned engine block must not bleed into the next call.
+    monkeypatch.chdir(tmp_path)
+    a = load_fleet_config()
+    a["engine"]["cli_agent"]["probe_cache_ttl_s"] = -1
+    b = load_fleet_config()
+    assert b["engine"]["cli_agent"]["probe_cache_ttl_s"] == 900
+
+
+def test_engine_config_accepts_loaded_config(tmp_path, monkeypatch):
+    # engine_config() called on load_fleet_config() output is idempotent.
+    monkeypatch.chdir(tmp_path)
+    d = tmp_path / ".atlas-ai"
+    d.mkdir()
+    (d / "fleet.json").write_text(json.dumps({
+        "engine": {"provider_mode": "api_only"},
+    }))
+    cfg = load_fleet_config()
+    eng = engine_config(cfg)
+    assert eng["provider_mode"] == "api_only"
+    assert eng["cli_agent"]["structured_json"] == "auto"
