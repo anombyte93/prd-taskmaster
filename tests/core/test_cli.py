@@ -335,7 +335,9 @@ def test_context_pack_cli_prints_signature_json(tmp_path):
     }
 
 
-def test_native_parse_prd_no_key_returns_agent_action_json(tmp_path):
+def test_native_parse_prd_no_key_returns_agent_action_json(tmp_path, monkeypatch):
+    for _k in ("ANTHROPIC_API_KEY","OPENAI_API_KEY","GEMINI_API_KEY","GOOGLE_API_KEY","OPENAI_COMPATIBLE_API_KEY"):
+        monkeypatch.delenv(_k, raising=False)
     env = clean_cli_env(tmp_path)
     force_native_backend(tmp_path)
     prd = tmp_path / "prd.md"
@@ -359,7 +361,9 @@ def test_native_parse_prd_no_key_returns_agent_action_json(tmp_path):
     assert data["agent_action_required"]["num_tasks"] == 3
 
 
-def test_native_expand_and_rate_no_key_return_agent_action_json(tmp_path):
+def test_native_expand_and_rate_no_key_return_agent_action_json(tmp_path, monkeypatch):
+    for _k in ("ANTHROPIC_API_KEY","OPENAI_API_KEY","GEMINI_API_KEY","GOOGLE_API_KEY","OPENAI_COMPATIBLE_API_KEY"):
+        monkeypatch.delenv(_k, raising=False)
     env = clean_cli_env(tmp_path)
     force_native_backend(tmp_path)
     seed_tasks(tmp_path)

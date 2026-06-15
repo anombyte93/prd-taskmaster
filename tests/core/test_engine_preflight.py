@@ -12,7 +12,7 @@ from prd_taskmaster.batch import run_engine_preflight
 def _clean_env(monkeypatch, tmp_path: Path, *, with_binary: bool = False) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_COMPATIBLE_API_KEY"):
+    for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_COMPATIBLE_API_KEY"):
         monkeypatch.delenv(key, raising=False)
     bin_dir = tmp_path / "bin"
     if with_binary:

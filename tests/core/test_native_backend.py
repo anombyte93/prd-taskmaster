@@ -122,6 +122,11 @@ def test_parse_prd_validates_and_writes_tagged_tasks(tmp_path, monkeypatch):
     prd = tmp_path / "prd.md"
     prd.write_text("# PRD\n\nREQ-001: Build native backend.")
     calls = []
+    from prd_taskmaster import backend
+    from prd_taskmaster.provider_resolver import ProviderHandle
+    monkeypatch.setattr(backend, "resolve_provider",
+        lambda role, *a, **k: ProviderHandle(
+            kind="api", provider="openai", role=role, model=None, reason="test"))
     monkeypatch.setattr(llm_client, "discover_key", lambda: {"provider": "openai", "key": "k"})
 
     def fake_generate_json(prompt, **kwargs):
@@ -150,6 +155,12 @@ def test_parse_prd_success_echoes_telemetry_reference(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     prd = tmp_path / "prd.md"
     prd.write_text("# PRD\n\nREQ-001: Build native backend.")
+    calls = []
+    from prd_taskmaster import backend
+    from prd_taskmaster.provider_resolver import ProviderHandle
+    monkeypatch.setattr(backend, "resolve_provider",
+        lambda role, *a, **k: ProviderHandle(
+            kind="api", provider="anthropic", role=role, model=None, reason="test"))
     monkeypatch.setattr(llm_client, "discover_key", lambda: {"provider": "anthropic", "key": "k"})
     telemetry_ref = {
         "path": str(tmp_path / ".atlas-ai" / "telemetry.jsonl"),
@@ -160,7 +171,6 @@ def test_parse_prd_success_echoes_telemetry_reference(tmp_path, monkeypatch):
         "backend": "native-api",
         "exit": 0,
     }
-    calls = []
 
     def fake_generate_json(prompt, **kwargs):
         calls.append(kwargs)
@@ -188,9 +198,15 @@ def test_parse_prd_invalid_candidate_returns_error_without_overwrite(tmp_path, m
     before = tasks_path.read_text()
     prd = tmp_path / "prd.md"
     prd.write_text("# PRD\n")
+    from prd_taskmaster import backend
+    from prd_taskmaster.provider_resolver import ProviderHandle
+    monkeypatch.setattr(backend, "resolve_provider",
+        lambda role, *a, **k: ProviderHandle(
+            kind="api", provider="anthropic", role=role, model=None, reason="test"))
     monkeypatch.setattr(llm_client, "discover_key", lambda: {"provider": "anthropic", "key": "k"})
     invalid = _valid_tasks(1)
     invalid["tasks"][0]["subtasks"] = invalid["tasks"][0]["subtasks"][:1]
+
     monkeypatch.setattr(llm_client, "generate_json", lambda *a, **k: invalid)
 
     result = NativeBackend().parse_prd(prd, 1)
@@ -206,8 +222,13 @@ def test_expand_builds_packets_escalates_invalid_json_and_merges_once(tmp_path, 
 
     monkeypatch.chdir(tmp_path)
     tasks_path = _seed_project(tmp_path, [_pending_task()])
-    monkeypatch.setattr(llm_client, "discover_key", lambda: {"provider": "anthropic", "key": "k"})
     calls = []
+    from prd_taskmaster import backend
+    from prd_taskmaster.provider_resolver import ProviderHandle
+    monkeypatch.setattr(backend, "resolve_provider",
+        lambda role, *a, **k: ProviderHandle(
+            kind="api", provider="anthropic", role=role, model=None, reason="test"))
+    monkeypatch.setattr(llm_client, "discover_key", lambda: {"provider": "anthropic", "key": "k"})
 
     def fake_generate_json(prompt, **kwargs):
         calls.append(kwargs)
@@ -263,8 +284,13 @@ def test_rate_writes_taskmaster_report_from_batched_generation(tmp_path, monkeyp
 
     monkeypatch.chdir(tmp_path)
     _seed_project(tmp_path, [_pending_task()])
-    monkeypatch.setattr(llm_client, "discover_key", lambda: {"provider": "openai", "key": "k"})
     calls = []
+    from prd_taskmaster import backend
+    from prd_taskmaster.provider_resolver import ProviderHandle
+    monkeypatch.setattr(backend, "resolve_provider",
+        lambda role, *a, **k: ProviderHandle(
+            kind="api", provider="openai", role=role, model=None, reason="test"))
+    monkeypatch.setattr(llm_client, "discover_key", lambda: {"provider": "openai", "key": "k"})
 
     def fake_generate_json(prompt, **kwargs):
         calls.append({"prompt": prompt, **kwargs})
