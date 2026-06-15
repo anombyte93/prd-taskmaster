@@ -86,6 +86,30 @@ def _parse_claude_envelope(stdout):
     return envelope
 
 
+def _claude_error_detail(stdout, stderr):
+    """For a claude-code nonzero exit, prefer the error reason from the JSON
+    envelope in stdout (which carries the real cause in .result / api_error_status)
+    over stderr (which may only hold benign warnings like 'no stdin data received').
+    Falls back to stderr, then stdout, then a generic message."""
+    import json as _json
+    if stdout:
+        try:
+            envelope = _json.loads(stdout.strip())
+            if isinstance(envelope, dict) and envelope.get("is_error"):
+                parts = []
+                result_text = envelope.get("result", "")
+                if result_text:
+                    parts.append(str(result_text))
+                status = envelope.get("api_error_status")
+                if status:
+                    parts.append(f"api_error_status={status}")
+                if parts:
+                    return "; ".join(parts)[:400]
+        except (_json.JSONDecodeError, ValueError):
+            pass
+    return (stderr or stdout or "no detail").strip()[:400]
+
+
 def _run_once(provider, binary, prompt, *, schema_hint, structured_json,
               model, op_class, task_id, timeout, parse_retry=False):
     """Spawn the CLI once, parse stdout into JSON. Returns the parsed dict/list,
@@ -113,10 +137,13 @@ def _run_once(provider, binary, prompt, *, schema_hint, structured_json,
 
     if completed.returncode != 0:
         _telemetry(op_class, task_id, model, 1, start, parse_retry)
-        detail = (completed.stderr or completed.stdout or "").strip()[:400]
+        if _has_schema_flag(provider):
+            detail = _claude_error_detail(completed.stdout, completed.stderr)
+        else:
+            detail = (completed.stderr or completed.stdout or "").strip()[:400]
         raise CliAgentError("nonzero_exit", f"{binary} exit {completed.returncode}: {detail}")
 
-    if str(provider).lower() == "claude-code":
+    if _has_schema_flag(provider):
         result = _parse_claude_envelope(completed.stdout)
     else:
         result = _extract_json(completed.stdout)
@@ -150,13 +177,20 @@ def generate_json_via_cli(provider, prompt, *, system="", schema_hint="", model=
         raise CliAgentError("no_cli", f"{cli} binary not on PATH")
 
     # Assemble the prompt the model sees. The CLI takes no separate system slot,
-    # so prepend system. Fold the schema into the prompt only when the CLI has no
-    # native schema flag (codex/gemini) or prompt-mode is forced for claude.
+    # so prepend system. Fold the schema into the prompt for codex/gemini (no
+    # native schema flag) or when prompt-mode is forced for claude. For claude,
+    # ALWAYS include a terse JSON-only directive even when --json-schema is used
+    # (belt-and-suspenders: claude v2.1.177+ still requires the prompt directive
+    # to reliably return JSON in .result rather than prose).
     base_prompt = prompt
     if system:
         base_prompt = system + "\n\n" + base_prompt
     use_schema_flag = _has_schema_flag(provider) and structured_json != "prompt"
-    if schema_hint and not use_schema_flag:
+    if schema_hint:
+        # For codex/gemini, folding the schema into the prompt is the only path.
+        # For claude, ALWAYS include a terse JSON-only directive even when
+        # --json-schema is also passed (belt-and-suspenders: claude v2.1.177+
+        # still requires the prompt directive to reliably return JSON in .result).
         base_prompt += "\n\nReturn ONLY valid JSON matching:\n" + schema_hint
 
     flag_schema = schema_hint if use_schema_flag else ""

@@ -293,8 +293,60 @@ def test_generate_json_via_cli_claude_schema_uses_flag_not_prompt(monkeypatch, t
                             structured_json="schema")
     argv = fake.calls[0]["argv"]
     assert "--json-schema" in argv
-    # schema goes via the flag, so the prompt slot stays the bare prompt
-    assert argv[2] == "Base"
+    # schema goes via the flag AND a JSON directive is folded into the prompt
+    # (belt-and-suspenders: claude v2.1.177+ requires both)
+    assert "Base" in argv[2]
+    assert "Return ONLY valid JSON" in argv[2]
+
+
+# ── Fix #1: claude schema-mode always includes a JSON directive in the prompt ──
+
+def test_claude_schema_mode_prompt_always_contains_json_directive(monkeypatch, tmp_path):
+    """Regression: --json-schema alone is not enough on claude v2.1.177+.
+    The prompt must ALSO carry a JSON-only directive so .result is JSON, not prose."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(C.shutil, "which", lambda c: "/bin/" + c)
+    fake = make_runner([FakeCompleted(returncode=0, stdout=json.dumps({"result": '{"x":1}'}))])
+    monkeypatch.setattr(C.subprocess, "run", fake)
+    C.generate_json_via_cli(
+        "claude-code", "Do something", schema_hint='{"type":"object"}',
+    )
+    argv = fake.calls[0]["argv"]
+    # --json-schema flag must be present (native schema path)
+    assert "--json-schema" in argv
+    # The prompt passed to -p must ALSO contain a JSON-only directive
+    sent_prompt = argv[2]
+    assert "Return ONLY valid JSON" in sent_prompt
+
+
+# ── Fix #2: claude nonzero-exit surfaces stdout envelope error, not stderr ─────
+
+def test_claude_nonzero_exit_surfaces_stdout_envelope_reason(monkeypatch, tmp_path):
+    """Regression: on nonzero exit, claude writes the real error in the JSON
+    envelope on stdout; STDERR may only hold benign warnings.
+    The CliAgentError message must contain the stdout reason, not the stderr noise."""
+    monkeypatch.chdir(tmp_path)
+    stdout_envelope = json.dumps({
+        "is_error": True,
+        "result": "model claude-3-7-not-found returned 404",
+        "api_error_status": 404,
+    })
+    stderr_noise = "Warning: no stdin data received"
+    fake = make_runner([
+        FakeCompleted(returncode=1, stdout=stdout_envelope, stderr=stderr_noise)
+    ])
+    monkeypatch.setattr(C.subprocess, "run", fake)
+    with pytest.raises(C.CliAgentError) as ei:
+        C._run_once(
+            "claude-code", "/bin/claude", "P", schema_hint="", structured_json="auto",
+            model=None, op_class="structured_gen", task_id=None, timeout=180,
+        )
+    assert ei.value.kind == "nonzero_exit"
+    error_msg = str(ei.value)
+    # Must surface the stdout reason (the real cause)
+    assert "404" in error_msg or "model claude-3-7-not-found" in error_msg
+    # Must NOT surface only the benign stderr warning
+    assert "no stdin data received" not in error_msg
 
 
 def test_generate_json_via_cli_two_telemetry_rows_on_retry(monkeypatch, tmp_path):
