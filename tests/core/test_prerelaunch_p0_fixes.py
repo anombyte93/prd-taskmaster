@@ -13,12 +13,10 @@ default", which is the exact state `task-master init` creates.
 """
 
 import json
-import stat
 from pathlib import Path
 
 from prd_taskmaster.mode_recommend import validate_setup
 from prd_taskmaster.providers import run_configure_providers
-from prd_taskmaster.tm_parallel import _run_packet
 
 
 # ── shared fixtures (self-contained; mirror test_dogfood_fixes helpers) ──────
@@ -159,58 +157,11 @@ def test_validate_setup_passes_when_main_provider_is_usable(tmp_path, monkeypatc
     assert result["ready"] is True
 
 
-# ── P0-3: expand must degrade to structural when research provider is down ───
-
-def _fake_research_sensitive_taskmaster(bin_dir: Path) -> str:
-    """A fake `task-master` that FAILS when --research is present (quota/auth down)
-    and SUCCEEDS for a structural expand. Returns the binary path."""
-    script = bin_dir / "task-master"
-    script.write_text(
-        "#!/bin/sh\n"
-        'for a in "$@"; do\n'
-        '  if [ "$a" = "--research" ]; then echo "Perplexity API error: quota" >&2; exit 1; fi\n'
-        "done\n"
-        "exit 0\n"
-    )
-    script.chmod(script.stat().st_mode | stat.S_IEXEC)
-    return str(script)
-
-
-def test_expand_packet_degrades_to_structural_on_research_failure(tmp_path):
-    """The dogfood outage: research provider out of quota. expand --research fails;
-    the engine must retry WITHOUT --research (structural, 'always available') rather
-    than hard-fail to 0 subtasks. Success is marked degraded."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    binary = _fake_research_sensitive_taskmaster(bin_dir)
-    workdir = tmp_path / "wd"
-    workdir.mkdir()
-
-    item = {"task_id": 1, "path": str(workdir), "tier": "standard", "model": "sonnet"}
-    profile = {"structured_gen_start": "standard", "escalation": {"enabled": False}}
-
-    result = _run_packet(binary, item, timeout=30, fleet_config={}, profile=profile)
-
-    assert result["success"] is True
-    assert result.get("degraded") is True
-
-
-def test_expand_packet_fails_when_structural_also_fails(tmp_path):
-    """If even structural expand fails, the packet is a genuine failure (not masked)."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    script = bin_dir / "task-master"
-    script.write_text("#!/bin/sh\necho 'hard failure' >&2\nexit 1\n")
-    script.chmod(script.stat().st_mode | stat.S_IEXEC)
-    workdir = tmp_path / "wd"
-    workdir.mkdir()
-
-    item = {"task_id": 1, "path": str(workdir), "tier": "standard", "model": "sonnet"}
-    profile = {"structured_gen_start": "standard", "escalation": {"enabled": False}}
-
-    result = _run_packet(str(script), item, timeout=30, fleet_config={}, profile=profile)
-
-    assert result["success"] is False
+# NOTE: P0-3 (expand must degrade to structural when research provider is down)
+# previously tested tm_parallel._run_packet against a fake `task-master` binary.
+# The task-master backend was removed (spec §9.4) — native is the sole generator —
+# so the binary-path degrade tests were deleted with the module. The native
+# engine's structural-decomposition fallback lives in NativeBackend.expand.
 
 
 # ── #11/#12: nested-session spawn PROBE (verify, don't assume) ───────────────

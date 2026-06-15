@@ -18,7 +18,8 @@ from prd_taskmaster.batch import cmd_engine_preflight
 from prd_taskmaster.economy import cmd_economy_report
 from prd_taskmaster.feedback import HARNESS_CHOICES, cmd_feedback_add, cmd_feedback_report
 from prd_taskmaster.context_pack import build_context_pack
-from prd_taskmaster import fleet, parallel, task_state, tm_parallel
+from prd_taskmaster import fleet, parallel, task_state
+from prd_taskmaster.lib import _detect_taskmaster_method
 
 
 def _backend_source() -> str:
@@ -34,28 +35,44 @@ def _backend_source() -> str:
     return "auto"
 
 
-def _ai_ops(selected: str, taskmaster_detect: dict, native_detect: dict) -> str:
-    if selected == "taskmaster":
-        return "taskmaster-api" if taskmaster_detect.get("available") else "agent"
+def _ai_ops(native_detect: dict) -> str:
     if native_detect.get("ai_ops") == "api":
         return "native-api"
     return "agent"
 
 
+def _taskmaster_file_format_detect() -> dict:
+    """Informational only: whether the optional task-master binary is on PATH.
+
+    The task-master backend was removed (spec §9.4) — native is the sole
+    generator — but `.taskmaster/` file-format detection survives, so we still
+    surface whether the binary exists for diagnostic transparency.
+    """
+    detected = _detect_taskmaster_method()
+    available = detected.get("method") in ("cli", "mcp")
+    return {
+        "available": available,
+        "version": detected.get("version"),
+        "min_ok": available,
+    }
+
+
 def run_backend_detect() -> dict:
-    """Pure core for backend-detect; safe for CLI and MCP wrappers."""
-    cfg = fleet.load_fleet_config()
-    selected_backend = get_backend(cfg)
-    taskmaster_detect = get_backend({"backend": "taskmaster"}).detect()
-    native_detect = get_backend({"backend": "native"}).detect()
+    """Pure core for backend-detect; safe for CLI and MCP wrappers.
+
+    Native is the sole generator now; the `taskmaster` entry is purely an
+    informational file-format/binary presence probe, never a selectable backend.
+    """
+    selected_backend = get_backend(fleet.load_fleet_config())
+    native_detect = selected_backend.detect()
     return {
         "ok": True,
         "selected": selected_backend.name,
         "source": _backend_source(),
-        "ai_ops": _ai_ops(selected_backend.name, taskmaster_detect, native_detect),
-        "resolved": selected_backend.detect(),
+        "ai_ops": _ai_ops(native_detect),
+        "resolved": native_detect,
         "backends": {
-            "taskmaster": taskmaster_detect,
+            "taskmaster": _taskmaster_file_format_detect(),
             "native": native_detect,
         },
     }
@@ -265,28 +282,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tag")
     p.add_argument("--input", required=True)
 
-    # tm-parallel native TaskMaster expansion
-    p = sub.add_parser("tm-parallel", help="Run native TaskMaster expansion in isolated parallel workdirs")
-    p.add_argument("--tag")
-    p.add_argument("--missing-only", action="store_true", default=True)
-    p.add_argument("--concurrency", type=int, default=None)
-    p.add_argument("--timeout", type=float, default=180)
-    p.add_argument("--dry-run", action="store_true")
-
-    p = sub.add_parser("tm-plan", help="Plan isolated native TaskMaster expansion workdirs")
-    p.add_argument("--tag")
-    p.add_argument("--missing-only", action="store_true", default=True)
-
-    p = sub.add_parser("tm-run", help="Run a planned native TaskMaster expansion batch")
-    p.add_argument("--run-id", required=True)
-    p.add_argument("--concurrency", type=int, default=None)
-    p.add_argument("--timeout", type=float, default=180)
-
-    p = sub.add_parser("tm-harvest", help="Harvest a native TaskMaster expansion batch")
-    p.add_argument("--run-id", required=True)
-    p.add_argument("--tag")
-    p.add_argument("--threshold", type=int, default=7)
-
     # economy-report
     p = sub.add_parser("economy-report", help="Summarize .atlas-ai/telemetry.jsonl per (op_class, model)")
     p.add_argument("--input", default=None)
@@ -378,10 +373,6 @@ DISPATCH = {
     "parallel-apply": parallel.cmd_apply,
     "parallel-extract": parallel.cmd_extract,
     "parallel-inject": parallel.cmd_inject,
-    "tm-parallel": tm_parallel.cmd_tm_parallel,
-    "tm-plan": tm_parallel.cmd_tm_plan,
-    "tm-run": tm_parallel.cmd_tm_run,
-    "tm-harvest": tm_parallel.cmd_tm_harvest,
     "fleet-waves": fleet.cmd_fleet_waves,
     "next-task": task_state.cmd_next_task,
     "claim-task": task_state.cmd_claim_task,

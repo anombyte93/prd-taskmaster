@@ -9,9 +9,9 @@ whole phase and return a human-presentable summary.
 import json
 
 from prd_taskmaster import fleet
-from prd_taskmaster.backend import NativeBackend, TaskMasterBackend, _FACTORY_TOKEN, get_backend
+from prd_taskmaster.backend import NativeBackend, get_backend
 from prd_taskmaster.capabilities import run_detect_capabilities
-from prd_taskmaster.lib import CommandError, emit, fail
+from prd_taskmaster.lib import CommandError, _detect_taskmaster_method, emit, fail
 from prd_taskmaster.preflight import run_detect_taskmaster, run_preflight
 from prd_taskmaster.providers import run_configure_providers, run_detect_providers
 
@@ -29,43 +29,39 @@ def _backend_source() -> str:
     return "auto"
 
 
-def _backend_ai_ops(selected: str, taskmaster_detect: dict, native_detect: dict) -> str:
-    if selected == "taskmaster":
-        return "taskmaster-api" if taskmaster_detect.get("available") else "agent"
+def _backend_ai_ops(native_detect: dict) -> str:
     if native_detect.get("ai_ops") == "api":
         return "native-api"
     return "agent"
 
 
 def _backend_block() -> dict:
-    cfg = fleet.load_fleet_config()
-    selected = get_backend(cfg).name
-    # Construct TaskMasterBackend directly to probe binary availability without
-    # triggering the user-facing DeprecationWarning — this is an internal
-    # diagnostic, not a user opt-in to the deprecated backend.
-    taskmaster_detect = TaskMasterBackend(_FACTORY_TOKEN).detect()
+    selected = get_backend(fleet.load_fleet_config()).name
+    # The task-master backend was removed (spec §9.4): native is the sole
+    # generator. The `taskmaster` entry is now an informational file-format/binary
+    # presence probe (via the surviving _detect_taskmaster_method), never a
+    # selectable backend — so engine-preflight stays honest about the optional
+    # binary without depending on the deleted TaskMasterBackend class.
+    tm_detected = _detect_taskmaster_method()
+    tm_available = tm_detected.get("method") in ("cli", "mcp")
     native_detect = NativeBackend().detect()
     return {
         "selected": selected,
         "source": _backend_source(),
         "taskmaster": {
-            "available": bool(taskmaster_detect.get("available")),
-            "version": taskmaster_detect.get("version"),
-            "min_ok": bool(taskmaster_detect.get("available")),
+            "available": tm_available,
+            "version": tm_detected.get("version"),
+            "min_ok": tm_available,
         },
         "native": {
             "api_provider": native_detect.get("api_provider"),
             "agent_fallback": True,
         },
-        "ai_ops": _backend_ai_ops(selected, taskmaster_detect, native_detect),
+        "ai_ops": _backend_ai_ops(native_detect),
     }
 
 
 def _backend_summary(block: dict) -> str:
-    if block.get("selected") == "taskmaster":
-        version = block.get("taskmaster", {}).get("version")
-        version_text = f" v{version}" if version else ""
-        return f"Backend: taskmaster{version_text} ({block.get('source', 'auto')})"
     provider = block.get("native", {}).get("api_provider")
     if provider:
         return f"Backend: native (api: {provider})"

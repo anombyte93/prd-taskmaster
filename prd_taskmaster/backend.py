@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import tempfile
 import time
 import warnings
@@ -13,10 +12,10 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import prd_taskmaster
-from prd_taskmaster import cli_agent, fleet, llm_client, parallel, taskmaster, tm_parallel
+from prd_taskmaster import cli_agent, fleet, llm_client, parallel
 from prd_taskmaster.economy import append_telemetry, economy_profile, shift_tier
 from prd_taskmaster.provider_resolver import resolve_provider
-from prd_taskmaster.lib import CommandError, _detect_taskmaster_method, now_iso
+from prd_taskmaster.lib import CommandError, now_iso
 from prd_taskmaster.validation import run_validate_tasks
 
 
@@ -28,9 +27,6 @@ class Backend(Protocol):
     def parse_prd(self, prd_path, num_tasks, tag=None) -> dict: ...
     def expand(self, task_ids=None, research=True, tag=None) -> dict: ...
     def rate(self, tag=None, research=True) -> dict: ...
-
-
-_FACTORY_TOKEN = object()
 
 
 TASKS_SCHEMA_HINT = """{
@@ -148,13 +144,6 @@ def _pending_tasks(tag: str | None, task_ids: Any = None) -> tuple[str, list[dic
         if str(task.get("status", "pending")) == "pending":
             pending.append(task)
     return resolved, pending
-
-
-def _binary_or_raise() -> str:
-    binary = taskmaster._find_binary()
-    if not binary:
-        raise CommandError("task-master binary not found in PATH")
-    return binary
 
 
 def _read_json(path: Path) -> dict | None:
@@ -743,213 +732,23 @@ class NativeBackend(Backend):
         }
 
 
-class TaskMasterBackend(Backend):
-    name = "taskmaster"
-
-    def __init__(self, _factory_token: object | None = None) -> None:
-        if _factory_token is not _FACTORY_TOKEN:
-            raise CommandError("TaskMasterBackend must be constructed through get_backend")
-
-    def detect(self) -> dict:
-        detected = _detect_taskmaster_method()
-        gate = tm_parallel._version_gate()
-        missing: list[str] = []
-
-        def add_missing(message: object) -> None:
-            if message and str(message) not in missing:
-                missing.append(str(message))
-
-        if detected.get("method") == "none":
-            add_missing("task-master binary not found in PATH")
-        if not gate.get("ok"):
-            add_missing(gate.get("error"))
-
-        available = bool(gate.get("ok"))
-        return {
-            "name": "taskmaster",
-            "available": available,
-            "version": gate.get("detected_version") or detected.get("version"),
-            "ai_ops": available,
-            "missing": missing,
-        }
-
-    def init_project(self) -> dict:
-        return taskmaster.init_taskmaster()
-
-    def parse_prd(self, prd_path, num_tasks, tag=None) -> dict:
-        binary = _binary_or_raise()
-        result = subprocess.run(
-            [binary, "parse-prd", "--input", str(prd_path), "--num-tasks", str(num_tasks)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            d = {
-                "ok": False,
-                "task_count": 0,
-                "exit": result.returncode,
-                "stderr": result.stderr,
-            }
-            d.setdefault("backend", "taskmaster")
-            d.setdefault("ai", "taskmaster-cli")
-            return d
-        _resolved, tasks = _load_tasks(tag)
-        if not tasks:
-            # P1-1: a 0-exit parse that produced no tasks is NOT success — it is the
-            # silent failure that lets the pipeline treat an empty graph as "done".
-            d = {
-                "ok": False,
-                "task_count": 0,
-                "exit": result.returncode,
-                "error": (
-                    "parse-prd exited 0 but produced 0 tasks — the model returned no "
-                    "tasks. Check provider credentials (run: python3 script.py "
-                    "configure-providers) and the PRD content."
-                ),
-            }
-            d.setdefault("backend", "taskmaster")
-            d.setdefault("ai", "taskmaster-cli")
-            return d
-        d = {"ok": True, "task_count": len(tasks)}
-        d.setdefault("backend", "taskmaster")
-        d.setdefault("ai", "taskmaster-cli")
-        return d
-
-    def expand(self, task_ids=None, research=True, tag=None) -> dict:
-        resolved, pending = _pending_tasks(tag, task_ids)
-        if len(pending) > 3:
-            res = tm_parallel.run_tm_parallel(tag=tag)
-            d = dict(res)
-            d.setdefault("backend", "taskmaster")
-            d.setdefault("ai", "taskmaster-cli")
-            return d
-        if not pending:
-            d = {"ok": True, "tag": resolved, "expanded": [], "failed": [], "results": []}
-            d.setdefault("backend", "taskmaster")
-            d.setdefault("ai", "taskmaster-cli")
-            return d
-
-        binary = _binary_or_raise()
-        results = []
-        expanded = []
-        failed = []
-        any_degraded = False
-        for task in pending:
-            task_id = task.get("id")
-            cmd = [binary, "expand", "--id", str(task_id)]
-            if research:
-                cmd.append("--research")
-            start = time.monotonic()
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            wall_ms = int((time.monotonic() - start) * 1000)
-            degraded = False
-            if result.returncode != 0 and research:
-                # P0-3: research provider down (quota/auth). Degrade to a structural
-                # expand (no --research) — always available, still verifiable —
-                # rather than hard-failing this task to 0 subtasks.
-                s_start = time.monotonic()
-                result = subprocess.run(
-                    [binary, "expand", "--id", str(task_id)],
-                    capture_output=True,
-                    text=True,
-                )
-                wall_ms += int((time.monotonic() - s_start) * 1000)
-                degraded = True
-                any_degraded = True
-            append_telemetry({
-                "ts": now_iso(),
-                "op_class": "structured_gen",
-                "task_id": task_id,
-                "model": "",
-                "backend": "taskmaster-api",
-                "exit": result.returncode,
-                "wall_ms": wall_ms,
-                "escalated": False,
-                "degraded": degraded,
-            })
-            item = {
-                "task_id": task_id,
-                "exit": result.returncode,
-                "wall_ms": wall_ms,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "degraded": degraded,
-            }
-            results.append(item)
-            if result.returncode == 0:
-                expanded.append(task_id)
-            else:
-                failed.append(task_id)
-        d = {
-            "ok": not failed,
-            "tag": resolved,
-            "expanded": expanded,
-            "failed": failed,
-            "results": results,
-        }
-        if any_degraded:
-            d["degraded"] = True
-        d.setdefault("backend", "taskmaster")
-        d.setdefault("ai", "taskmaster-cli")
-        return d
-
-    def rate(self, tag=None, research=True) -> dict:
-        binary = _binary_or_raise()
-        cmd = [binary, "analyze-complexity"]
-        if research:
-            cmd.append("--research")
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            d = {"ok": False, "exit": result.returncode, "stderr": result.stderr}
-            d.setdefault("backend", "taskmaster")
-            d.setdefault("ai", "taskmaster-cli")
-            return d
-
-        resolved = parallel.current_tag(tag)
-        for path in _report_candidates(resolved):
-            raw = _read_json(path)
-            if raw is not None:
-                d = {
-                    "ok": True,
-                    "tag": resolved,
-                    "report": str(path),
-                    "complexityAnalysis": raw.get("complexityAnalysis", []),
-                    "raw": raw,
-                }
-                d.setdefault("backend", "taskmaster")
-                d.setdefault("ai", "taskmaster-cli")
-                return d
-        d = {
-            "ok": False,
-            "tag": resolved,
-            "report": None,
-            "error": "task complexity report not found",
-        }
-        d.setdefault("backend", "taskmaster")
-        d.setdefault("ai", "taskmaster-cli")
-        return d
-
-
 def get_backend(cfg=None) -> Backend:
     config = fleet.load_fleet_config() if cfg is None else cfg
     backend = config.get("backend", "auto") if isinstance(config, dict) else "auto"
 
     if backend == "taskmaster":
-        # Deprecated path: kept for ONE release so existing fleet.json files with
-        # an explicit "backend": "taskmaster" do not hard-break on upgrade. The
-        # TaskMaster binary + this branch are deleted in the gated migration task
-        # (spec §9.4) once golden parity is green.
+        # The taskmaster backend was removed (spec §9.4): a legacy fleet.json
+        # still pinned to it resolves to native (the sole generator) rather than
+        # crashing, with a deprecation warning pointing at the config key.
         warnings.warn(
-            "backend='taskmaster' is deprecated and will be removed in the next "
-            "release; the native engine is now the sole generator. Remove the "
-            "'backend' key from .atlas-ai/fleet.json (or set it to 'native') to "
-            "silence this warning.",
+            "backend='taskmaster' has been removed; using the native engine. "
+            "Remove the 'backend' key from .atlas-ai/fleet.json (or set it to "
+            "'native') to silence this warning.",
             DeprecationWarning,
             stacklevel=2,
         )
-        return TaskMasterBackend(_FACTORY_TOKEN)
 
-    # backend == "native" OR "auto" (the default): the native engine is the sole
-    # generator. 'auto' no longer probes for the task-master binary — it resolves
-    # to NativeBackend unconditionally (spec §9.2).
+    # backend == "native" OR "auto" (the default) OR a removed "taskmaster":
+    # the native engine is the sole generator. 'auto' no longer probes for the
+    # task-master binary — it resolves to NativeBackend unconditionally (spec §9.2).
     return NativeBackend()

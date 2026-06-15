@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FastMCP server for prd-taskmaster.
 
-Registers 32 tools wrapping the sibling modules (pipeline, capabilities,
+Registers 29 tools wrapping the sibling modules (pipeline, capabilities,
 taskmaster, backend, validation, templates) plus server-native helpers
 (calc_tasks, backup_prd, append_workflow, debrief, log_progress,
 gen_test_tasks, read_state, gen_scripts, compute_fleet_waves, context_pack,
@@ -24,13 +24,11 @@ from mcp.server.fastmcp import FastMCP
 from prd_taskmaster import pipeline as P
 from prd_taskmaster import validation as V
 from prd_taskmaster import mode_recommend as C
-from prd_taskmaster import taskmaster as TM
 from prd_taskmaster import templates as TPL
 from prd_taskmaster import lib as LIB
 from prd_taskmaster import fleet as F
 from prd_taskmaster import batch as B
 from prd_taskmaster import task_state as TS
-from prd_taskmaster import tm_parallel as TMP
 from prd_taskmaster import cli as CLI
 from prd_taskmaster import feedback as FB
 from prd_taskmaster.context_pack import build_context_pack
@@ -38,7 +36,7 @@ from prd_taskmaster.context_pack import build_context_pack
 mcp = FastMCP("prd-taskmaster")
 
 
-# ─── Delegation tools (20) ────────────────────────────────────────────────────
+# ─── Delegation tools (17) ────────────────────────────────────────────────────
 
 @mcp.tool()
 def preflight(cwd: str | None = None) -> dict:
@@ -91,12 +89,6 @@ def validate_setup() -> dict:
 
 
 @mcp.tool()
-def init_taskmaster(method: str = "cli") -> dict:
-    """Initialise TaskMaster in the current project via the CLI."""
-    return TM.init_taskmaster(method)
-
-
-@mcp.tool()
 def validate_prd(input_path: str, ai: bool = False) -> dict:
     """Run the deterministic PRD quality checks and return a graded report."""
     return V.run_validate_prd(input_path)
@@ -112,15 +104,6 @@ def load_template(type: str = "comprehensive") -> dict:
 def compute_fleet_waves(concurrency: int = 3, tag: str = "") -> dict:
     """Compute Atlas Fleet dependency waves for the selected TaskMaster tag."""
     return F.run_fleet_waves(concurrency, tag)
-
-
-@mcp.tool()
-def tm_parallel_expand(tag: str = "", dry_run: bool = False) -> dict:
-    """Run native TaskMaster expansion in isolated parallel workdirs."""
-    try:
-        return TMP.run_tm_parallel(tag=tag or None, dry_run=dry_run)
-    except LIB.CommandError as exc:
-        return {"ok": False, "error": exc.message, **exc.extra}
 
 
 @mcp.tool()
@@ -162,17 +145,6 @@ def _backend_tool_call(fn, *args, **kwargs) -> dict:
 
 
 @mcp.tool()
-def backend_detect() -> dict:
-    """Detect resolved backend, both backend detect() results, and ai_ops.
-
-    If ai_ops is "agent", parse_prd, expand_tasks, and rate_tasks may return
-    ok=false with agent_action_required; headless orchestrators should pre-check
-    this tool's ai_ops before starting AI operations.
-    """
-    return _backend_tool_call(CLI.run_backend_detect)
-
-
-@mcp.tool()
 def init_project() -> dict:
     """Initialise the resolved backend project state."""
     return _backend_tool_call(CLI.run_init_project)
@@ -182,7 +154,7 @@ def init_project() -> dict:
 def parse_prd(prd_path: str, num_tasks: int, tag: str = "") -> dict:
     """Parse a PRD through the resolved backend.
 
-    When backend_detect reports ai_ops="agent", this can return ok=false with
+    When the resolved native backend's ai_ops is "agent", this can return ok=false with
     agent_action_required instead of doing headless AI work.
     """
     return _backend_tool_call(CLI.run_parse_prd, prd_path, num_tasks, tag=tag or None)
@@ -196,7 +168,7 @@ def expand_tasks(
 ) -> dict:
     """Expand selected or all pending tasks through the resolved backend.
 
-    When backend_detect reports ai_ops="agent", this can return ok=false with
+    When the resolved native backend's ai_ops is "agent", this can return ok=false with
     agent_action_required instead of doing headless AI work.
     """
     return _backend_tool_call(
@@ -211,7 +183,7 @@ def expand_tasks(
 def rate_tasks(tag: str = "", research: bool = True) -> dict:
     """Rate task complexity through the resolved backend.
 
-    When backend_detect reports ai_ops="agent", this can return ok=false with
+    When the resolved native backend's ai_ops is "agent", this can return ok=false with
     agent_action_required instead of doing headless AI work.
     """
     return _backend_tool_call(CLI.run_rate, tag=tag or None, research=research)

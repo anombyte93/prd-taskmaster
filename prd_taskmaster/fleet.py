@@ -45,10 +45,13 @@ DEFAULT_FLEET_CONFIG = {
     "routing": DEFAULT_ROUTING,
     "experimental_backends": False,
     "token_economy": "balanced",
-    "backend": "auto",
+    "backend": "native",
 }
 
-BACKEND_CHOICES = {"auto", "taskmaster", "native"}
+# The native engine is the sole generator; "auto" is still ACCEPTED by
+# get_backend() (it resolves to native), but it is no longer the emitted default
+# and the removed "taskmaster" value is no longer a valid persisted choice.
+BACKEND_CHOICES = {"native"}
 
 # ─── Atlas hybrid provider: engine config block (Chunk 1) ─────────────────────
 PROVIDER_MODE_CHOICES = {"hybrid", "api_only", "cli_only", "plan_only"}

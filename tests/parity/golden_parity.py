@@ -5,13 +5,14 @@ fixtures/, normalizes them to a structural shape (dropping volatile prose),
 and diffs them. Only diffs NOT in the pre-declared `intended` whitelist fail
 parity.
 
-IMPORTANT: parse_prd does NOT return the task graph in its result dict — both
-NativeBackend.parse_prd (backend.py:409-419) and TaskMasterBackend.parse_prd
-(backend.py:735-738) return {ok, task_count, tag, backend, ...} with no "tasks"
-key; the tasks are written to .taskmaster/tasks/tasks.json. So capture reads the
-graph from DISK via parallel.load_tagged + parallel.get_tasks AFTER parse_prd.
-Each backend leg runs in its OWN temp cwd + tag so the two legs do not overwrite
-each other's tasks.json.
+IMPORTANT: parse_prd does NOT return the task graph in its result dict —
+NativeBackend.parse_prd returns {ok, task_count, tag, backend, ...} with no
+"tasks" key; the tasks are written to .taskmaster/tasks/tasks.json. So capture
+reads the graph from DISK via parallel.load_tagged + parallel.get_tasks AFTER
+parse_prd. Each leg runs in its OWN temp cwd + tag so legs do not overwrite each
+other's tasks.json. The task-master backend was removed (spec §9.4): its golden
+capture is a frozen committed artifact and the 'taskmaster' leg is no longer
+re-runnable — only the native leg is live.
 
 This is the binary acceptance gate referenced by the migration deletion task.
 Skill: AI-golden-parity-refactor. Spec: §9.3.
@@ -144,12 +145,20 @@ def _capture(backend_name: str, out_dir: Path) -> int:
     extract_graph_from_disk — parse_prd's result dict has no "tasks" key.
 
     Imported lazily so the pure differ tests do not drag in backend/model deps."""
-    from prd_taskmaster.backend import NativeBackend, TaskMasterBackend, _FACTORY_TOKEN
+    from prd_taskmaster.backend import NativeBackend
 
     out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     if backend_name == "taskmaster":
-        be = TaskMasterBackend(_FACTORY_TOKEN)
+        # The task-master backend was removed (spec §9.4): the golden TaskMaster
+        # capture is a frozen, committed artifact and is no longer re-capturable.
+        # Gate against the committed gold; only the native leg is live.
+        print(
+            "the 'taskmaster' capture leg was removed with the backend (spec §9.4); "
+            "gate against the frozen committed gold instead",
+            file=sys.stderr,
+        )
+        return 2
     elif backend_name == "native":
         be = NativeBackend()
     else:

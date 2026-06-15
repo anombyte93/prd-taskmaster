@@ -1,9 +1,11 @@
-"""Migration tests: backend='auto' resolves to NativeBackend unconditionally,
-backend='taskmaster' still works for one deprecation release with a warning.
+"""Migration tests: NativeBackend is the sole generator. The task-master backend
+was removed (spec §9.4); backend='auto' resolves to NativeBackend unconditionally
+and a legacy backend='taskmaster' config falls back to native with a warning.
 
-Spec: docs/design/2026-06-15-atlas-engine-hybrid-provider-setup.md §9.2
+Spec: docs/design/2026-06-15-atlas-engine-hybrid-provider-setup.md §9.2, §9.4
 """
 
+import importlib
 import warnings
 
 import pytest
@@ -11,46 +13,20 @@ import pytest
 from prd_taskmaster import backend as backend_mod
 from prd_taskmaster.backend import (
     NativeBackend,
-    TaskMasterBackend,
     get_backend,
 )
 
 
-def test_auto_resolves_native_even_when_taskmaster_binary_present(monkeypatch):
-    """The migration's core invariant: 'auto' is NativeBackend even when the
-    task-master binary is on PATH and detect() reports it available.
-
-    We monkeypatch TaskMasterBackend.detect to claim availability; the old
-    code would have returned the TaskMasterBackend in that case. Post-flip it
-    must NOT — 'auto' returns NativeBackend unconditionally.
-    """
-    monkeypatch.setattr(
-        TaskMasterBackend,
-        "detect",
-        lambda self: {"name": "taskmaster", "available": True, "ai_ops": True},
-    )
+def test_auto_resolves_native(monkeypatch):
+    """The migration's core invariant: 'auto' is NativeBackend. Post-deletion
+    there is no task-master binary probe at all — native is unconditional."""
     be = get_backend({"backend": "auto"})
     assert isinstance(be, NativeBackend)
     assert be.name == "native"
 
 
-def test_auto_resolves_native_when_taskmaster_binary_absent(monkeypatch):
-    monkeypatch.setattr(
-        TaskMasterBackend,
-        "detect",
-        lambda self: {"name": "taskmaster", "available": False, "ai_ops": False},
-    )
-    be = get_backend({"backend": "auto"})
-    assert isinstance(be, NativeBackend)
-
-
-def test_missing_backend_key_defaults_to_native(monkeypatch):
+def test_missing_backend_key_defaults_to_native():
     """An empty/legacy config (no 'backend' key) defaults to 'auto' -> Native."""
-    monkeypatch.setattr(
-        TaskMasterBackend,
-        "detect",
-        lambda self: {"name": "taskmaster", "available": True},
-    )
     be = get_backend({})
     assert isinstance(be, NativeBackend)
 
@@ -60,27 +36,27 @@ def test_explicit_native_returns_native():
     assert isinstance(be, NativeBackend)
 
 
-def test_explicit_taskmaster_still_works_but_warns():
-    """backend='taskmaster' is honored for ONE deprecation release, with a
-    DeprecationWarning so dispatch logs surface the impending removal."""
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        be = get_backend({"backend": "taskmaster"})
-    assert isinstance(be, TaskMasterBackend)
-    assert any(issubclass(w.category, DeprecationWarning) for w in caught)
-    assert any("taskmaster" in str(w.message).lower() for w in caught)
+# ─── Post-deletion: the task-master surface is gone (Chunk 6 Task 4) ──────────
+
+def test_taskmaster_backend_is_removed():
+    """Post-deletion: TaskMasterBackend no longer exists in the backend module."""
+    assert not hasattr(backend_mod, "TaskMasterBackend")
 
 
-def test_get_backend_does_not_call_taskmaster_detect_on_auto(monkeypatch):
-    """Regression guard: the old auto path constructed a TaskMasterBackend and
-    called .detect(). The flip must NOT touch TaskMasterBackend at all on auto —
-    no binary probe cost, no import-time spawn."""
-    called = {"detect": False}
+def test_tm_parallel_module_is_removed():
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("prd_taskmaster.tm_parallel")
 
-    def boom(self):
-        called["detect"] = True
-        return {"available": True}
 
-    monkeypatch.setattr(TaskMasterBackend, "detect", boom)
-    get_backend({"backend": "auto"})
-    assert called["detect"] is False
+def test_backend_choices_is_native_only():
+    from prd_taskmaster import fleet
+
+    assert fleet.BACKEND_CHOICES == {"native"}
+
+
+def test_taskmaster_backend_request_falls_back_to_native(recwarn):
+    """An old fleet.json still pinned to backend='taskmaster' must NOT crash now
+    that the class is gone — it resolves to native with a deprecation warning."""
+    be = get_backend({"backend": "taskmaster"})
+    assert isinstance(be, NativeBackend)
+    assert any(issubclass(w.category, DeprecationWarning) for w in recwarn.list)

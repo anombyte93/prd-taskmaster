@@ -214,22 +214,24 @@ def test_context_pack_tool_returns_core_pack(tmp_path):
     }
 
 
-def test_server_registers_32_tools():
-    """Verify server.py declares all 32 expected tool functions at module scope."""
+def test_server_registers_29_tools():
+    """Verify server.py declares all 29 expected tool functions at module scope.
+
+    The task-master backend was removed (spec §9.4): the init_taskmaster,
+    tm_parallel_expand, and backend_detect MCP tools were deleted (32 -> 29).
+    """
     import server as S
     expected = {
         "preflight", "current_phase", "advance_phase", "check_gate",
-        "detect_taskmaster", "init_taskmaster", "validate_setup",
+        "detect_taskmaster", "validate_setup",
         "detect_capabilities", "load_template", "validate_prd",
         "calc_tasks", "gen_test_tasks", "backup_prd", "append_workflow",
         "debrief", "log_progress", "read_state", "gen_scripts",
         "compute_fleet_waves",
         "engine_preflight",
-        "tm_parallel_expand",
         "next_task",
         "claim_task",
         "set_task_status",
-        "backend_detect",
         "init_project",
         "parse_prd",
         "expand_tasks",
@@ -238,7 +240,7 @@ def test_server_registers_32_tools():
         "feedback_submit",
         "feedback_report",
     }
-    assert len(expected) == 32
+    assert len(expected) == 29
     public_attrs = {name for name in dir(S) if not name.startswith("_")}
     missing = expected - public_attrs
     assert not missing, f"missing tools: {sorted(missing)}"
@@ -247,7 +249,7 @@ def test_server_registers_32_tools():
 def test_backend_ai_tools_document_agent_action_required():
     import server as S
 
-    for name in ("backend_detect", "parse_prd", "expand_tasks", "rate_tasks"):
+    for name in ("parse_prd", "expand_tasks", "rate_tasks"):
         doc = getattr(S, name).__doc__ or ""
         assert "agent_action_required" in doc
         assert "ai_ops" in doc
