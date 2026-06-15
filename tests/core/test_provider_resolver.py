@@ -58,3 +58,37 @@ def test_plan_only_mode_always_returns_plan(monkeypatch):
     _patch(monkeypatch, usable=True, probe=True, key={"provider": "anthropic"})
     h = pr.resolve_provider("main", fleet_config=_engine(provider_mode="plan_only"))
     assert h.kind == "plan"
+
+
+def test_cli_first_when_keyless_default_null(monkeypatch):
+    # Both a usable CLI and a key exist; keyless_default unset (None) -> CLI wins.
+    _patch(monkeypatch, role_provider="claude-code", usable=True, probe=True,
+           key={"provider": "anthropic"})
+    h = pr.resolve_provider("main", fleet_config=_engine(keyless_default=None))
+    assert h.kind == "cli"
+    assert h.provider == "claude-code"
+    assert h.model == "sonnet"
+
+
+def test_cli_first_when_keyless_default_true(monkeypatch):
+    _patch(monkeypatch, role_provider="claude-code", usable=True, probe=True,
+           key={"provider": "anthropic"})
+    h = pr.resolve_provider("main", fleet_config=_engine(keyless_default=True))
+    assert h.kind == "cli"
+
+
+def test_key_first_when_keyless_default_false(monkeypatch):
+    # Same facts, keyless_default False -> API wins despite the usable CLI.
+    _patch(monkeypatch, role_provider="claude-code", usable=True, probe=True,
+           key={"provider": "anthropic"})
+    h = pr.resolve_provider("main", fleet_config=_engine(keyless_default=False))
+    assert h.kind == "api"
+    assert h.provider == "anthropic"
+
+
+def test_key_first_demotes_to_cli_when_no_key(monkeypatch):
+    # keyless_default False but no key present -> still falls to the usable CLI,
+    # not the plan floor (api tier missing -> next tier in order).
+    _patch(monkeypatch, role_provider="claude-code", usable=True, probe=True, key=None)
+    h = pr.resolve_provider("main", fleet_config=_engine(keyless_default=False))
+    assert h.kind == "cli"
