@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from prd_taskmaster.fleet import engine_config
 from prd_taskmaster.lib import emit_json_error
 from prd_taskmaster.providers import (
     _has_perplexity_api_key,
@@ -364,7 +365,7 @@ def detect_capabilities() -> dict:
     }
 
 
-def validate_setup() -> dict:
+def validate_setup(provider_mode: str | None = None) -> dict:
     """Run all Phase 0 SETUP checks and return per-check pass/fail + fix hints.
 
     Returns EXACTLY 6 checks (spec §5):
@@ -381,6 +382,13 @@ def validate_setup() -> dict:
       critical_failures: int
       checks: list[dict]   — exactly 6 entries, each with id, passed, fix
     """
+    if provider_mode is None:
+        provider_mode = engine_config().get("provider_mode", "hybrid")
+    # When the engine is NOT plan_only it no longer depends on the task-master
+    # binary (sub-project #1 removes it), so its presence/version is advisory,
+    # not a critical gate. plan_only keeps the binary as a hard requirement.
+    taskmaster_advisory = provider_mode != "plan_only"
+
     checks = []
 
     # Check 1: task-master binary installed
@@ -407,9 +415,16 @@ def validate_setup() -> dict:
         "passed": bool(cli_path),
         "detail": (
             f"Found at {cli_path} (version {cli_version})" if cli_path
-            else "Not found in PATH"
+            else (
+                "Not found in PATH (advisory: engine no longer requires it)"
+                if taskmaster_advisory else "Not found in PATH"
+            )
         ),
-        "fix": "npm install -g task-master-ai" if not cli_path else None,
+        "fix": (
+            None if cli_path or taskmaster_advisory
+            else "npm install -g task-master-ai"
+        ),
+        **({"severity": "advisory"} if taskmaster_advisory else {}),
     })
 
     # Check 2: version >= minimum
@@ -423,8 +438,11 @@ def validate_setup() -> dict:
             if version_info.get("detected_version")
             else "version not detectable"
         ),
-        "fix": "npm install -g task-master-ai@latest" if not version_info["supported"] else None,
-        "severity": "warning",
+        "fix": (
+            None if version_info["supported"] or taskmaster_advisory
+            else "npm install -g task-master-ai@latest"
+        ),
+        "severity": "advisory" if taskmaster_advisory else "warning",
     })
 
     # Check 3: .taskmaster/ directory exists
@@ -560,10 +578,11 @@ def validate_setup() -> dict:
         "severity": "warning",
     })
 
-    # Aggregate — only non-warning failures are "critical"
+    # Aggregate — neither "warning" nor "advisory" failures are "critical"
+    _non_critical = {"warning", "advisory"}
     critical_failures = [
         c for c in checks
-        if not c["passed"] and c.get("severity") != "warning"
+        if not c["passed"] and c.get("severity") not in _non_critical
     ]
     all_passed = len(critical_failures) == 0
 
