@@ -50,6 +50,25 @@ DEFAULT_FLEET_CONFIG = {
 
 BACKEND_CHOICES = {"auto", "taskmaster", "native"}
 
+# ─── Atlas hybrid provider: engine config block (Chunk 1) ─────────────────────
+PROVIDER_MODE_CHOICES = {"hybrid", "api_only", "cli_only", "plan_only"}
+STRUCTURED_JSON_CHOICES = {"auto", "schema", "prompt"}
+
+DEFAULT_ENGINE_CONFIG = {
+    "provider_mode": "hybrid",        # hybrid | api_only | cli_only | plan_only
+    "keyless_default": None,          # null until wizard asks; True=CLI-first, False=key-first
+    "cli_agent": {
+        "structured_json": "auto",    # auto | schema | prompt
+        "probe_cache_ttl_s": 900,
+        "per_call_timeout_s": 180,
+        "max_inflight": None,         # null -> inherit max_concurrency
+    },
+    "concurrency": {
+        "structured_gen": None,       # null -> inherit max_concurrency
+        "ram_aware": False,           # reserved for sub-project #2
+    },
+}
+
 
 ATLAS_CONFIG_PATH = Path(".atlas-ai") / "config" / "atlas.json"
 
@@ -70,6 +89,65 @@ def _atlas_config_economy() -> str | None:
         return None
     val = raw.get("token_economy")
     return val if isinstance(val, str) else None
+
+
+def _is_pos_int(value):
+    """True for a real positive int, excluding bool (bool subclasses int)."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def engine_config(cfg=None):
+    """Merged `engine` block with all defaults applied (Chunk 1).
+
+    Accepts a raw fleet.json dict OR the output of `load_fleet_config` (both
+    carry an `engine` key after this change). Returns a fresh dict every call.
+    Malformed values fall back silently, exactly like `load_fleet_config`.
+    """
+    eng = {
+        "provider_mode": DEFAULT_ENGINE_CONFIG["provider_mode"],
+        "keyless_default": DEFAULT_ENGINE_CONFIG["keyless_default"],
+        "cli_agent": dict(DEFAULT_ENGINE_CONFIG["cli_agent"]),
+        "concurrency": dict(DEFAULT_ENGINE_CONFIG["concurrency"]),
+    }
+    if not isinstance(cfg, dict):
+        return eng
+    raw = cfg.get("engine")
+    if not isinstance(raw, dict):
+        return eng
+
+    mode = raw.get("provider_mode")
+    if mode in PROVIDER_MODE_CHOICES:
+        eng["provider_mode"] = mode
+
+    keyless = raw.get("keyless_default")
+    # Only an explicit bool is persisted; None means "wizard hasn't asked".
+    if isinstance(keyless, bool):
+        eng["keyless_default"] = keyless
+
+    cli = raw.get("cli_agent")
+    if isinstance(cli, dict):
+        sj = cli.get("structured_json")
+        if sj in STRUCTURED_JSON_CHOICES:
+            eng["cli_agent"]["structured_json"] = sj
+        ttl = cli.get("probe_cache_ttl_s")
+        if _is_pos_int(ttl):
+            eng["cli_agent"]["probe_cache_ttl_s"] = ttl
+        timeout = cli.get("per_call_timeout_s")
+        if _is_pos_int(timeout):
+            eng["cli_agent"]["per_call_timeout_s"] = timeout
+        inflight = cli.get("max_inflight")
+        if _is_pos_int(inflight):
+            eng["cli_agent"]["max_inflight"] = inflight
+
+    conc = raw.get("concurrency")
+    if isinstance(conc, dict):
+        sg = conc.get("structured_gen")
+        if _is_pos_int(sg):
+            eng["concurrency"]["structured_gen"] = sg
+        if isinstance(conc.get("ram_aware"), bool):
+            eng["concurrency"]["ram_aware"] = conc["ram_aware"]
+
+    return eng
 
 
 def load_fleet_config(path=None):
