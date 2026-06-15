@@ -12,7 +12,9 @@ returns naturally when the transport closes.
 """
 from __future__ import annotations
 
+import functools
 import sys
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -33,7 +35,63 @@ from prd_taskmaster import cli as CLI
 from prd_taskmaster import feedback as FB
 from prd_taskmaster.context_pack import build_context_pack
 
-mcp = FastMCP("prd-taskmaster")
+_mcp = FastMCP("prd-taskmaster")
+
+
+class _HardenedMCP:
+    """Wraps FastMCP so a single tool can never crash the stdio transport.
+
+    BUG3: an unhandled exception inside a tool body (e.g. ``backup_prd`` doing
+    raw ``Path.read_text()`` on a directory / unreadable file / full disk)
+    propagated out of the tool function and tore down the whole MCP process —
+    the operator saw "MCP error -32000: Connection closed" and ALL tools
+    vanished from the session at once. Tools must fail *closed* with a
+    structured ``{"ok": False, "error": ...}`` payload, never by terminating
+    the host. This wrapper installs that contract on every ``@mcp.tool()``
+    uniformly, regardless of whether the individual body remembered to catch.
+    """
+
+    def __init__(self, inner: FastMCP) -> None:
+        self._inner = inner
+
+    def tool(self, *t_args, **t_kwargs):
+        inner_decorator = self._inner.tool(*t_args, **t_kwargs)
+
+        def decorator(fn):
+            @functools.wraps(fn)
+            def guarded(*args, **kwargs):
+                try:
+                    return fn(*args, **kwargs)
+                except LIB.CommandError as exc:
+                    return {"ok": False, "error": exc.message, **getattr(exc, "extra", {})}
+                except SystemExit as exc:
+                    # A backend op called sys.exit(); surface it, don't let it
+                    # bubble up and stop mcp.run().
+                    return {"ok": False, "error": "tool exited", "exit": exc.code}
+                except BaseException as exc:  # noqa: BLE001 — fail closed, never crash the host
+                    # Diagnostics go to stderr (captured by the MCP host log),
+                    # never to stdout (which carries the JSON-RPC stream).
+                    print(
+                        f"[prd-taskmaster] tool {fn.__name__!r} raised "
+                        f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    return {
+                        "ok": False,
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "tool": fn.__name__,
+                    }
+
+            return inner_decorator(guarded)
+
+        return decorator
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+mcp = _HardenedMCP(_mcp)
 
 
 # ─── Delegation tools (17) ────────────────────────────────────────────────────
@@ -227,13 +285,25 @@ def gen_test_tasks(total: int) -> dict:
 
 @mcp.tool()
 def backup_prd(input_path: str) -> dict:
-    """Copy a PRD to a timestamped prd-backup-YYYYMMDD-HHMMSS.md sibling."""
+    """Copy a PRD to a timestamped prd-backup-YYYYMMDD-HHMMSS.md sibling.
+
+    Hardened (BUG3): the source may be a directory, unreadable, non-UTF-8, or
+    the destination may be unwritable / on a full disk. Every such case returns
+    a structured error instead of raising — a failed backup must not close the
+    MCP transport.
+    """
     src = Path(input_path)
     if not src.exists():
         return {"ok": False, "error": f"source missing: {input_path}"}
+    if not src.is_file():
+        return {"ok": False, "error": f"source is not a file: {input_path}"}
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     dst = src.parent / f"prd-backup-{ts}.md"
-    dst.write_text(src.read_text())
+    try:
+        # Binary copy: tolerates non-UTF-8 PRDs that read_text() would choke on.
+        dst.write_bytes(src.read_bytes())
+    except OSError as exc:
+        return {"ok": False, "error": f"backup failed: {exc}", "source": str(src)}
     return {"ok": True, "backup_path": str(dst)}
 
 
