@@ -138,9 +138,53 @@ def _run_validate_step(recommendation: dict, mode: str | None) -> dict:
     return {**base, "ready": ready, "live_probes": live_probes}
 
 
-def run_setup(accept_default: bool = False, validate_only: bool = False) -> dict:
+def _has_spawning_cli() -> bool:
+    return any(shutil.which(b) for b in ("claude", "codex", "gemini"))
+
+
+def add_key(var: str, ask_value, ask_keyless) -> dict:
+    """Add-key step (decision #2).
+
+    `ask_value()` returns the raw key string (e.g. an input() call).
+    `ask_keyless()` returns True if the user wants the FREE keyless CLI as
+    primary, False if the PAID key. Both are injected so the step is testable.
+
+    Writes the key to .env (via _ensure_env_entry — non-secret local append),
+    then — only when a key was added AND a spawning CLI exists — asks the
+    keyless/paid question and persists engine.keyless_default. With no CLI the
+    question is meaningless (only one path exists) so the flag stays unset
+    (null) — no global default imposed (decision #2)."""
+    value = (ask_value() or "").strip()
+    if not value:
+        return {"ok": False, "reason": "no key entered", "asked_keyless": False,
+                "keyless_default": fleet.engine_config().get("keyless_default")}
+
+    changed = _ensure_env_entry(Path(".env"), var, value)
+
+    asked = False
+    keyless_default = fleet.engine_config().get("keyless_default")
+    if _has_spawning_cli():
+        asked = True
+        # True  → keyless CLI primary  → keyless_default True
+        # False → paid key primary     → keyless_default False
+        keyless_default = bool(ask_keyless())
+        fleet.save_engine_config({"keyless_default": keyless_default})
+
+    return {
+        "ok": True,
+        "env_changed": changed,
+        "var": var,
+        "asked_keyless": asked,
+        "keyless_default": keyless_default,
+    }
+
+
+def run_setup(accept_default: bool = False, validate_only: bool = False, choose=None) -> dict:
     """Drive the wizard. Returns a dict; never exits, never raises on the
     happy path. Non-interactive when accept_default or validate_only is set."""
+    if choose is None:
+        choose = input
+
     rec = _recommend()
     recommendation = rec["recommendation"]
     caps = rec["capabilities"]
@@ -166,6 +210,28 @@ def run_setup(accept_default: bool = False, validate_only: bool = False) -> dict
         result["validation"] = _run_validate_step(recommendation, mode)
         return result
 
-    # Interactive branch is layered in Task 4 (Customise / Add-key prompts).
+    # Interactive: present the panel, read a one-char choice. The default
+    # (Enter / 'a') accepts. 'k' adds a key + asks the decision-#2 question.
+    choice = (choose() or "").strip().lower()
+    if choice in ("", "a", "accept"):
+        configured = run_configure_providers()
+        result["accepted"] = True
+        result["configured"] = configured
+    elif choice in ("k", "key"):
+        result["add_key"] = add_key(
+            var="ANTHROPIC_API_KEY",
+            ask_value=lambda: choose("Paste API key: "),
+            ask_keyless=lambda: (choose(
+                "Primary provider? [k]eyless (free) / [p]aid key: ").strip().lower()
+                not in ("p", "paid")),
+        )
+        configured = run_configure_providers()
+        result["accepted"] = True
+        result["configured"] = configured
+    elif choice in ("c", "customise", "customize"):
+        # Customise = repair-on-detect for now (task-master-style picker is a
+        # later enhancement); run_configure_providers never clobbers user choices.
+        result["configured"] = run_configure_providers()
+        result["accepted"] = True
     result["validation"] = _run_validate_step(recommendation, mode)
     return result

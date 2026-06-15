@@ -125,3 +125,64 @@ def test_validate_only_does_not_configure(tmp_path, monkeypatch):
     result = setup_wizard.run_setup(validate_only=True)
     assert result.get("accepted") is not True
     assert result["validation"]["ready"] is True
+
+
+def test_add_key_writes_env_and_keyless_flag_when_cli_present(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _stub_detectors(monkeypatch, claude=True)  # a spawning CLI exists
+    # user supplies a key, then answers "paid" (key as primary) -> keyless_default False
+    result = setup_wizard.add_key(
+        var="ANTHROPIC_API_KEY",
+        ask_value=lambda: "sk-newkey",
+        ask_keyless=lambda: False,
+    )
+    env_text = (tmp_path / ".env").read_text()
+    assert 'ANTHROPIC_API_KEY="sk-newkey"' in env_text
+    # Read the PERSISTED engine block back. Chunk 1's engine_config() with no arg
+    # returns pure defaults (it does not read the file); the on-disk value is
+    # surfaced via load_fleet_config()'s merged engine block.
+    engine = setup_wizard.fleet.engine_config(setup_wizard.fleet.load_fleet_config())
+    assert engine["keyless_default"] is False
+    assert result["keyless_default"] is False
+    assert result["asked_keyless"] is True
+
+
+def test_add_key_keyless_true_when_user_chooses_keyless(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _stub_detectors(monkeypatch, claude=True)
+    setup_wizard.add_key(
+        var="ANTHROPIC_API_KEY",
+        ask_value=lambda: "sk-newkey",
+        ask_keyless=lambda: True,
+    )
+    # Persisted value read via the file-reading path (see note above).
+    persisted = setup_wizard.fleet.engine_config(setup_wizard.fleet.load_fleet_config())
+    assert persisted["keyless_default"] is True
+
+
+def test_add_key_does_not_ask_keyless_without_cli(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _stub_detectors(monkeypatch, claude=False, codex=False, gemini=False)
+    def must_not_ask():
+        raise AssertionError("asked keyless question with no CLI present")
+    result = setup_wizard.add_key(
+        var="ANTHROPIC_API_KEY",
+        ask_value=lambda: "sk-newkey",
+        ask_keyless=must_not_ask,
+    )
+    assert result["asked_keyless"] is False
+    # flag stays null (unset) — no global default imposed
+    assert setup_wizard.fleet.engine_config()["keyless_default"] is None
+
+
+def test_add_key_blank_value_is_noop(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _stub_detectors(monkeypatch, claude=True)
+    result = setup_wizard.add_key(
+        var="ANTHROPIC_API_KEY",
+        ask_value=lambda: "   ",
+        ask_keyless=lambda: True,
+    )
+    assert result["ok"] is False
+    assert not (tmp_path / ".env").exists() or 'ANTHROPIC_API_KEY' not in (tmp_path / ".env").read_text()
+    assert result["asked_keyless"] is False

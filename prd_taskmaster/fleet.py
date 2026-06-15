@@ -150,6 +150,41 @@ def engine_config(cfg=None):
     return eng
 
 
+def save_engine_config(updates):
+    """Deep-merge `updates` into the `engine` block of .atlas-ai/fleet.json,
+    write atomically, and return the new merged engine block (Chunk 5 contract).
+
+    Only the `engine` sub-tree is touched; every other top-level key in the file
+    is preserved. A missing/unreadable/non-dict file is treated as empty. One
+    level of nested-dict merge (matching the engine block's shape) is applied so
+    a partial `{"cli_agent": {...}}` update does not clobber sibling cli_agent
+    keys. The returned block is normalized through `engine_config` (defaults +
+    validation) so callers see exactly what a fresh load would.
+    """
+    path = FLEET_CONFIG_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        doc = json.loads(path.read_text()) if path.is_file() else {}
+    except (json.JSONDecodeError, OSError):
+        doc = {}
+    if not isinstance(doc, dict):
+        doc = {}
+    engine = doc.get("engine")
+    if not isinstance(engine, dict):
+        engine = {}
+    if isinstance(updates, dict):
+        for k, v in updates.items():
+            if isinstance(v, dict) and isinstance(engine.get(k), dict):
+                engine[k].update(v)
+            else:
+                engine[k] = v
+    doc["engine"] = engine
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(doc, indent=2))
+    tmp.replace(path)
+    return engine_config(doc)
+
+
 def load_fleet_config(path=None):
     """Load .atlas-ai/fleet.json merged over defaults.
 
