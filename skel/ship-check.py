@@ -172,6 +172,103 @@ def _head_commit(repo_root: Path) -> str:
     return sha or "UNKNOWN"
 
 
+def _card_path_for(cdd_dir: Path, tid) -> "Path | None":
+    """Return the Path to the CDD card for task <tid>, or None if absent.
+
+    Mirrors the _has_card_for existence check but returns the actual path so
+    callers can read the card contents.  Prefers the direct task-<tid>.json;
+    falls back to the first combined card whose hyphen-separated id-list
+    contains <tid>.
+    """
+    tid_str = str(tid)
+    direct = cdd_dir / f"task-{tid_str}.json"
+    if direct.exists():
+        return direct
+    for card in cdd_dir.glob("task-*.json"):
+        stem = card.stem
+        if not stem.startswith("task-"):
+            continue
+        ids = stem[len("task-"):].split("-")
+        if tid_str in ids:
+            return card
+    return None
+
+
+def gate_reachability(repo_root: Path, tasks: list) -> Tuple[bool, List[str]]:
+    """Gate 6 — block done wired/live tasks whose recorded reachability verdict
+    is ORPHAN, ERROR, or absent.
+
+    Reads the per-task verdict from the CDD card's 'reachability' block (written
+    by execute-task step RA6). Does NOT re-execute the reachability sweep — the
+    standalone skel must stay stdlib-only. FAIL-CLOSED on missing/unknown verdicts
+    for wired/live done tasks.
+
+    Tiers that require a reachability check: 'wired', 'live'.
+    All other tiers (spike, domain-model, unset) are skipped.
+    Non-done tasks are also skipped.
+    """
+    failures: List[str] = []
+    cdd_dir = repo_root / ".atlas-ai" / "cdd"
+    _REQUIRED_TIERS = {"wired", "live"}
+    _PASS_VERDICTS = {"WIRED", "EXEMPT"}
+    _FAIL_VERDICTS = {"ORPHAN", "ERROR"}
+
+    for t in tasks:
+        if t.get("status") != "done":
+            continue
+        tier = (
+            t.get("phaseConfig", {}).get("tier")
+            or t.get("tier")
+            or "domain-model"
+        )
+        if tier not in _REQUIRED_TIERS:
+            continue
+
+        tid = t.get("id")
+        card_path = _card_path_for(cdd_dir, tid)
+        if card_path is None:
+            failures.append(
+                f"task {tid}: tier={tier} requires reachability but no CDD card found"
+            )
+            continue
+
+        try:
+            card = json.loads(card_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            failures.append(
+                f"task {tid}: tier={tier} — cannot read CDD card ({exc})"
+            )
+            continue
+
+        reach = card.get("reachability")
+        if not reach:
+            failures.append(
+                f"task {tid}: tier={tier} requires a reachability check, but its CDD card has"
+                f" no 'reachability' block — run the execute-task reachability sweep, then wire"
+                f" it or re-status deferred/scaffold"
+            )
+            continue
+
+        verdict = reach.get("verdict") if isinstance(reach, dict) else None
+        if verdict in _PASS_VERDICTS:
+            continue
+        elif verdict in _FAIL_VERDICTS:
+            modules = reach.get("modules", []) if isinstance(reach, dict) else []
+            mod_str = f" ({', '.join(modules)})" if modules else ""
+            failures.append(
+                f"task {tid}: reachability {verdict}{mod_str} — wire the module(s)"
+                f" into the running system or re-status deferred/scaffold"
+            )
+        else:
+            # Unknown / garbage verdict — fail-closed.
+            failures.append(
+                f"task {tid}: tier={tier} — unknown reachability verdict {verdict!r};"
+                f" expected WIRED, EXEMPT, ORPHAN, or ERROR"
+            )
+
+    return len(failures) == 0, failures
+
+
 def gate_oracle(repo_root: Path, tasks: list, head_commit: str) -> Tuple[bool, List[str]]:
     """Re-grade every DONE task via the atlas oracle CLI. FAIL-CLOSED.
 
@@ -255,6 +352,9 @@ def run_all_gates(repo_root: Path) -> Tuple[bool, List[str]]:
         head = _head_commit(repo_root)
         _, f5 = gate_oracle(repo_root, tasks, head)
         failures.extend(f5)
+
+        _, f6 = gate_reachability(repo_root, tasks)
+        failures.extend(f6)
 
     _, f4 = gate_plan(repo_root)
     failures.extend(f4)
