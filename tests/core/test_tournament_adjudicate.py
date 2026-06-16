@@ -13,6 +13,14 @@ Coverage:
   T6. settle_job: stub exits 0 with ok:true → returns parsed envelope.
   T7. settle_job: stub exits 1 with ok:false → returns ok:false WITHOUT raising.
   T8. settle_job: stub emits garbage → raises ValueError.
+  T9. settle_job: stub sleeps → raises ValueError (timeout) — B1.
+  T10. adjudicate_submission: bad entry_fee_paid / fakery_stake (non-int string) → 0 — B2.
+  T11. adjudicate_job: one malformed racer (no claimant_id) → fail-closed ERROR submission,
+       other valid racers still adjudicated, job writes submissions.json — I1 / M2.
+  T12. settle_job: non-existent binary → raises ValueError — M3.
+  T13. adjudicate_submission: evidence_dir + ledger_dir created before oracle runs — I2.
+  T14. adjudicate_submission: claimant_id path traversal → sanitized in path, original id
+       preserved in Submission.claimant.id — I3.
 """
 
 from __future__ import annotations
@@ -20,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import time
 from pathlib import Path
 
 import pytest
@@ -293,15 +302,7 @@ def test_settle_job_ok_true(tmp_path):
     job_dir = tmp_path / "job"
     job_dir.mkdir()
 
-    result = settle_job(
-        job_dir=job_dir,
-        tournament_cmd=[str(stub), "tournament", "settle"],
-        # tournament_cmd is what the adjudicator prepends — but settle_job itself
-        # builds: tournament_cmd + ["tournament","settle","--job",job_dir]
-        # so we pass only the binary here
-    )
-    # settle_job constructs: tournament_cmd + ["tournament","settle","--job",...]
-    # We need just the stub binary as tournament_cmd
+    # M1 — only one call; the dead first call has been removed.
     result = settle_job(
         job_dir=job_dir,
         tournament_cmd=[str(stub)],
@@ -350,3 +351,220 @@ def test_settle_job_garbage_raises(tmp_path):
             job_dir=job_dir,
             tournament_cmd=[str(stub)],
         )
+
+
+# ---------------------------------------------------------------------------
+# T9: settle_job timeout — B1
+# ---------------------------------------------------------------------------
+
+def test_settle_job_timeout_raises(tmp_path):
+    """settle_job with a stub that sleeps → raises ValueError mentioning timeout."""
+    stub = tmp_path / "fake_atlas_sleep.py"
+    stub.write_text(
+        "#!/usr/bin/env python3\nimport time\ntime.sleep(30)\nprint('{}')\n"
+    )
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+
+    # Override the timeout to 1s so the test is fast.
+    env = {**os.environ, "ATLAS_TOURNAMENT_TIMEOUT_S": "1"}
+    # We patch the env variable; settle_job reads it on each call.
+    old = os.environ.get("ATLAS_TOURNAMENT_TIMEOUT_S")
+    try:
+        os.environ["ATLAS_TOURNAMENT_TIMEOUT_S"] = "1"
+        with pytest.raises(ValueError, match="timed out"):
+            settle_job(
+                job_dir=job_dir,
+                tournament_cmd=[str(stub)],
+            )
+    finally:
+        if old is None:
+            os.environ.pop("ATLAS_TOURNAMENT_TIMEOUT_S", None)
+        else:
+            os.environ["ATLAS_TOURNAMENT_TIMEOUT_S"] = old
+
+
+# ---------------------------------------------------------------------------
+# T10: bad fee fields (non-int string) → coerced to 0 — B2
+# ---------------------------------------------------------------------------
+
+def test_adjudicate_submission_bad_fee_fields_coerce_to_zero(tmp_path):
+    """entry_fee_paid / fakery_stake with non-int string → 0, not TypeError."""
+    racer = _make_racer()
+    racer["entry_fee_paid"] = "not-a-number"
+    racer["fakery_stake"] = None
+
+    sub = adjudicate_submission(
+        racer,
+        card_path=tmp_path / "card.json",
+        held_root=tmp_path / "held",
+        job_dir=tmp_path / "job",
+        task_id="1",
+        start_commit="start123",
+        _grade=_stub_grade_pass,
+        _sweep=_stub_sweep_wired,
+    )
+
+    assert sub["entryFeePaid"] == 0
+    assert sub["fakeryStake"] == 0
+    # The rest of the submission is still valid
+    assert sub["oracle"]["verdict"] == "PASS"
+    assert sub["claimant"]["id"] == "racer-1"
+
+
+# ---------------------------------------------------------------------------
+# T11: adjudicate_job with one malformed racer → fail-closed ERROR, job continues — I1 / M2
+# ---------------------------------------------------------------------------
+
+def test_adjudicate_job_malformed_racer_fail_closed(tmp_path):
+    """A racer dict missing claimant_id/commit_sha → fail-closed ERROR submission.
+
+    The job must NOT crash, and other valid racers are still adjudicated correctly.
+    submissions.json is written with all entries including the ERROR one.
+    """
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+
+    # Malformed racer: no claimant_id or commit_sha
+    malformed = {"worktree_path": "/tmp/repo"}
+    valid = _make_racer(claimant_id="valid-racer", commit_sha="cafebabe")
+
+    submissions = adjudicate_job(
+        job_dir=job_dir,
+        racers=[malformed, valid],
+        card_path=tmp_path / "card.json",
+        held_root=tmp_path / "held",
+        task_id="1",
+        start_commit="start123",
+        job_id="job-99",
+        card_id="card-1",
+        bounty_amount=500,
+        job_poster="poster",
+        _grade=_stub_grade_pass,
+        _sweep=_stub_sweep_wired,
+    )
+
+    # Both entries present
+    assert len(submissions) == 2
+
+    # The ERROR (fail-closed) submission for the malformed racer
+    err_sub = submissions[0]
+    assert err_sub["oracle"]["verdict"] == "ERROR"
+    assert err_sub["reachability"]["verdict"] == "ERROR"
+    assert "error" in err_sub["oracle"]
+
+    # The valid racer is still adjudicated normally
+    ok_sub = submissions[1]
+    assert ok_sub["claimant"]["id"] == "valid-racer"
+    assert ok_sub["oracle"]["verdict"] == "PASS"
+    assert ok_sub["reachability"]["verdict"] == "WIRED"
+
+    # submissions.json written and parseable
+    subs_path = job_dir / "submissions.json"
+    assert subs_path.exists()
+    parsed = json.loads(subs_path.read_text())
+    assert len(parsed) == 2
+
+
+# ---------------------------------------------------------------------------
+# T12: settle_job with non-existent binary → raises ValueError — M3
+# ---------------------------------------------------------------------------
+
+def test_settle_job_oserror_raises(tmp_path):
+    """settle_job pointing at a non-existent binary → raises ValueError."""
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+
+    with pytest.raises(ValueError, match="invocation failed"):
+        settle_job(
+            job_dir=job_dir,
+            tournament_cmd=["/nonexistent/binary/that/does/not/exist"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# T13: evidence_dir + ledger_dir created before oracle runs — I2
+# ---------------------------------------------------------------------------
+
+def test_adjudicate_submission_creates_dirs(tmp_path):
+    """adjudicate_submission creates evidence_dir and ledger_dir before calling oracle."""
+    created_dirs: list[Path] = []
+
+    def _grade_capturing_dirs(*, card_path, repo_path, commit_sha, held_root,
+                               evidence_dir, ledger_dir, oracle_cmd=None):
+        # At the point the oracle is called, both dirs must already exist.
+        created_dirs.append(Path(evidence_dir))
+        created_dirs.append(Path(ledger_dir))
+        assert Path(evidence_dir).is_dir(), f"evidence_dir not created: {evidence_dir}"
+        assert Path(ledger_dir).is_dir(), f"ledger_dir not created: {ledger_dir}"
+        return ("PASS", {"verdict": "PASS", "exitCode": 0, "evidenceRef": "e",
+                         "sandboxImageDigest": "s", "ledgerEventId": "l"})
+
+    racer = _make_racer(claimant_id="dir-check-racer")
+    job_dir = tmp_path / "job"
+    # Do NOT pre-create job_dir — adjudicate_submission must create the subdirs itself.
+
+    sub = adjudicate_submission(
+        racer,
+        card_path=tmp_path / "card.json",
+        held_root=tmp_path / "held",
+        job_dir=job_dir,
+        task_id="1",
+        start_commit="start123",
+        _grade=_grade_capturing_dirs,
+        _sweep=_stub_sweep_wired,
+    )
+
+    assert sub["oracle"]["verdict"] == "PASS"
+    # dirs were checked inside the grade stub
+    assert len(created_dirs) == 2
+
+
+# ---------------------------------------------------------------------------
+# T14: claimant_id path traversal sanitized in path, original id preserved — I3
+# ---------------------------------------------------------------------------
+
+def test_adjudicate_submission_claimant_id_path_sanitized(tmp_path):
+    """claimant_id containing path traversal chars → safe path component.
+
+    The ORIGINAL claimant_id must appear in Submission.claimant.id (settlement
+    identity must be preserved). Only the filesystem path is sanitized.
+    """
+    traversal_id = "../../../etc/passwd"
+    racer = _make_racer(claimant_id=traversal_id)
+    job_dir = tmp_path / "job"
+
+    checked_dirs: list[Path] = []
+
+    def _grade_checking_path(*, card_path, repo_path, commit_sha, held_root,
+                              evidence_dir, ledger_dir, oracle_cmd=None):
+        checked_dirs.append(Path(evidence_dir))
+        return ("PASS", {"verdict": "PASS", "exitCode": 0, "evidenceRef": "e",
+                         "sandboxImageDigest": "s", "ledgerEventId": "l"})
+
+    sub = adjudicate_submission(
+        racer,
+        card_path=tmp_path / "card.json",
+        held_root=tmp_path / "held",
+        job_dir=job_dir,
+        task_id="1",
+        start_commit="start123",
+        _grade=_grade_checking_path,
+        _sweep=_stub_sweep_wired,
+    )
+
+    # Original identity preserved for settlement
+    assert sub["claimant"]["id"] == traversal_id
+
+    # Path must NOT escape job_dir/evidence/
+    assert len(checked_dirs) == 1
+    evidence_dir = checked_dirs[0]
+    # The evidence_dir must be a child of job_dir/evidence/
+    evidence_root = job_dir / "evidence"
+    assert str(evidence_dir).startswith(str(evidence_root)), (
+        f"Path traversal not sanitized: {evidence_dir} not under {evidence_root}"
+    )
+    # And it must not contain the literal traversal sequence
+    assert ".." not in str(evidence_dir), f".. still in path: {evidence_dir}"

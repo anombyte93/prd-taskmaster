@@ -9,6 +9,7 @@ the job is never aborted and a bad racer never gets a false PASS.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shlex
 import subprocess
@@ -19,6 +20,7 @@ from prd_taskmaster.lib import atomic_write
 from prd_taskmaster.oracle_bridge import OracleCardError, grade_card
 from prd_taskmaster.reachability_cmd import run_reachability_sweep
 
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -51,6 +53,23 @@ def _tournament_cmd() -> list[str]:
     if raw:
         return shlex.split(raw)
     return ["atlas"]
+
+
+def _sanitize_path_component(value: str) -> str:
+    """Sanitize a claimant_id for use as a filesystem path component.
+
+    Strips path separators and '..' to prevent directory traversal.
+    Only used for the evidence_dir path — the original claimant.id
+    is preserved in the Submission for settlement identity.
+    """
+    # Take only the final component (strips any leading dir parts)
+    safe = Path(value).name
+    # Replace any remaining '..' sequences
+    safe = safe.replace("..", "_")
+    # Replace forward and back slashes that Path.name may not have caught
+    safe = safe.replace("/", "_").replace("\\", "_")
+    # Fall back to a placeholder if the result is empty
+    return safe or "_unknown_"
 
 
 # ---------------------------------------------------------------------------
@@ -101,9 +120,17 @@ def adjudicate_submission(
     job_dir = Path(job_dir)
     claimant_id = str(racer["claimant_id"])
 
+    # I3 — sanitize claimant_id for use as a path component only.
+    # The original claimant_id is preserved in the Submission's claimant.id.
+    safe_id = _sanitize_path_component(claimant_id)
+
     # ── Gate 1: oracle ────────────────────────────────────────────────────────
-    evidence_dir = job_dir / "evidence" / claimant_id
+    evidence_dir = job_dir / "evidence" / safe_id
     ledger_dir = job_dir / "ledger"
+
+    # I2 — ensure dirs exist before the oracle writes into them.
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    ledger_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         oracle_verdict, oracle_detail = _grade(
@@ -145,7 +172,7 @@ def adjudicate_submission(
     return {
         "claimant": {
             "kind": "executor",
-            "id": claimant_id,
+            "id": claimant_id,      # ORIGINAL identity preserved for settlement
         },
         "commitSha": racer["commit_sha"],
         "selfReportedExit": _int_or_none(racer.get("self_reported_exit")),
@@ -153,8 +180,10 @@ def adjudicate_submission(
         "reachability": {"verdict": reach_verdict},
         "commitHash": racer.get("commit_hash", ""),
         "revealedAt": racer.get("revealed_at", ""),
-        "entryFeePaid": int(racer.get("entry_fee_paid", 0)),
-        "fakeryStake": int(racer.get("fakery_stake", 0)),
+        # B2 — safe coercion: bad/missing entry_fee_paid or fakery_stake → 0,
+        # not a TypeError crash.
+        "entryFeePaid": _int_or_none(racer.get("entry_fee_paid")) or 0,
+        "fakeryStake": _int_or_none(racer.get("fakery_stake")) or 0,
     }
 
 
@@ -177,24 +206,60 @@ def adjudicate_job(
     """Adjudicate all racers for a job, write submissions.json + job.json.
 
     Runs adjudicate_submission sequentially for each racer, collecting the
-    Submission dicts. Writes both output files atomically. Returns the list.
+    Submission dicts. Never aborts the whole job: any unexpected exception from
+    adjudicate_submission is caught per-racer and replaced with a fail-closed
+    ERROR submission. Returns the list.
     """
     job_dir = Path(job_dir)
 
-    submissions = [
-        adjudicate_submission(
-            racer,
-            card_path=card_path,
-            held_root=held_root,
-            job_dir=job_dir,
-            task_id=task_id,
-            start_commit=start_commit,
-            oracle_cmd=oracle_cmd,
-            _grade=_grade,
-            _sweep=_sweep,
-        )
-        for racer in racers
-    ]
+    submissions: list[dict] = []
+    for racer in racers:
+        # I1 — per-racer fail-closed containment: unexpected exceptions (e.g.
+        # KeyError on a malformed racer) must not abort the whole job.
+        try:
+            sub = adjudicate_submission(
+                racer,
+                card_path=card_path,
+                held_root=held_root,
+                job_dir=job_dir,
+                task_id=task_id,
+                start_commit=start_commit,
+                oracle_cmd=oracle_cmd,
+                _grade=_grade,
+                _sweep=_sweep,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Fail-closed: produce an ERROR submission instead of crashing.
+            # reachability.verdict="ERROR" ⟹ passesBothGates=false on the TS side.
+            claimant_id = racer.get("claimant_id", "unknown") if isinstance(racer, dict) else "unknown"
+            commit_sha = racer.get("commit_sha", "unknown") if isinstance(racer, dict) else "unknown"
+            log.exception(
+                "Unexpected error adjudicating racer %r (commit %r); inserting ERROR submission",
+                claimant_id,
+                commit_sha,
+            )
+            sub = {
+                "claimant": {
+                    "kind": "executor",
+                    "id": str(claimant_id),
+                },
+                "commitSha": str(commit_sha),
+                "selfReportedExit": None,
+                "oracle": {
+                    "verdict": "ERROR",
+                    "exitCode": None,
+                    "evidenceRef": "",
+                    "sandboxImageDigest": "",
+                    "ledgerEventId": "",
+                    "error": f"adjudication failed: {exc}",
+                },
+                "reachability": {"verdict": "ERROR"},
+                "commitHash": "",
+                "revealedAt": "",
+                "entryFeePaid": 0,
+                "fakeryStake": 0,
+            }
+        submissions.append(sub)
 
     # Write submissions.json atomically.
     atomic_write(
@@ -244,8 +309,15 @@ def settle_job(
     Raises
     ------
     ValueError:
-        If the CLI stdout cannot be parsed as JSON.
+        If the CLI stdout cannot be parsed as JSON, the process cannot be
+        launched (OSError/SubprocessError), or the process times out.
     """
+    # B1 — timeout: default 120s, overridable via ATLAS_TOURNAMENT_TIMEOUT_S.
+    try:
+        timeout_s = int(os.environ.get("ATLAS_TOURNAMENT_TIMEOUT_S", "120"))
+    except (TypeError, ValueError):
+        timeout_s = 120
+
     cmd = (tournament_cmd or _tournament_cmd()) + [
         "tournament", "settle",
         "--job", str(job_dir),
@@ -254,7 +326,11 @@ def settle_job(
         cmd.append("--enforce-slash")
 
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError(
+            f"tournament CLI timed out after {timeout_s}s"
+        ) from exc
     except (OSError, subprocess.SubprocessError) as exc:
         raise ValueError(f"tournament CLI invocation failed: {exc}") from exc
 
