@@ -338,6 +338,101 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
         fail(e.message, **e.extra)
 
 
+# ─── Reachability / promise-evidence helpers ─────────────────────────────────
+
+# Claim terms that imply live/integration-level evidence (word-boundary anchored).
+# More-specific patterns come FIRST so they take priority over generic ones.
+_CLAIM_TERMS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'\b(prisma|database|persist|store|migration|orm)\b', re.IGNORECASE), "db"),
+    (re.compile(r'\bcli\b', re.IGNORECASE), "cli"),
+    (re.compile(r'\bclient\b', re.IGNORECASE), "client"),
+    (re.compile(r'\bapi\b', re.IGNORECASE), "api"),
+    (re.compile(r'\b(connector|adapter|sync|webhook|integration|endpoint|route)\b', re.IGNORECASE), "integration"),
+]
+
+# Signal that satisfies the live/integration claim requirement
+_LIVE_SIGNAL_RE = re.compile(
+    r'http|request|server|e2e|integration|curl|port|subprocess|invoke|entrypoint|endpoint',
+    re.IGNORECASE,
+)
+
+# Signal that satisfies the DB claim requirement (real connection, not just fixture)
+_DB_SIGNAL_RE = re.compile(
+    r'database|db|connection|driver|postgres|mysql|sqlite|mongo|redis|supabase|prisma\s+client',
+    re.IGNORECASE,
+)
+
+# "Fixture-only" pattern: mentions mocks/stubs without live signals
+_FIXTURE_ONLY_RE = re.compile(
+    r'fixture|mock|stub|sample|parses|unit\s+test',
+    re.IGNORECASE,
+)
+
+# Down-rank map: claim term → suggested replacement title fragment
+_DOWNRANK: dict[str, str] = {
+    "connector": "parser",
+    "client": "parser",
+    "prisma": "file adapter",
+    "database": "file adapter",
+    "integration": "handler",
+    "sync": "reader",
+}
+
+
+def _classify_test_strategy(test_strategy: str) -> str:
+    """Return 'fixture-only' if testStrategy has no live signal, else 'live'."""
+    ts = test_strategy.strip()
+    if not ts:
+        return "fixture-only"
+    has_live = bool(_LIVE_SIGNAL_RE.search(ts) or _DB_SIGNAL_RE.search(ts))
+    has_fixture = bool(_FIXTURE_ONLY_RE.search(ts))
+    if has_fixture and not has_live:
+        return "fixture-only"
+    return "live"
+
+
+def _suggested_title(claim_term: str, original_title: str) -> str:
+    """Produce a down-ranked title suggestion."""
+    term_lower = claim_term.lower()
+    # Find the most specific key in _DOWNRANK that is a substring of the claim term
+    replacement = _DOWNRANK.get(term_lower)
+    if replacement is None:
+        # Default: strip the claim term from the title
+        stripped = re.sub(r'\b' + re.escape(claim_term) + r'\b', '', original_title, flags=re.IGNORECASE).strip()
+        return stripped or original_title
+    # Replace first occurrence of the claim term in title
+    suggested = re.sub(r'\b' + re.escape(claim_term) + r'\b', replacement, original_title, count=1, flags=re.IGNORECASE)
+    return suggested.strip()
+
+
+def _promise_evidence_mismatch(task: dict) -> dict | None:
+    """Detect high-altitude claim in title/description vs fixture-only testStrategy.
+
+    Returns a mismatch dict {task_id, claim_term, evidence_altitude, suggested_title}
+    or None if no mismatch detected.
+    """
+    title = str(task.get("title") or "")
+    description = str(task.get("description") or "")
+    test_strategy = str(task.get("testStrategy") or "")
+    combined_text = f"{title} {description}"
+
+    altitude = _classify_test_strategy(test_strategy)
+    if altitude != "fixture-only":
+        return None
+
+    for pattern, claim_key in _CLAIM_TERMS:
+        mo = pattern.search(combined_text)
+        if mo:
+            matched_term = mo.group(0)
+            return {
+                "task_id": task.get("id"),
+                "claim_term": matched_term,
+                "evidence_altitude": "fixture-only",
+                "suggested_title": _suggested_title(matched_term, title),
+            }
+    return None
+
+
 def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, require_phase_config: bool) -> dict:
     """Validate a manually-authored TaskMaster-compatible tasks.json file."""
     tasks_path = Path(input_path) if input_path else TASKMASTER_TASKS / "tasks.json"
@@ -360,6 +455,7 @@ def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, requi
     allowed_statuses = {"pending", "in-progress", "review", "done", "deferred", "cancelled"}
     allowed_priorities = {"high", "medium", "low"}
     problems = []
+    warnings = []
     ids = []
 
     placeholder_re = re.compile(
@@ -455,6 +551,50 @@ def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, requi
                 if dep not in sub_ids:
                     problems.append(f"{label} subtask {sub_id}: dependency {dep!r} does not exist in sibling subtasks")
 
+        # ── Reachability checks (per-task) ─────────────────────────────────────
+        tier = (
+            task.get("phaseConfig", {}).get("tier")
+            or task.get("tier")
+            or "domain-model"
+        )
+        tier = str(tier).strip().lower()
+        hard_tiers = {"wired", "live"}
+        soft_tiers = {"spike", "domain-model"}
+
+        # 1. reachableVia presence check
+        reachable_via = str(task.get("reachableVia") or "").strip()
+        if not reachable_via:
+            if tier in hard_tiers:
+                problems.append(
+                    f"{label}: tier={tier} requires reachableVia "
+                    f"(name the route/component/CLI/API this wires into)"
+                )
+            else:
+                warnings.append(
+                    f"{label}: tier={tier} — reachableVia is empty "
+                    f"(advisory: name the route/component/CLI/API this connects to)"
+                )
+        else:
+            # reachableVia is present — check it looks scoped (has : / . or -)
+            if not re.search(r'[:/.\-]', reachable_via):
+                warnings.append(
+                    f"{label}: reachableVia={reachable_via!r} looks unscoped "
+                    f"(no ':' '/' '.' or '-'; prefer e.g. 'route:/x', 'cli:cmd', 'component.Name')"
+                )
+
+        # 2. Promise-evidence mismatch check
+        mismatch = _promise_evidence_mismatch(task)
+        if mismatch:
+            msg = (
+                f"{label}: title/description claims '{mismatch['claim_term']}' "
+                f"but testStrategy is fixture-only — "
+                f"suggested title: {mismatch['suggested_title']!r}"
+            )
+            if tier in hard_tiers:
+                problems.append(msg)
+            else:
+                warnings.append(msg)
+
     real_ids = [task_id for task_id in ids if task_id is not None]
     duplicate_ids = sorted({task_id for task_id in real_ids if real_ids.count(task_id) > 1}, key=str)
     for task_id in duplicate_ids:
@@ -479,6 +619,7 @@ def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, requi
                 "tasks_path": str(tasks_path),
                 "task_count": len(tasks),
                 "problems": problems,
+                "warnings": warnings,
             },
         )
 
@@ -487,12 +628,19 @@ def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, requi
         "tasks_path": str(tasks_path),
         "task_count": len(tasks),
         "subtask_count": sum(len(t.get("subtasks", []) or []) for t in tasks if isinstance(t, dict)),
+        "warnings": warnings,
         "message": "Task file is valid for manual prd-taskmaster mode",
     }
 
 
 def cmd_validate_tasks(args: argparse.Namespace) -> None:
     try:
-        emit(run_validate_tasks(args.input, args.allow_empty_subtasks, args.require_phase_config))
+        result = run_validate_tasks(args.input, args.allow_empty_subtasks, args.require_phase_config)
+        # Surface warnings non-fatally before emitting JSON
+        if result.get("warnings"):
+            import sys as _sys
+            for w in result["warnings"]:
+                print(f"WARNING: {w}", file=_sys.stderr)
+        emit(result)
     except CommandError as e:
         fail(e.message, **e.extra)

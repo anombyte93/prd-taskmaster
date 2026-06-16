@@ -43,6 +43,7 @@ TASKS_SCHEMA_HINT = """{
       "dependencies": [],
       "priority": "high",
       "tier": "domain-model",
+      "reachableVia": "",
       "subtasks": [
         {
           "id": 1,
@@ -70,7 +71,9 @@ existing task or sibling subtask IDs; use only priority high, medium, or low;
 do not include placeholders, generic tasks, or empty testStrategy fields;
 tier ∈ {spike|domain-model|wired|live}: the altitude of the claim — spike=research,
 domain-model=pure logic, wired=integration, live=user-visible; wired/live require
-reachability evidence (the deterministic enrich step will set this if omitted)."""
+reachability evidence (the deterministic enrich step will set this if omitted);
+reachableVia names the existing route/component/CLI/tool/API the new code wires into;
+required for wired/live tasks (a task naming no consumer is an orphan by design)."""
 
 
 PARALLEL_RESULT_SCHEMA_HINT = """{
@@ -241,6 +244,7 @@ def _task_summaries(tasks: list[dict]) -> list[dict]:
             "dependencies": task.get("dependencies") or [],
             "status": task.get("status", "pending"),
             "subtask_count": len(task.get("subtasks") or []),
+            "reachableVia": task.get("reachableVia", ""),
         })
     return summaries
 
@@ -364,7 +368,10 @@ class NativeBackend(Backend):
         prompt = (
             f"Parse this PRD into exactly {num_tasks} TaskMaster-compatible tasks.\n"
             f"Target tag: {tag or parallel.current_tag(None)}.\n"
-            "Return only the tasks JSON object.\n\n"
+            "Return only the tasks JSON object.\n"
+            "For wired/live tier tasks, set reachableVia to the existing route, component, CLI, "
+            "tool, or API that this task's code wires into (e.g. 'route:/api/v1/orders', "
+            "'cli:prd-taskmaster', 'component:OrdersTable').\n\n"
             f"PRD PATH: {path}\n"
             f"PRD:\n{prd_text}"
         )
