@@ -18,6 +18,7 @@ from prd_taskmaster.economy import cmd_economy_report
 from prd_taskmaster.feedback import HARNESS_CHOICES, cmd_feedback_add, cmd_feedback_report
 from prd_taskmaster.context_pack import build_context_pack
 from prd_taskmaster import fleet, parallel, task_state, tm_parallel
+from prd_taskmaster.reachability_cmd import cmd_reachability_sweep
 
 
 def _backend_source() -> str:
@@ -322,6 +323,37 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--id", required=True)
     p.add_argument("--status", required=True)
     p.add_argument("--tag")
+    p.add_argument(
+        "--evidence-ref",
+        default=None,
+        help="Path or ref to the CDD evidence card for this task",
+    )
+    p.add_argument(
+        "--reachability",
+        default=None,
+        help=(
+            "Reachability verdict: bare string (WIRED|EXEMPT|ORPHAN) or a JSON dict. "
+            "When omitted and marking done, the verdict is auto-read from the task's "
+            "CDD card .atlas-ai/cdd/task-<id>.json if present."
+        ),
+    )
+
+    # reachability-sweep
+    p = sub.add_parser(
+        "reachability-sweep",
+        help="Run the reachability sweep for a task and write the verdict into its CDD card",
+    )
+    p.add_argument("--task", required=True, help="Task id (e.g. 1 or 1.2)")
+    p.add_argument(
+        "--start-commit",
+        required=True,
+        help="Git SHA recorded when work on this task began (git rev-parse HEAD at task start)",
+    )
+    p.add_argument(
+        "--cwd",
+        default=None,
+        help="Explicit repo root (defaults to the current working directory)",
+    )
 
     # status — render progress panels
     p = sub.add_parser("status", help="Render Atlas progress panels for the current phase")
@@ -379,6 +411,7 @@ DISPATCH = {
     "next-task": task_state.cmd_next_task,
     "claim-task": task_state.cmd_claim_task,
     "set-status": task_state.cmd_set_status,
+    "reachability-sweep": cmd_reachability_sweep,
     "economy-report": cmd_economy_report,
     "context-pack": cmd_context_pack,
     "feedback-add": cmd_feedback_add,

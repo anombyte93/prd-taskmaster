@@ -257,6 +257,12 @@ def run_set_status(
     resolved_tag = parallel.current_tag(tag)
     result: dict[str, Any] = {}
 
+    # Auto-read reachability from CDD card when marking done without an explicit verdict.
+    # This allows `set-status done` to work transparently after the sweep has run and
+    # written the verdict into the card (execute-task Step 9 → Step 10 flow).
+    if reachability is None and status == "done" and subtask_id is None:
+        reachability = _read_cdd_reachability(parent_id)
+
     def transform(current: str) -> str:
         if not current.strip():
             raise CommandError(f"{parallel.TASKS} not found")
@@ -350,8 +356,104 @@ def cmd_claim_task(args: argparse.Namespace) -> None:
         fail(exc.message, **exc.extra)
 
 
-def cmd_set_status(args: argparse.Namespace) -> None:
+def _parse_reachability_arg(value: "str | None") -> "dict | None":
+    """Parse the --reachability CLI argument.
+
+    Accepts:
+      - None             → None (not provided)
+      - "WIRED"          → {"verdict": "WIRED"}
+      - "EXEMPT"         → {"verdict": "EXEMPT"}
+      - "ORPHAN"         → {"verdict": "ORPHAN"}
+      - '{"verdict":…}'  → parsed JSON dict
+
+    Raises CommandError on invalid input.
+    """
+    if value is None:
+        return None
+    value = value.strip()
+    if value.startswith("{"):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise CommandError(f"--reachability: invalid JSON: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise CommandError("--reachability: JSON value must be an object")
+        return parsed
+    # Bare verdict string.
+    if value in ("WIRED", "EXEMPT", "ORPHAN", "ERROR"):
+        return {"verdict": value}
+    raise CommandError(
+        f"--reachability: expected WIRED, EXEMPT, ORPHAN, or a JSON dict; got {value!r}"
+    )
+
+
+def _read_cdd_reachability(task_id: str) -> "dict | None":
+    """Attempt to read the reachability block from the task's CDD card.
+
+    Looks for .atlas-ai/cdd/task-<id>.json (direct) or a combined card
+    whose hyphen-separated id-list contains the id (matching ship-check logic).
+    Returns the dict under the "reachability" key, or None if unavailable.
+    """
+    from pathlib import Path as _Path
+
+    cdd_dir = _Path(".atlas-ai") / "cdd"
+    if not cdd_dir.exists():
+        return None
+
+    tid_str = str(task_id)
+    # Direct card.
+    direct = cdd_dir / f"task-{tid_str}.json"
+    card_path = None
+    if direct.exists():
+        card_path = direct
+    else:
+        # Combined card fallback.
+        for card in cdd_dir.glob("task-*.json"):
+            stem = card.stem
+            if not stem.startswith("task-"):
+                continue
+            ids = stem[len("task-"):].split("-")
+            if tid_str in ids:
+                card_path = card
+                break
+
+    if card_path is None:
+        return None
+
     try:
-        emit(run_set_status(args.id, args.status, getattr(args, "tag", None)))
+        card = json.loads(card_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    reach = card.get("reachability")
+    return reach if isinstance(reach, dict) else None
+
+
+def cmd_set_status(args: argparse.Namespace) -> None:
+    # Parse --reachability flag (bare verdict string or JSON dict).
+    try:
+        reachability = _parse_reachability_arg(getattr(args, "reachability", None))
+    except CommandError as exc:
+        fail(exc.message, **exc.extra)
+        return
+
+    # Auto-read fallback: if marking done and --reachability not given, try the CDD card.
+    if reachability is None and args.status == "done":
+        # Only the parent task id matters for CDD card lookup.
+        parent_id = str(args.id).split(".")[0]
+        reachability = _read_cdd_reachability(parent_id)
+
+    evidence_ref = getattr(args, "evidence_ref", None)
+
+    try:
+        emit(
+            run_set_status(
+                args.id,
+                args.status,
+                getattr(args, "tag", None),
+                evidence_ref=evidence_ref,
+                reachability=reachability,
+            )
+        )
     except CommandError as exc:
         fail(exc.message, **exc.extra)
