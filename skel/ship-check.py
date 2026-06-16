@@ -4,6 +4,11 @@
 Emits SHIP_CHECK_OK to stdout ONLY when all gates pass. Called by execute-task
 at termination AND by Step 9 (--dry-run) as a per-task predicate.
 
+Standalone: this file ships into user projects as `.atlas-ai/ship-check.py`. It
+imports ONLY the stdlib and MUST stay that way (no `import prd_taskmaster` — that
+package is not importable in a user project). The oracle gate therefore shells
+the `atlas oracle grade` CLI directly via subprocess.
+
 Gate logic (grounded against actual pipeline.json / tasks.json schemas
 observed 2026-06-04 in ai-human-tasker):
 
@@ -27,35 +32,36 @@ observed 2026-06-04 in ai-human-tasker):
     skel checked .atlas-ai/ralph-loop-prompt.md — wrong path and irrelevant
     after /goal migration.
 
-  Gate 5 (HARD) — No non-zero "Exit status N" line in any .atlas-ai/evidence/
-    file. This is the convergent must-do from the 2026-06-04 forensic audit
-    (T12 marked DONE while pnpm test exited 1 with 11 failing tests).
-    Override only via SHIP_CHECK_OVERRIDE_ADMIN token; overrides are logged
-    to .atlas-ai/state/execute-log.jsonl as an audit record.
+  Gate 5 (HARD, ORACLE) — Each DONE task is RE-GRADED by the atlas oracle.
+    The submitter's own .atlas-ai/evidence/ is NOT trusted; the oracle
+    re-executes the CDD card's grading against HEAD and writes its own
+    evidence/ledger. This replaces the fakable "no non-zero Exit status N in
+    evidence" grep — which silently PASSED when no evidence existed and had a
+    self-grantable bypass token. Both the silent-pass loophole and the bypass
+    token are GONE. The gate is FAIL-CLOSED: a missing card, a card with no
+    grading block, a CLI crash, unparseable output, or any verdict other than
+    "PASS" all BLOCK the ship.
 
 Interface:
   python3 .atlas-ai/ship-check.py                              # standard gate
   python3 .atlas-ai/ship-check.py --dry-run                    # always exit 0; report on stderr
-  python3 .atlas-ai/ship-check.py --override SHIP_CHECK_OVERRIDE_ADMIN  # bypass Gate 5
   python3 .atlas-ai/ship-check.py --cwd /path/to/project       # explicit project root
 
 Exit codes:
-  0 — SHIP_CHECK_OK (stdout: exactly "SHIP_CHECK_OK\n", with " [OVERRIDE]" suffix if applicable)
+  0 — SHIP_CHECK_OK (stdout: exactly "SHIP_CHECK_OK\n")
   1 — gate failures (stderr only; nothing on stdout — log watchers must not see partial matches)
-  2 — script error (IO, JSON parse, bad token)
+  2 — script error (IO, JSON parse)
 """
 from __future__ import annotations
 
 import argparse
 import json
-import re
+import os
+import shlex
+import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Tuple
-
-OVERRIDE_TOKEN = "SHIP_CHECK_OVERRIDE_ADMIN"
-EXIT_STATUS_RE = re.compile(r"\bExit status\s+(\d+)\b", re.IGNORECASE)
 
 
 def gate_pipeline(atlas: Path) -> Tuple[bool, List[str]]:
@@ -138,46 +144,101 @@ def gate_plan(repo_root: Path) -> Tuple[bool, List[str]]:
     return False, ["no plan file at .taskmaster/docs/plan.md or docs/superpowers/plans/*.md"]
 
 
-def gate_exit_codes(atlas: Path) -> Tuple[bool, List[str]]:
+def _oracle_cmd() -> List[str]:
+    """Configurable oracle CLI invocation. Default: the 'atlas' binary on PATH.
+
+    Set ATLAS_ORACLE_CMD (shell-split) to change it, e.g.:
+        ATLAS_ORACLE_CMD="node /path/to/atlas-protocol/apps/cli/dist/index.js"
+    """
+    raw = os.environ.get("ATLAS_ORACLE_CMD")
+    if raw:
+        return shlex.split(raw)
+    return ["atlas"]
+
+
+def _head_commit(repo_root: Path) -> str:
+    """HEAD sha via `git rev-parse HEAD`. FAIL-CLOSED: any failure returns the
+    sentinel "UNKNOWN" so the oracle mismatches the working tree and blocks."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "UNKNOWN"
+    if proc.returncode != 0:
+        return "UNKNOWN"
+    sha = (proc.stdout or "").strip()
+    return sha or "UNKNOWN"
+
+
+def gate_oracle(repo_root: Path, tasks: list, head_commit: str) -> Tuple[bool, List[str]]:
+    """Re-grade every DONE task via the atlas oracle CLI. FAIL-CLOSED.
+
+    For each done task: the CDD card must exist and carry a 'grading' block,
+    and the oracle must return verdict=="PASS". Anything else — missing card,
+    no grading block, CLI crash, unparseable output, a non-PASS verdict —
+    appends a failure. The submitter's evidence is NOT read here; the oracle
+    re-executes the grading and writes its own evidence/ledger.
+    """
     failures: List[str] = []
-    evidence_dir = atlas / "evidence"
-    if not evidence_dir.exists():
-        # Gate 3 (CDD) catches missing evidence; this gate is silent when no evidence exists
-        return True, []
-    for f in evidence_dir.rglob("*"):
-        if not f.is_file():
+    atlas = repo_root / ".atlas-ai"
+    held = atlas / "held-out"
+    evidence = atlas / "evidence"
+    ledger = atlas / "ledger"
+    cmd_base = _oracle_cmd()
+
+    for t in tasks:
+        if t.get("status") != "done":
+            continue
+        tid = t.get("id")
+        card_path = atlas / "cdd" / f"task-{tid}.json"
+        if not card_path.exists():
+            failures.append(f"task {tid}: no CDD card to grade")
             continue
         try:
-            text = f.read_text(errors="ignore")
-        except OSError:
+            card = json.loads(card_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            failures.append(f"task {tid}: cannot read CDD card ({exc})")
             continue
-        for match in EXIT_STATUS_RE.finditer(text):
-            try:
-                code = int(match.group(1))
-            except (ValueError, IndexError):
-                continue
-            if code != 0:
-                rel = f.relative_to(atlas.parent) if atlas.parent in f.parents else f
-                failures.append(f"non-zero exit in {rel}: Exit status {code}")
-                break  # one report per file is enough
+        if "grading" not in card:
+            failures.append(f"task {tid}: CDD card has no grading block")
+            continue
+
+        cmd = cmd_base + [
+            "oracle", "grade",
+            "--repo", str(repo_root),
+            "--commit", head_commit,
+            "--card", str(card_path),
+            "--held", str(held),
+            "--evidence", str(evidence),
+            "--ledger", str(ledger),
+        ]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        except (OSError, subprocess.SubprocessError) as exc:
+            failures.append(f"task {tid}: oracle CLI invocation failed ({exc})")
+            continue
+
+        try:
+            parsed = json.loads(proc.stdout)
+        except (json.JSONDecodeError, TypeError):
+            failures.append(f"task {tid}: oracle produced no parseable JSON verdict (rc={proc.returncode})")
+            continue
+
+        verdict = parsed.get("verdict") if isinstance(parsed, dict) else None
+        if verdict not in ("PASS", "FAIL"):
+            failures.append(f"task {tid}: oracle verdict missing/invalid ({verdict!r})")
+            continue
+        if verdict == "FAIL":
+            failures.append(f"task {tid}: oracle verdict FAIL")
+            continue
+        # verdict == "PASS" — the only path that does NOT append a failure.
+
     return len(failures) == 0, failures
 
 
-def log_override(atlas: Path, message: str) -> None:
-    log = atlas / "state" / "execute-log.jsonl"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    entry = {
-        "iteration": "OVERRIDE",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "task_id": "SHIP_CHECK",
-        "event": "override_invoked",
-        "message": message,
-    }
-    with log.open("a") as fp:
-        fp.write(json.dumps(entry) + "\n")
-
-
-def run_all_gates(repo_root: Path, override_active: bool) -> Tuple[bool, List[str]]:
+def run_all_gates(repo_root: Path) -> Tuple[bool, List[str]]:
     failures: List[str] = []
     atlas = repo_root / ".atlas-ai"
 
@@ -191,16 +252,12 @@ def run_all_gates(repo_root: Path, override_active: bool) -> Tuple[bool, List[st
         _, f3 = gate_cdd(atlas, tasks)
         failures.extend(f3)
 
+        head = _head_commit(repo_root)
+        _, f5 = gate_oracle(repo_root, tasks, head)
+        failures.extend(f5)
+
     _, f4 = gate_plan(repo_root)
     failures.extend(f4)
-
-    ok5, f5 = gate_exit_codes(atlas)
-    if not ok5:
-        if override_active:
-            log_override(atlas, f"Gate 5 bypassed: {'; '.join(f5[:3])}{' ...' if len(f5) > 3 else ''}")
-            # Override accepts the failures; no append to global failures list
-        else:
-            failures.extend(f5)
 
     return len(failures) == 0, failures
 
@@ -209,20 +266,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Deterministic ship-check for prd-taskmaster pipelines.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Run all gates but always exit 0. Report goes to stderr. Used by execute-task Step 9 as a per-task predicate.")
-    parser.add_argument("--override", type=str, default=None,
-                        help=f"Bypass Gate 5 (exit codes) if value equals {OVERRIDE_TOKEN}. Logged to execute-log.jsonl.")
     parser.add_argument("--cwd", type=str, default=None,
                         help="Project root (defaults to current working directory).")
     args = parser.parse_args()
 
     repo_root = Path(args.cwd).resolve() if args.cwd else Path.cwd()
-    override_active = args.override == OVERRIDE_TOKEN
-    if args.override is not None and not override_active:
-        print("FAIL: --override value does not match expected token", file=sys.stderr)
-        return 2
 
     try:
-        ok, failures = run_all_gates(repo_root, override_active=override_active)
+        ok, failures = run_all_gates(repo_root)
     except Exception as exc:  # noqa: BLE001 — top-level guard
         print(f"FAIL: ship-check script error: {exc!r}", file=sys.stderr)
         return 2
@@ -237,8 +288,7 @@ def main() -> int:
         return 0
 
     if ok:
-        suffix = " [OVERRIDE]" if override_active else ""
-        print(f"SHIP_CHECK_OK{suffix}")
+        print("SHIP_CHECK_OK")
         return 0
 
     for f in failures:

@@ -12,14 +12,26 @@ Live contract (see skel/ship-check.py docstring):
   Gate 3 — for each task id, a CDD card at .atlas-ai/cdd/task-<id>.json (or a
            combined card whose filename contains the id).
   Gate 4 — plan at .taskmaster/docs/plan.md OR docs/superpowers/plans/*.md.
-  Gate 5 (HARD) — no non-zero "Exit status N" in any .atlas-ai/evidence/ file.
-           Bypass via --override SHIP_CHECK_OVERRIDE_ADMIN.
-  Success → stdout exactly "SHIP_CHECK_OK\n" (+ " [OVERRIDE]"), exit 0.
+  Gate 5 (HARD, ORACLE) — every DONE task is RE-GRADED by the atlas oracle CLI
+           (shelled out; configurable via ATLAS_ORACLE_CMD). FAIL-CLOSED: a
+           missing card, a card with no grading block, a CLI crash, unparseable
+           output, or any non-PASS verdict BLOCKS the ship. The old fakable
+           "no non-zero Exit status N in evidence" grep and the self-grantable
+           --override SHIP_CHECK_OVERRIDE_ADMIN token are BOTH GONE (see the
+           dedicated coverage in test_ship_check_oracle.py).
+  Success → stdout exactly "SHIP_CHECK_OK\n", exit 0.
   Failure → nothing on stdout, FAIL detail on stderr, exit 1.
+
+NOTE: these tests drive the script as a real subprocess, so the oracle gate is
+satisfied by a real fake-oracle command (a tiny executable shell script) wired
+through ATLAS_ORACLE_CMD. Pure-monkeypatch oracle coverage lives in
+test_ship_check_oracle.py.
 """
 from __future__ import annotations
 
 import json
+import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -31,18 +43,41 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SHIP_CHECK = REPO_ROOT / "skel" / "ship-check.py"
 
 
-def _run(cwd: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+def _fake_oracle(tmp_path: Path, verdict: str = "PASS") -> str:
+    """Write an executable fake `atlas` that emits {"verdict": <verdict>} for an
+    `oracle grade` invocation. Return an ATLAS_ORACLE_CMD value pointing at it."""
+    script = tmp_path / "fake_atlas.sh"
+    script.write_text(
+        "#!/bin/sh\n"
+        'for a in "$@"; do\n'
+        '  if [ "$a" = "grade" ]; then\n'
+        f'    printf \'{{"verdict":"{verdict}"}}\'\n'
+        "    exit 0\n"
+        "  fi\n"
+        "done\n"
+        "exit 0\n"
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return f"sh {script}"
+
+
+def _run(cwd: Path, *extra: str, oracle_cmd: str | None = None) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    if oracle_cmd is not None:
+        env["ATLAS_ORACLE_CMD"] = oracle_cmd
     return subprocess.run(
         ["python3", str(SHIP_CHECK), *extra],
         cwd=str(cwd),
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
 
 
 def _green(tmp_path: Path) -> None:
-    """Build an all-gates-green project tree under tmp_path."""
+    """Build an all-gates-green project tree under tmp_path. CDD cards carry a
+    `grading` block so the oracle gate can re-grade them."""
     atlas = tmp_path / ".atlas-ai"
     (atlas / "state").mkdir(parents=True)
     (atlas / "state" / "pipeline.json").write_text(
@@ -64,8 +99,9 @@ def _green(tmp_path: Path) -> None:
     )
     cdd = atlas / "cdd"
     cdd.mkdir(parents=True)
-    (cdd / "task-1.json").write_text(json.dumps({"id": 1}))
-    (cdd / "task-2.json").write_text(json.dumps({"id": 2}))
+    grading = {"grading": {"command": ["sh", "grade.sh"]}}
+    (cdd / "task-1.json").write_text(json.dumps({"id": 1, **grading}))
+    (cdd / "task-2.json").write_text(json.dumps({"id": 2, **grading}))
     docs = tmp_path / ".taskmaster" / "docs"
     docs.mkdir(parents=True)
     (docs / "plan.md").write_text("# Plan\n")
@@ -80,7 +116,7 @@ def test_ship_check_fails_on_empty_state(tmp_path: Path) -> None:
 
 def test_ship_check_passes_on_all_gates_green(tmp_path: Path) -> None:
     _green(tmp_path)
-    r = _run(tmp_path)
+    r = _run(tmp_path, oracle_cmd=_fake_oracle(tmp_path, "PASS"))
     assert r.returncode == 0, f"stderr={r.stderr!r} stdout={r.stdout!r}"
     assert "SHIP_CHECK_OK" in r.stdout
 
@@ -118,25 +154,27 @@ def test_ship_check_fails_when_done_task_has_no_cdd_card(tmp_path: Path) -> None
     assert "task 2: no CDD card" in r.stderr
 
 
-def test_ship_check_gate5_blocks_on_nonzero_exit_and_override_passes(tmp_path: Path) -> None:
-    """Gate 5 (HARD): a non-zero 'Exit status N' in evidence blocks; the
-    override token bypasses it."""
+def test_ship_check_gate5_oracle_fail_blocks_and_override_is_gone(tmp_path: Path) -> None:
+    """Gate 5 (HARD, ORACLE): an oracle FAIL verdict blocks the ship, and the
+    old self-grantable --override token no longer exists (argparse rejects it)."""
     _green(tmp_path)
-    evidence = tmp_path / ".atlas-ai" / "evidence"
-    evidence.mkdir(parents=True)
-    (evidence / "run.log").write_text("pnpm test\nExit status 1\n")
 
-    # Without override → blocked.
-    r = _run(tmp_path)
+    # An oracle FAIL verdict → blocked, nothing on stdout.
+    r = _run(tmp_path, oracle_cmd=_fake_oracle(tmp_path, "FAIL"))
     assert r.returncode != 0
     assert "SHIP_CHECK_OK" not in r.stdout
-    assert "Exit status 1" in r.stderr
+    assert "oracle verdict FAIL" in r.stderr
 
-    # With the override token → passes, OVERRIDE suffix on stdout.
-    r2 = _run(tmp_path, "--override", "SHIP_CHECK_OVERRIDE_ADMIN")
-    assert r2.returncode == 0, f"stderr={r2.stderr!r} stdout={r2.stdout!r}"
-    assert "SHIP_CHECK_OK" in r2.stdout
-    assert "[OVERRIDE]" in r2.stdout
+    # The override token is GONE: argparse rejects the unknown flag (exit 2)
+    # and never emits SHIP_CHECK_OK — there is no bypass path.
+    r2 = _run(
+        tmp_path,
+        "--override",
+        "SHIP_CHECK_OVERRIDE_ADMIN",
+        oracle_cmd=_fake_oracle(tmp_path, "PASS"),
+    )
+    assert r2.returncode == 2
+    assert "SHIP_CHECK_OK" not in r2.stdout
 
 
 # ─── Python API agreement (prd_taskmaster.shipcheck.run_ship_check) ──────────
@@ -171,6 +209,6 @@ def test_ship_check_passes_with_flat_tasks_format(tmp_path):
     (tmp_path / ".taskmaster" / "tasks" / "tasks.json").write_text(json.dumps(
         {"tasks": [{"id": 1, "status": "done"}, {"id": 2, "status": "done"}]}
     ))
-    r = _run(tmp_path)
+    r = _run(tmp_path, oracle_cmd=_fake_oracle(tmp_path, "PASS"))
     assert r.returncode == 0, f"stderr={r.stderr!r}"
     assert "SHIP_CHECK_OK" in r.stdout
