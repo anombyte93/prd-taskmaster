@@ -42,6 +42,7 @@ TASKS_SCHEMA_HINT = """{
       "status": "pending",
       "dependencies": [],
       "priority": "high",
+      "tier": "domain-model",
       "subtasks": [
         {
           "id": 1,
@@ -66,7 +67,10 @@ Rules: generate exactly the requested task count unless the PRD is smaller; ever
 task must include id, title, description, details, testStrategy, status,
 dependencies, priority, and at least 2 subtasks; dependencies must reference
 existing task or sibling subtask IDs; use only priority high, medium, or low;
-do not include placeholders, generic tasks, or empty testStrategy fields."""
+do not include placeholders, generic tasks, or empty testStrategy fields;
+tier ∈ {spike|domain-model|wired|live}: the altitude of the claim — spike=research,
+domain-model=pure logic, wired=integration, live=user-visible; wired/live require
+reachability evidence (the deterministic enrich step will set this if omitted)."""
 
 
 PARALLEL_RESULT_SCHEMA_HINT = """{
