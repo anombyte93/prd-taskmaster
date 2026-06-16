@@ -303,27 +303,26 @@ class TestDomainModelMismatchInWarningsOnly:
 
 
 class TestClientSubstringAnchoring:
-    def test_client_side_hyphenated_does_not_trigger(self):
-        """'client-side' (hyphenated) should NOT match the \\bclient\\b pattern."""
-        # The word "client" in "client-side" has a hyphen immediately after,
-        # so \bclient\b won't match at the 't' boundary (hyphen is a word boundary).
-        # However, \bclient\b DOES match 'client' in 'client-side' because '-' is
-        # a non-word char that forms a boundary. Let's test via _promise_evidence_mismatch
-        # that even if it matches, domain-model never produces a hard-block.
+    def test_client_side_warns_not_blocks(self, tmp_path):
+        """'client-side' matches \\bclient\\b (hyphen is a word boundary), but 'client'
+        is now a soft/ambiguous term — it produces an advisory warning, never a hard-block
+        even for wired/live tasks."""
         task = _make_task(
-            tier="domain-model",
-            title="client-side state model",
-            description="Pure domain-model for UI state.",
-            test_strategy="unit test parses a fixture",
+            tier="wired",
+            reachable_via="component.HydrationLayer",
+            title="client-side hydration layer",
+            description="Pure client-side rendering with React.",
+            test_strategy="write unit tests for component props",
         )
-        # domain-model never hard-blocks regardless of match
-        result = _promise_evidence_mismatch(task)
-        # Even if there IS a mismatch, domain-model only warns
-        # This test verifies via run_validate_tasks that it doesn't raise
-        # (direct function call already tested above, so here we test the key property)
-        if result is not None:
-            # The mismatch exists but domain-model means it is only advisory
-            assert result["evidence_altitude"] == "fixture-only"
+        path = _write_tasks_file(tmp_path, [task])
+        # Must NOT raise — client is soft/warn-only
+        result = run_validate_tasks(path, allow_empty_subtasks=True, require_phase_config=False)
+        assert result["ok"] is True
+        # But a warning should be present
+        warnings = result.get("warnings", [])
+        assert any("client" in w.lower() for w in warnings), (
+            f"Expected advisory warning mentioning 'client'; got: {warnings}"
+        )
 
     def test_api_substring_does_not_match_rapid(self):
         """'rapid' should NOT trigger the \\bapi\\b pattern."""
@@ -340,7 +339,9 @@ class TestClientSubstringAnchoring:
             )
 
     def test_api_standalone_word_does_trigger(self):
-        """'API' as a standalone word in the title DOES trigger the pattern."""
+        """Title containing 'integration' (a hard term) plus 'API' and 'client' (soft
+        terms) still triggers a mismatch because hard terms are checked first.
+        'integration' is precise/hard so it fires as the matched term."""
         task = _make_task(
             title="API client for vendor integration",
             description="Fetch from vendor API.",
@@ -348,7 +349,10 @@ class TestClientSubstringAnchoring:
         )
         result = _promise_evidence_mismatch(task)
         assert result is not None
-        assert result["claim_term"].lower() in {"api", "client", "integration"}
+        # 'integration' is the first hard term to match; api/client are soft (checked after hard)
+        assert result["claim_term"].lower() in {"integration", "api", "client"}
+        # The result must not be soft — 'integration' is a hard claim term
+        assert not result.get("soft"), "Expected hard mismatch (integration is a precise term)"
 
     def test_cli_does_not_match_client(self):
         """'client' should not trigger the \\bcli\\b pattern."""
@@ -478,3 +482,168 @@ class TestSpikeTierSoftRules:
         warnings = result.get("warnings", [])
         # There should be a mismatch warning
         assert any("fixture-only" in w or "connector" in w or "prisma" in w.lower() for w in warnings)
+
+
+# ─── 12. Soft claim terms: no false hard-block on wired/live ──────────────────
+
+
+class TestSoftClaimTermsNoFalseHardBlock:
+    """Ambiguous claim terms (store/route/sync/client/api) must NEVER hard-block
+    wired or live tasks — only produce advisory warnings."""
+
+    def test_wired_redux_store_unit_tests_warns_not_blocks(self, tmp_path):
+        """wired 'Redux store' + 'write unit tests' → ok:True, warning present."""
+        task = _make_task(
+            tier="wired",
+            reachable_via="component.ReduxStore",
+            title="Redux store for cart state",
+            description="Manage cart state with Redux.",
+            test_strategy="write unit tests for reducers",
+        )
+        path = _write_tasks_file(tmp_path, [task])
+        result = run_validate_tasks(path, allow_empty_subtasks=True, require_phase_config=False)
+        assert result["ok"] is True, (
+            "wired 'Redux store' with unit tests should not hard-block — 'store' is a soft term"
+        )
+        warnings = result.get("warnings", [])
+        assert any("store" in w.lower() or "fixture-only" in w for w in warnings), (
+            f"Expected advisory warning for 'store'; got: {warnings}"
+        )
+
+    def test_wired_api_route_handler_unit_tests_warns_not_blocks(self, tmp_path):
+        """wired 'API route handler' + 'write unit tests' → ok:True, warning present."""
+        task = _make_task(
+            tier="wired",
+            reachable_via="route:/api/v1/orders",
+            title="API route handler for orders",
+            description="Handle order requests via the API route.",
+            test_strategy="write unit tests for the handler function",
+        )
+        path = _write_tasks_file(tmp_path, [task])
+        result = run_validate_tasks(path, allow_empty_subtasks=True, require_phase_config=False)
+        assert result["ok"] is True, (
+            "wired 'API route handler' with unit tests should not hard-block — 'api'/'route' are soft terms"
+        )
+        warnings = result.get("warnings", [])
+        assert any("api" in w.lower() or "route" in w.lower() or "fixture-only" in w for w in warnings), (
+            f"Expected advisory warning for 'api'/'route'; got: {warnings}"
+        )
+
+    def test_wired_client_side_hydration_unit_tests_warns_not_blocks(self, tmp_path):
+        """wired 'client-side hydration' + 'unit tests' → ok:True, warning present."""
+        task = _make_task(
+            tier="wired",
+            reachable_via="component.HydrationShell",
+            title="client-side hydration shell",
+            description="Implement React client-side hydration for SSR pages.",
+            test_strategy="unit tests for hydration props",
+        )
+        path = _write_tasks_file(tmp_path, [task])
+        result = run_validate_tasks(path, allow_empty_subtasks=True, require_phase_config=False)
+        assert result["ok"] is True, (
+            "wired 'client-side hydration' with unit tests should not hard-block — 'client' is a soft term"
+        )
+        warnings = result.get("warnings", [])
+        assert any("client" in w.lower() or "fixture-only" in w for w in warnings), (
+            f"Expected advisory warning for 'client'; got: {warnings}"
+        )
+
+    def test_wired_sync_props_unit_tests_warns_not_blocks(self, tmp_path):
+        """wired 'sync props/state' + 'write unit tests' → ok:True, warning present."""
+        task = _make_task(
+            tier="wired",
+            reachable_via="component.SyncedPanel",
+            title="Sync props between parent and child components",
+            description="Use useEffect to sync state props in React.",
+            test_strategy="write unit tests for the sync hook",
+        )
+        path = _write_tasks_file(tmp_path, [task])
+        result = run_validate_tasks(path, allow_empty_subtasks=True, require_phase_config=False)
+        assert result["ok"] is True, (
+            "wired 'sync props' with unit tests should not hard-block — 'sync' is a soft term"
+        )
+        warnings = result.get("warnings", [])
+        assert any("sync" in w.lower() or "fixture-only" in w for w in warnings), (
+            f"Expected advisory warning for 'sync'; got: {warnings}"
+        )
+
+    def test_soft_term_mismatch_is_marked_soft(self):
+        """_promise_evidence_mismatch sets soft=True for ambiguous claim terms."""
+        task = _make_task(
+            title="Redux store reducer",
+            description="Manage UI state store.",
+            test_strategy="unit tests for reducer pure functions",
+        )
+        result = _promise_evidence_mismatch(task)
+        assert result is not None
+        assert result.get("soft") is True, (
+            f"Expected soft=True for 'store' claim term; got: {result}"
+        )
+
+    def test_hard_term_mismatch_is_not_soft(self):
+        """_promise_evidence_mismatch sets soft=False for precise claim terms."""
+        task = _make_task(
+            title="Prisma connector for orders",
+            description="Persist data via Prisma ORM.",
+            test_strategy="unit test parses a fixture",
+        )
+        result = _promise_evidence_mismatch(task)
+        assert result is not None
+        assert result.get("soft") is False, (
+            f"Expected soft=False for 'prisma'/'connector' claim term; got: {result}"
+        )
+
+
+# ─── 13. Precise terms still hard-block wired/live ───────────────────────────
+
+
+class TestPreciseTermsStillHardBlock:
+    """Precise/unambiguous terms (prisma, webhook, connector, endpoint, etc.)
+    must continue to hard-block wired/live tasks."""
+
+    def test_wired_webhook_integration_fixture_only_raises(self, tmp_path):
+        """wired 'webhook integration' + fixture-only test → hard-block."""
+        task = _make_task(
+            tier="wired",
+            reachable_via="route:/webhooks/stripe",
+            title="webhook integration for Stripe events",
+            description="Handle Stripe webhook payloads.",
+            test_strategy="unit test parses a fixture payload",
+        )
+        path = _write_tasks_file(tmp_path, [task])
+        with pytest.raises(CommandError) as exc_info:
+            run_validate_tasks(path, allow_empty_subtasks=True, require_phase_config=False)
+        err = exc_info.value
+        problems_text = " ".join(str(p) for p in err.extra.get("problems", []))
+        assert "fixture-only" in problems_text or "webhook" in problems_text, (
+            f"Expected 'webhook' or 'fixture-only' in problems; got: {problems_text}"
+        )
+
+    def test_wired_prisma_connector_fixture_still_hard_blocks(self, tmp_path):
+        """wired 'Prisma connector' + fixture-only test → hard-block (unchanged)."""
+        task = _make_task(
+            tier="wired",
+            reachable_via="route:/api/v1/orders",
+            title="Prisma connector for order persistence",
+            description="Persist orders to the database via Prisma.",
+            test_strategy="unit test parses a fixture file",
+        )
+        path = _write_tasks_file(tmp_path, [task])
+        with pytest.raises(CommandError):
+            run_validate_tasks(path, allow_empty_subtasks=True, require_phase_config=False)
+
+    def test_wired_database_migration_fixture_still_hard_blocks(self, tmp_path):
+        """wired 'database migration' + fixture-only test → hard-block."""
+        task = _make_task(
+            tier="wired",
+            reachable_via="cli:migrate",
+            title="database migration for user schema",
+            description="Add migration to update the users table.",
+            test_strategy="unit tests parse fixture SQL",
+        )
+        path = _write_tasks_file(tmp_path, [task])
+        with pytest.raises(CommandError) as exc_info:
+            run_validate_tasks(path, allow_empty_subtasks=True, require_phase_config=False)
+        err = exc_info.value
+        problems_text = " ".join(str(p) for p in err.extra.get("problems", []))
+        assert "fixture-only" in problems_text or "database" in problems_text or "migration" in problems_text

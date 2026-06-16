@@ -340,14 +340,23 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
 
 # ─── Reachability / promise-evidence helpers ─────────────────────────────────
 
-# Claim terms that imply live/integration-level evidence (word-boundary anchored).
-# More-specific patterns come FIRST so they take priority over generic ones.
-_CLAIM_TERMS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r'\b(prisma|database|persist|store|migration|orm)\b', re.IGNORECASE), "db"),
+# Precise claim terms that unambiguously imply live/integration-level evidence.
+# A fixture-only testStrategy paired with one of these is a HARD-BLOCK on
+# wired/live tasks (and a warning on spike/domain-model), same as before.
+# Word-boundary anchored; more-specific patterns come first.
+_HARD_CLAIM_TERMS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'\b(prisma|database|persist|migration|orm)\b', re.IGNORECASE), "db"),
     (re.compile(r'\bcli\b', re.IGNORECASE), "cli"),
+    (re.compile(r'\b(connector|adapter|webhook|integration|endpoint)\b', re.IGNORECASE), "integration"),
+]
+
+# Ambiguous claim terms — common in legitimate UI/state work (Redux store,
+# React Router route, client-side hydration, API types/config, sync props).
+# These NEVER produce a hard-block; they add an advisory warning at every tier.
+_SOFT_CLAIM_TERMS: list[tuple[re.Pattern, str]] = [
     (re.compile(r'\bclient\b', re.IGNORECASE), "client"),
     (re.compile(r'\bapi\b', re.IGNORECASE), "api"),
-    (re.compile(r'\b(connector|adapter|sync|webhook|integration|endpoint|route)\b', re.IGNORECASE), "integration"),
+    (re.compile(r'\b(route|sync|store)\b', re.IGNORECASE), "integration"),
 ]
 
 # Signal that satisfies the live/integration claim requirement
@@ -364,7 +373,7 @@ _DB_SIGNAL_RE = re.compile(
 
 # "Fixture-only" pattern: mentions mocks/stubs without live signals
 _FIXTURE_ONLY_RE = re.compile(
-    r'fixture|mock|stub|sample|parses|unit\s+test',
+    r'fixture|mock|stub|sample|parses|\bunit\s+tests?\b',
     re.IGNORECASE,
 )
 
@@ -408,8 +417,13 @@ def _suggested_title(claim_term: str, original_title: str) -> str:
 def _promise_evidence_mismatch(task: dict) -> dict | None:
     """Detect high-altitude claim in title/description vs fixture-only testStrategy.
 
-    Returns a mismatch dict {task_id, claim_term, evidence_altitude, suggested_title}
+    Returns a mismatch dict {task_id, claim_term, evidence_altitude, suggested_title, soft}
     or None if no mismatch detected.
+
+    ``soft=True`` means the matched term is ambiguous (store/route/sync/client/api) —
+    the caller must treat this as an advisory warning at every tier, never a hard-block.
+    ``soft=False`` means the matched term is a precise integration promise — the caller
+    hard-blocks wired/live tasks and warns on spike/domain-model.
     """
     title = str(task.get("title") or "")
     description = str(task.get("description") or "")
@@ -420,7 +434,8 @@ def _promise_evidence_mismatch(task: dict) -> dict | None:
     if altitude != "fixture-only":
         return None
 
-    for pattern, claim_key in _CLAIM_TERMS:
+    # Check precise (hard) terms first
+    for pattern, claim_key in _HARD_CLAIM_TERMS:
         mo = pattern.search(combined_text)
         if mo:
             matched_term = mo.group(0)
@@ -429,7 +444,22 @@ def _promise_evidence_mismatch(task: dict) -> dict | None:
                 "claim_term": matched_term,
                 "evidence_altitude": "fixture-only",
                 "suggested_title": _suggested_title(matched_term, title),
+                "soft": False,
             }
+
+    # Check ambiguous (soft) terms — warn-only regardless of tier
+    for pattern, claim_key in _SOFT_CLAIM_TERMS:
+        mo = pattern.search(combined_text)
+        if mo:
+            matched_term = mo.group(0)
+            return {
+                "task_id": task.get("id"),
+                "claim_term": matched_term,
+                "evidence_altitude": "fixture-only",
+                "suggested_title": _suggested_title(matched_term, title),
+                "soft": True,
+            }
+
     return None
 
 
@@ -559,7 +589,6 @@ def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, requi
         )
         tier = str(tier).strip().lower()
         hard_tiers = {"wired", "live"}
-        soft_tiers = {"spike", "domain-model"}
 
         # 1. reachableVia presence check
         reachable_via = str(task.get("reachableVia") or "").strip()
@@ -590,7 +619,11 @@ def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, requi
                 f"but testStrategy is fixture-only — "
                 f"suggested title: {mismatch['suggested_title']!r}"
             )
-            if tier in hard_tiers:
+            if mismatch.get("soft"):
+                # Ambiguous term (store/route/sync/client/api): advisory warning at every tier,
+                # never a hard-block even for wired/live tasks.
+                warnings.append(msg)
+            elif tier in hard_tiers:
                 problems.append(msg)
             else:
                 warnings.append(msg)
