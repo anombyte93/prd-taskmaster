@@ -23,6 +23,8 @@ VALID_STATUSES = {
     "deferred",
     "cancelled",
     "blocked",
+    "scaffold",  # auto-downgraded orphan: code exists but not wired into the system;
+                 # NOT done, NOT deferred (deferred = deliberate); blocks the ship gate.
 }
 
 _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}

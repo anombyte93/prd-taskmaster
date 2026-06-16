@@ -440,3 +440,69 @@ def test_run_next_task_matches_live_taskmaster_in_progress_subtask(tmp_path, mon
     assert local["task"]["status"] == live["task"]["status"]
     assert local["task"]["parent_id"] == live["task"]["parentId"]
     assert local["task"]["parent_title"] == "Resume parent"
+
+
+# ─── scaffold status tests ────────────────────────────────────────────────────
+
+
+def test_set_status_scaffold_succeeds(tmp_path, monkeypatch):
+    """set-status scaffold is accepted (auto-downgrade path no longer halts)."""
+    from prd_taskmaster.task_state import run_set_status
+
+    tasks_file = _write_project(tmp_path, _tagged_payload([_task(1, status="done")]))
+    monkeypatch.chdir(tmp_path)
+
+    result = run_set_status("1", "scaffold")
+    assert result["ok"] is True
+    assert result["status"] == "scaffold"
+    written = json.loads(tasks_file.read_text())
+    assert written["master"]["tasks"][0]["status"] == "scaffold"
+
+
+def test_set_status_scaffold_via_cli(tmp_path):
+    """CLI set-status --status scaffold exits 0 and writes the status."""
+    tasks_file = _write_project(tmp_path, _tagged_payload([_task(1, status="done")]))
+
+    code, out, err = _run_cli(tmp_path, "set-status", "--id", "1", "--status", "scaffold")
+    assert code == 0, f"stderr={err!r}"
+    data = json.loads(out)
+    assert data["status"] == "scaffold"
+    written = json.loads(tasks_file.read_text())
+    assert written["master"]["tasks"][0]["status"] == "scaffold"
+
+
+def test_scaffold_task_blocks_ship_gate(tmp_path):
+    """A project with one scaffold task must NOT yield SHIP_CHECK_OK (Gate 2 blocks)."""
+    from prd_taskmaster.shipcheck import run_all_gates
+
+    # Write minimal project: Gates 1, 3, 4, 6 satisfied; only Gate 2 is the issue.
+    atlas = tmp_path / ".atlas-ai"
+    (atlas / "state").mkdir(parents=True)
+    (atlas / "state" / "pipeline.json").write_text(
+        json.dumps({"current_phase": "EXECUTE"})
+    )
+    tm = tmp_path / ".taskmaster" / "tasks"
+    tm.mkdir(parents=True)
+    # One scaffold task — status != "done" → Gate 2 must fail.
+    (tm / "tasks.json").write_text(
+        json.dumps({"master": {"tasks": [{"id": 1, "title": "Orphan", "status": "scaffold"}]}})
+    )
+    docs = tmp_path / ".taskmaster" / "docs"
+    docs.mkdir(parents=True)
+    (docs / "plan.md").write_text("# Plan\n")
+    # No CDD card needed — Gate 2 fires first for the scaffold task.
+
+    ok, failures = run_all_gates(tmp_path)
+    assert ok is False, "scaffold task must block the ship gate"
+    assert any("scaffold" in f or "not done" in f for f in failures), (
+        f"expected a Gate 2 failure mentioning scaffold or not done; got: {failures}"
+    )
+
+
+def test_scaffold_not_in_done_set(tmp_path, monkeypatch):
+    """scaffold is not treated as done — it must not satisfy the 'all done' ship gate."""
+    from prd_taskmaster.task_state import VALID_STATUSES
+
+    assert "scaffold" in VALID_STATUSES, "scaffold must be a valid status"
+    # Confirm it is NOT the 'done' status.
+    assert "scaffold" != "done"

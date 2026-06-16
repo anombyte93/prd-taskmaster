@@ -103,7 +103,7 @@ def test_preflight_reads_standard_taskmaster_state_and_recommends_pending_tag(pr
     assert result["current_tag"] == "production-agent"
     assert result["task_count"] == 1
     assert result["pending_task_count"] == 0
-    assert result["tag_counts"]["master"] == {"total": 2, "pending": 1, "done": 1}
+    assert result["tag_counts"]["master"] == {"total": 2, "pending": 1, "done": 1, "scaffold": 0}
     assert result["recommended_tag"] == "master"
     assert result["recommended_action"] == "select_taskmaster_tag"
 
