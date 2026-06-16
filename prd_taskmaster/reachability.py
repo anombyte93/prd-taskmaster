@@ -3,23 +3,41 @@
 This module is READ-ONLY at runtime: it uses git and grep (via subprocess) to inspect
 the repository; it never writes files.
 
+Verdict contract
+----------------
+- WIRED  : at least one non-test file outside the module's own co-located test imports it.
+           This is a PASS verdict.
+- EXEMPT : ``reachable_via`` starts with a known scheme prefix
+           (cli:|route:|tool:|hook:|plugin:|dynamic:).  In v1 we accept the declared scheme
+           on trust; scheme-registration verification is a TODO.
+           This is a PASS verdict.
+- ORPHAN : no non-test importer found AND no exempt scheme declared.
+           This is a BLOCKING verdict.
+- ERROR  : git or grep encountered a real failure (exit code != 0 for git;
+           exit code >= 2 for grep).  The sweep cannot be trusted.
+           This is a BLOCKING verdict.
+
+CRITICAL: ERROR must NEVER be mis-reported as WIRED or EXEMPT.
+Only WIRED and EXEMPT are passing verdicts.  ORPHAN and ERROR both block.
+
 Design notes
 ------------
-- A module is WIRED if at least one file outside of its own co-located test imports it.
-- A module is ORPHAN if no such importer exists AND no exempt scheme is declared.
-- A module is EXEMPT if ``reachable_via`` starts with a known scheme prefix
-  (cli:|route:|tool:|hook:|plugin:|dynamic:).  In v1 we accept the declared scheme on
-  trust; scheme-registration verification (e.g. checking that the entry-point actually
-  exists) is a TODO.
-- Errors in git/grep are logged to stderr and treated conservatively: an empty new-module
-  set is considered WIRED/EXEMPT (not ORPHAN), because we cannot confirm the module is
-  new.  A grep error for a specific module is also treated as conservative WIRED so we
-  never silently block a legitimate module.
+- new_modules_for_task raises ReachabilityError on git failure so callers can never
+  silently swallow a broken-environment result and pass an orphan sweep.
+- find_importers / _grep_patterns raise ReachabilityError on grep exit code >= 2
+  (a real error, not "no matches").  grep exit code 1 ("no matches") is NORMAL and
+  causes ORPHAN, not an error.
+- reachability_verdict and sweep_task catch ReachabilityError and return
+  {"verdict": "ERROR", ...} so the gate is blocked.
+- Test files are excluded from importers whether co-located, under tests/, tests/core/,
+  or any __tests__/ subtree.
 
-Conservative rule: *fail toward "needs review"* only applies when we have a module we
-could not sweep.  If new_modules_for_task returns empty (git error), sweep_task returns
-WIRED because there is nothing to flag.  If find_importers raises (grep error), we return
-WIRED (we couldn't confirm orphan status — but we log the anomaly).
+Known v1 limitations (not fixed here; deferred to future iterations)
+-----------------------------------------------------------------------
+- Python commented-out imports (# import bar) can produce a false-WIRED via grep.
+  A future AST-based scan would eliminate this.
+- Migration-filename exclusion in new_modules_for_task covers filename patterns but not
+  content (e.g. a migration that also defines a domain model).  Low-risk in practice.
 """
 
 from __future__ import annotations
@@ -33,6 +51,16 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ─── Sentinel exception ───────────────────────────────────────────────────────
+
+class ReachabilityError(Exception):
+    """Raised when a git or grep subprocess fails with a real error.
+
+    Distinct from 'no matches' (grep rc=1), which is a normal, expected result
+    that produces an ORPHAN verdict rather than an error.
+    """
+
 
 # ─── Exempt scheme prefixes ───────────────────────────────────────────────────
 
@@ -107,8 +135,12 @@ def new_modules_for_task(
     - Exclude tests, __init__.py, __main__.py, index.* barrels, conftest.py,
       setup.py, and migration files (see module-level patterns).
 
-    If the git diff command fails, logs a warning and returns [] (conservative: caller
-    sees no new modules and will not flag ORPHAN on missing data).
+    Raises ReachabilityError if git exits with a non-zero return code (real git failure).
+    An empty diff (git succeeds but no files were added) returns [] normally — this is
+    NOT an error.
+
+    Contract: callers must handle ReachabilityError to avoid silently passing a sweep
+    on a broken git environment.
     """
     repo_root = Path(repo_root)
     lang = language_for_repo(repo_root)
@@ -122,12 +154,12 @@ def new_modules_for_task(
         text=True,
     )
     if result.returncode != 0:
-        logger.warning(
-            "new_modules_for_task: git diff failed (rc=%d): %s",
-            result.returncode,
-            result.stderr.strip(),
+        msg = (
+            f"new_modules_for_task: git diff failed (rc={result.returncode}): "
+            f"{result.stderr.strip()}"
         )
-        return []
+        logger.warning(msg)
+        raise ReachabilityError(msg)
 
     modules: list[Path] = []
     for line in result.stdout.splitlines():
@@ -151,7 +183,8 @@ def new_modules_for_task(
 
 def find_importers(repo_root: Path, module: Path, lang: str) -> list[Path]:
     """Return repo-relative Paths of files that import *module*, excluding the module itself
-    and its own co-located test.
+    and all test files (co-located, under tests/, tests/core/, __tests__/, or any
+    path matching the test-file patterns).
 
     Python (lang='py'):
       Given foo/bar.py the pkg dotted path is foo.bar and the bare name is bar.
@@ -163,14 +196,17 @@ def find_importers(repo_root: Path, module: Path, lang: str) -> list[Path]:
       across *.py files.
 
     TypeScript/JavaScript (lang='ts'|'js'):
-      Grep for ``from '...bar'`` / ``require('...bar')`` referencing the module's
-      basename (without extension).
+      Grep for ``from '...{stem}'`` / ``require('...{stem}')`` referencing the module's
+      basename (without extension), anchored at a path-component boundary (/, ./, or start
+      of path segment) so that stem='bar' does NOT match './foobar'.
 
     Go (lang='go'):
       Grep for the module's directory path (package) in import blocks.
 
-    If grep fails (e.g. no files found), logs and returns [] (conservative: treat as WIRED
-    — we cannot confirm orphan status).
+    Error policy (fail CLOSED):
+      - grep exit code 1 = "no matches" → NORMAL, returns [] → caller produces ORPHAN.
+      - grep exit code >= 2 = real error → RAISES ReachabilityError.
+      Test-file importers are excluded from the result.
 
     Returns repo-relative Paths.
     """
@@ -190,9 +226,6 @@ def find_importers(repo_root: Path, module: Path, lang: str) -> list[Path]:
         exclude_paths.add(candidate.as_posix())
     # Also check tests/ sibling directory.
     exclude_paths.add((parent.parent / "tests" / f"test_{stem}{module.suffix}").as_posix())
-    exclude_paths.add(
-        (parent.parent / "tests" / f"test_{stem}{module.suffix}").as_posix()
-    )
 
     if lang == "py":
         patterns = _py_import_patterns(module)
@@ -215,6 +248,10 @@ def find_importers(repo_root: Path, module: Path, lang: str) -> list[Path]:
         rel = p.as_posix()
         if rel in seen or rel in exclude_paths:
             continue
+        # Exclude ALL test files — co-located, nested under tests/, __tests__/, or any
+        # path matching the test-file or test-directory patterns.
+        if _EXCLUDE_NAME_RE.search(rel) or _EXCLUDE_DIRS_RE.search(rel):
+            continue
         seen.add(rel)
         importers.append(p)
 
@@ -234,16 +271,24 @@ def reachability_verdict(
     1. EXEMPT if *reachable_via* starts with a known scheme prefix (cli:|route:|tool:|hook:|plugin:|dynamic:).
        (v1: scheme accepted on trust; verification is a TODO.)
     2. Call find_importers.  WIRED if any found, else ORPHAN.
+       On ReachabilityError (real grep/subprocess failure): return ERROR verdict.
+
+    Verdict contract (fail CLOSED):
+      WIRED  → PASS (imported by at least one non-test file)
+      EXEMPT → PASS (declared reachable via scheme)
+      ORPHAN → BLOCKING (no non-test importer found)
+      ERROR  → BLOCKING (subprocess failure; sweep result is untrustworthy)
 
     Returns a dict::
 
         {
-            "verdict":      "WIRED" | "ORPHAN" | "EXEMPT",
+            "verdict":      "WIRED" | "ORPHAN" | "EXEMPT" | "ERROR",
             "module":       str,
             "importers":    [str, ...],
             "reachable_via": str | None,
             "exempt_reason": str | None,   # scheme name if EXEMPT
             "lang":         str,
+            "error":        str | None,    # only present for ERROR verdict
         }
     """
     module = Path(module)
@@ -265,21 +310,20 @@ def reachability_verdict(
     # Step 2: importer sweep.
     try:
         importers = find_importers(repo_root, module, lang)
-    except Exception as exc:
+    except ReachabilityError as exc:
         logger.warning(
-            "reachability_verdict: find_importers raised for %s: %s — treating as WIRED (conservative)",
+            "reachability_verdict: find_importers raised ReachabilityError for %s: %s — returning ERROR",
             module_str,
             exc,
         )
-        importers = []
-        # Conservative: we cannot confirm orphan → WIRED.
         return {
-            "verdict": "WIRED",
+            "verdict": "ERROR",
             "module": module_str,
             "importers": [],
             "reachable_via": reachable_via,
             "exempt_reason": None,
             "lang": lang,
+            "error": str(exc),
         }
 
     verdict = "WIRED" if importers else "ORPHAN"
@@ -307,17 +351,26 @@ def sweep_task(
     - If tier in {spike, domain-model}: EXEMPT (not swept; reachability not required at this phase).
     - If task.entrypoint is truthy: EXEMPT (entrypoints are by definition reachable via the outside world).
     - Else (tier in {wired, live}): sweep new modules and compute per-module verdicts.
-      Task verdict = ORPHAN if ANY module is ORPHAN; else WIRED (EXEMPT modules don't make the task orphan).
+      Task verdict = ORPHAN if ANY module is ORPHAN.
+      Task verdict = ERROR  if ANY module is ERROR (or if new_modules_for_task raises).
+      Else WIRED (EXEMPT modules don't make the task orphan).
+
+    Verdict contract (fail CLOSED):
+      WIRED  → PASS
+      EXEMPT → PASS
+      ORPHAN → BLOCKING
+      ERROR  → BLOCKING (never silently pass on a broken environment)
 
     Returns::
 
         {
-            "verdict":      "WIRED" | "ORPHAN" | "EXEMPT",
+            "verdict":      "WIRED" | "ORPHAN" | "EXEMPT" | "ERROR",
             "tier":         str,
             "modules":      [<per-module verdict dicts>],
             "reason":       str | None,        # only for EXEMPT
             "checked_at":   str (ISO-8601),
             "start_commit": str,
+            "error":        str | None,        # only for ERROR
         }
     """
     repo_root = Path(repo_root)
@@ -354,14 +407,15 @@ def sweep_task(
     lang = language_for_repo(repo_root)
     try:
         new_modules = new_modules_for_task(repo_root, start_commit)
-    except Exception as exc:
-        logger.warning("sweep_task: new_modules_for_task raised: %s — returning WIRED (conservative)", exc)
+    except ReachabilityError as exc:
+        logger.warning("sweep_task: new_modules_for_task raised ReachabilityError: %s — returning ERROR", exc)
         return {
-            "verdict": "WIRED",
+            "verdict": "ERROR",
             "tier": tier,
             "modules": [],
             "checked_at": checked_at,
             "start_commit": start_commit,
+            "error": str(exc),
         }
 
     reachable_via = task.get("reachableVia")
@@ -377,20 +431,29 @@ def sweep_task(
         )
         module_verdicts.append(v)
 
-    # Task is ORPHAN if ANY module is ORPHAN (EXEMPT modules don't contribute to orphan status).
+    # Task is ORPHAN if ANY module is ORPHAN; ERROR if ANY module is ERROR.
+    # Only WIRED if no module is ORPHAN or ERROR (EXEMPT modules don't contribute).
     task_verdict = "WIRED"
+    task_error: str | None = None
     for v in module_verdicts:
         if v["verdict"] == "ORPHAN":
             task_verdict = "ORPHAN"
             break
+        if v["verdict"] == "ERROR":
+            task_verdict = "ERROR"
+            task_error = v.get("error")
+            break
 
-    return {
+    result: dict = {
         "verdict": task_verdict,
         "tier": tier,
         "modules": module_verdicts,
         "checked_at": checked_at,
         "start_commit": start_commit,
     }
+    if task_error is not None:
+        result["error"] = task_error
+    return result
 
 
 # ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -415,12 +478,30 @@ def _py_import_patterns(module: Path) -> list[str]:
 
 
 def _ts_import_patterns(module: Path) -> list[str]:
-    """Build grep -E patterns that match TS/JS import/require for *module*."""
-    stem = module.stem
-    # Match: from '...stem' | from "...stem" | require('...stem') | require("...stem")
+    """Build grep -E patterns that match TS/JS import/require for *module*.
+
+    The stem is anchored at a path-component boundary so that stem='bar' does NOT
+    match './foobar'.  The pattern requires that the character immediately before
+    the stem (within the quoted path) is a '/' — ensuring 'bar' is the last path
+    segment, not a suffix of a longer name.
+
+    Examples (stem='bar'):
+      from './bar'          ✓   '/' immediately before stem
+      from '../pkg/bar'     ✓   '/' immediately before stem
+      from './foobar'       ✗   no '/' immediately before 'bar' (preceded by 'o')
+      require('./bar')      ✓
+      require('./foobar')   ✗
+
+    Correctness note: [^'"]*/{stem}['"] applied to './foobar' — the only '/' in
+    the quoted string is at position 1 (between '.' and 'f'), and '/foobar' does
+    not contain '/bar' as an anchored suffix starting after a '/'.  grep backtracks
+    through all positions and finds no valid split, so './foobar' correctly does
+    NOT match.
+    """
+    stem = re.escape(module.stem)
     return [
-        rf"""from ['"][^'"]*{re.escape(stem)}['"]""",
-        rf"""require\(['"][^'"]*{re.escape(stem)}['"]\)""",
+        rf"""from ['"][^'"]*/{stem}['"]""",
+        rf"""require\(['"][^'"]*/{stem}['"]\)""",
     ]
 
 
@@ -435,26 +516,39 @@ def _grep_patterns(repo_root: Path, patterns: list[str], glob: str) -> list[Path
     """Run grep -rEl for each pattern across files matching *glob* under *repo_root*.
 
     Returns a deduplicated list of repo-relative Paths of matching files.
-    On error, logs a warning and returns [] (conservative: caller decides what to do).
+
+    Error policy (fail CLOSED):
+      - grep exit code 0 = matches found → normal.
+      - grep exit code 1 = no matches → normal, returns [] for this pattern.
+      - grep exit code >= 2 = real error (e.g. invalid regex, I/O error) →
+        RAISES ReachabilityError.  The caller must propagate this upward so that
+        the sweep returns ERROR rather than a false WIRED/ORPHAN.
     """
     found: set[str] = set()
     for pattern in patterns:
         result = subprocess.run(
-            ["grep", "-rEl", "--include", glob, pattern, "."],
+            ["grep", "-rEl", "--include", glob,
+             "--exclude-dir=tests", "--exclude-dir=__tests__",
+             pattern, "."],
             cwd=str(repo_root),
             capture_output=True,
             text=True,
         )
-        if result.returncode not in (0, 1):
-            # rc=1 means "no match" — that is expected.  Any other rc is an error.
-            logger.warning(
-                "_grep_patterns: grep returned rc=%d for pattern %r: %s",
-                result.returncode,
-                pattern,
-                result.stderr.strip(),
-            )
-            # Conservative: do NOT abort; keep going with other patterns.
+        if result.returncode == 0:
+            # Matches found.
+            pass
+        elif result.returncode == 1:
+            # No matches — completely normal, not an error.
             continue
+        else:
+            # rc >= 2: real grep error.
+            msg = (
+                f"_grep_patterns: grep returned rc={result.returncode} "
+                f"for pattern {pattern!r}: {result.stderr.strip()}"
+            )
+            logger.warning(msg)
+            raise ReachabilityError(msg)
+
         for line in result.stdout.splitlines():
             line = line.strip()
             if line:

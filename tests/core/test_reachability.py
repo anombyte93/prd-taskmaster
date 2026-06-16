@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from prd_taskmaster.reachability import (
+    ReachabilityError,
     find_importers,
     language_for_repo,
     new_modules_for_task,
@@ -439,3 +440,235 @@ class TestSweepTask:
         # Module verdict is EXEMPT (cli scheme), so task verdict is WIRED (no ORPHAN modules).
         assert result["verdict"] == "WIRED"
         assert result["modules"][0]["verdict"] == "EXEMPT"
+
+
+# ─── 7. Regression: fail-closed on git/grep errors ────────────────────────────
+
+class TestFailClosed:
+    """These tests MUST fail against pre-fix code (which returned WIRED on errors).
+
+    After the fix:
+    - new_modules_for_task raises ReachabilityError on git failure
+    - sweep_task returns ERROR (not WIRED) on git failure
+    - _grep_patterns raises ReachabilityError on grep rc >= 2
+    - grep rc=1 ("no matches") is NOT an error: produces ORPHAN, no exception
+    """
+
+    def test_git_error_raises_reachability_error(self, tmp_path):
+        """new_modules_for_task raises ReachabilityError when git fails.
+
+        Using a non-git directory ensures git diff exits non-zero.
+        PRE-FIX BEHAVIOR: returned [] silently → caller saw WIRED (false pass).
+        POST-FIX BEHAVIOR: raises ReachabilityError.
+        """
+        non_git_dir = tmp_path / "not_a_repo"
+        non_git_dir.mkdir()
+        # Also need a pyproject.toml so language detection doesn't bail early.
+        (non_git_dir / "pyproject.toml").write_text("[project]\n")
+
+        with pytest.raises(ReachabilityError):
+            new_modules_for_task(non_git_dir, "abc1234", "HEAD")
+
+    def test_sweep_task_git_error_returns_error_verdict(self, tmp_path):
+        """sweep_task returns ERROR verdict (not WIRED) when git fails.
+
+        PRE-FIX BEHAVIOR: new_modules_for_task returned [] → no modules swept →
+        task_verdict defaulted to WIRED → silent false pass.
+        POST-FIX BEHAVIOR: ReachabilityError propagates → verdict = ERROR.
+        """
+        non_git_dir = tmp_path / "not_a_repo"
+        non_git_dir.mkdir()
+        (non_git_dir / "pyproject.toml").write_text("[project]\n")
+
+        task = {"tier": "wired"}
+        result = sweep_task(non_git_dir, task, "abc1234")
+        assert result["verdict"] == "ERROR", (
+            f"Expected ERROR on git failure, got {result['verdict']!r}. "
+            "Pre-fix code would return WIRED (false pass)."
+        )
+        assert "error" in result
+
+    def test_sweep_task_bogus_commit_returns_error_verdict(self, tmp_path):
+        """sweep_task with a real git repo but a bogus commit SHA returns ERROR.
+
+        PRE-FIX BEHAVIOR: swallowed git error → WIRED.
+        POST-FIX BEHAVIOR: ERROR verdict.
+        """
+        repo = _init_repo(tmp_path)
+        (repo / "pyproject.toml").write_text("[project]\n")
+        _commit_all(repo, "init")
+
+        task = {"tier": "wired"}
+        result = sweep_task(repo, task, "deadbeef00000000000000000000000000000000")
+        assert result["verdict"] == "ERROR", (
+            f"Expected ERROR on bogus commit, got {result['verdict']!r}."
+        )
+
+    def test_grep_no_match_is_not_an_error_returns_orphan(self, tmp_path):
+        """A module with zero importers → ORPHAN verdict, no exception raised.
+
+        grep exits with rc=1 ("no matches") — this is NORMAL and must NOT raise
+        ReachabilityError.  The verdict is ORPHAN (blocking) but NOT ERROR.
+
+        PRE-FIX BEHAVIOR: same (grep no-match was already handled) — this test
+        confirms the fix didn't accidentally break the no-match path.
+        """
+        repo = _init_repo(tmp_path)
+        (repo / "pyproject.toml").write_text("[project]\n")
+        pkg = repo / "pkg"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("")
+        (pkg / "isolated.py").write_text("# nothing imports this\n")
+        _commit_all(repo, "init")
+
+        # Should not raise — grep rc=1 is not an error.
+        verdict = reachability_verdict(repo, Path("pkg/isolated.py"), "py")
+        assert verdict["verdict"] == "ORPHAN", (
+            f"Expected ORPHAN for module with no importers, got {verdict['verdict']!r}."
+        )
+        assert verdict["importers"] == []
+
+
+# ─── 8. Regression: nested test importer → ORPHAN ────────────────────────────
+
+class TestNestedTestImporterIsOrphan:
+    """A module imported ONLY by a deeply-nested test must be ORPHAN.
+
+    PRE-FIX BEHAVIOR: tests/core/test_foo.py was NOT in the exclude set
+    (only tests/test_foo.py was excluded) → returned as importer → WIRED (false pass).
+    POST-FIX BEHAVIOR: any file under tests/ or __tests__/ is excluded → ORPHAN.
+    """
+
+    def test_module_imported_only_by_nested_test_is_orphan(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "pyproject.toml").write_text("[project]\n")
+        pkg = repo / "pkg"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("")
+        (pkg / "util.py").write_text("def compute(): return 42\n")
+
+        # Nested test under tests/core/ — only importer.
+        tests_core = repo / "tests" / "core"
+        tests_core.mkdir(parents=True)
+        (tests_core / "__init__.py").write_text("")
+        (tests_core / "test_util.py").write_text(
+            "from pkg.util import compute\n"
+            "def test_compute():\n    assert compute() == 42\n"
+        )
+        _commit_all(repo, "add module + nested test")
+
+        verdict = reachability_verdict(repo, Path("pkg/util.py"), "py")
+        assert verdict["verdict"] == "ORPHAN", (
+            f"Expected ORPHAN — module imported only by tests/core/test_util.py, "
+            f"got {verdict['verdict']!r} with importers {verdict['importers']!r}. "
+            "Pre-fix code would return WIRED."
+        )
+        assert verdict["importers"] == []
+
+    def test_module_imported_by_nested_test_and_real_code_is_wired(self, tmp_path):
+        """When both a nested test AND real production code import the module → WIRED."""
+        repo = _init_repo(tmp_path)
+        (repo / "pyproject.toml").write_text("[project]\n")
+        pkg = repo / "pkg"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("")
+        (pkg / "util.py").write_text("def compute(): return 42\n")
+        (pkg / "service.py").write_text("from pkg.util import compute\n")
+
+        tests_core = repo / "tests" / "core"
+        tests_core.mkdir(parents=True)
+        (tests_core / "test_util.py").write_text("from pkg.util import compute\n")
+        _commit_all(repo, "add all")
+
+        verdict = reachability_verdict(repo, Path("pkg/util.py"), "py")
+        assert verdict["verdict"] == "WIRED"
+        assert any("service.py" in imp for imp in verdict["importers"])
+        # The nested test must NOT appear in importers.
+        assert not any("test_util" in imp for imp in verdict["importers"])
+
+
+# ─── 9. Regression: TS/JS substring → ORPHAN ─────────────────────────────────
+
+class TestTsSubstringIsOrphan:
+    """import x from './foobar' must NOT count as importing module 'bar'.
+
+    PRE-FIX BEHAVIOR: _ts_import_patterns used `[^'"]*{stem}` without a path
+    boundary anchor → './foobar' matched stem 'bar' as a suffix → WIRED (false pass).
+    POST-FIX BEHAVIOR: pattern requires '/' immediately before stem → ORPHAN.
+    """
+
+    def _make_ts_repo(self, tmp_path: Path) -> tuple[Path, str]:
+        """Create a minimal TS git repo with src/bar.ts and a single TS file that
+        imports './foobar' (NOT './bar'). Returns (repo, head_sha)."""
+        repo = _init_repo(tmp_path)
+        (repo / "package.json").write_text('{"name": "test"}')
+        (repo / "tsconfig.json").write_text("{}")
+        src = repo / "src"
+        src.mkdir()
+        # The module under test.
+        (src / "bar.ts").write_text("export const bar = 42;\n")
+        # A file that imports './foobar' — should NOT count as importing 'bar'.
+        (src / "consumer.ts").write_text("import { foobar } from './foobar';\n")
+        # A file that correctly imports './bar'.
+        (src / "real_consumer.ts").write_text("import { bar } from './bar';\n")
+        head = _commit_all(repo, "add ts files")
+        return repo, head
+
+    def test_foobar_import_does_not_wire_bar_module(self, tmp_path):
+        """src/consumer.ts does `import from './foobar'` — must NOT make src/bar.ts WIRED."""
+        repo = _init_repo(tmp_path)
+        (repo / "package.json").write_text('{"name": "test"}')
+        (repo / "tsconfig.json").write_text("{}")
+        src = repo / "src"
+        src.mkdir()
+        (src / "bar.ts").write_text("export const bar = 42;\n")
+        # Only importer uses './foobar' — NOT './bar'
+        (src / "consumer.ts").write_text("import { something } from './foobar';\n")
+        _commit_all(repo, "add ts files")
+
+        importers = find_importers(repo, Path("src/bar.ts"), "ts")
+        importer_paths = [p.as_posix() for p in importers]
+        assert "src/consumer.ts" not in importer_paths, (
+            "src/consumer.ts imports './foobar', NOT './bar' — must not appear as importer. "
+            "Pre-fix code would include it (false WIRED)."
+        )
+
+    def test_real_bar_import_wires_bar_module(self, tmp_path):
+        """src/real_consumer.ts does `import from './bar'` — MUST make src/bar.ts WIRED."""
+        repo = _init_repo(tmp_path)
+        (repo / "package.json").write_text('{"name": "test"}')
+        (repo / "tsconfig.json").write_text("{}")
+        src = repo / "src"
+        src.mkdir()
+        (src / "bar.ts").write_text("export const bar = 42;\n")
+        # A correct importer of './bar'
+        (src / "real_consumer.ts").write_text("import { bar } from '../src/bar';\n")
+        _commit_all(repo, "add ts files")
+
+        importers = find_importers(repo, Path("src/bar.ts"), "ts")
+        importer_paths = [p.as_posix() for p in importers]
+        assert "src/real_consumer.ts" in importer_paths, (
+            "src/real_consumer.ts imports '../src/bar' — must appear as importer."
+        )
+
+    def test_ts_substring_full_sweep_orphan(self, tmp_path):
+        """End-to-end: src/bar.ts imported only via './foobar' reference → ORPHAN.
+
+        PRE-FIX: reachability_verdict would return WIRED (false pass).
+        POST-FIX: ORPHAN (correct blocking verdict).
+        """
+        repo = _init_repo(tmp_path)
+        (repo / "package.json").write_text('{"name": "test"}')
+        (repo / "tsconfig.json").write_text("{}")
+        src = repo / "src"
+        src.mkdir()
+        (src / "bar.ts").write_text("export const bar = 42;\n")
+        (src / "consumer.ts").write_text("import { something } from './foobar';\n")
+        _commit_all(repo, "add ts files")
+
+        verdict = reachability_verdict(repo, Path("src/bar.ts"), "ts")
+        assert verdict["verdict"] == "ORPHAN", (
+            f"Expected ORPHAN — only importer uses './foobar' (not './bar'), "
+            f"got {verdict['verdict']!r} with importers {verdict['importers']!r}. "
+            "Pre-fix code would return WIRED."
+        )
