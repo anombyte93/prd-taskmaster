@@ -1,0 +1,65 @@
+direction: right
+classes: {
+  llm:   { style.fill: "#E69F00"; style.stroke: "#8a6100"; style.font-color: "#111111"; shape: hexagon }
+  code:  { style.fill: "#56B4E9"; style.stroke: "#1f6f9c"; style.font-color: "#111111" }
+  ext:   { style.fill: "#009E73"; style.stroke: "#00674c"; style.font-color: "#ffffff"; shape: oval }
+  iface: { style.fill: "#0072B2"; style.stroke: "#013a5e"; style.font-color: "#ffffff" }
+  gate:  { style.fill: "#F0E442"; style.stroke: "#9a8f00"; style.font-color: "#111111"; shape: diamond }
+  human: { style.fill: "#CC79A7"; style.font-color: "#111111"; shape: person }
+}
+
+title: "prd-taskmaster GENERATE engine · backend.NativeBackend -> resolve_provider tier -> cli | api | plan" { near: top-center; shape: text; style.font-size: 18 }
+
+engine: "Generation Engine (backend.py)" {
+  backend: "NativeBackend · parse_prd · expand · rate" { class: code }
+  fanout: "ThreadPoolExecutor fan-out · _expand_packet per packet" { class: code }
+  backend -> fanout: "expand() submits packets"
+}
+
+resolver: "provider_resolver.py" {
+  resolve: "resolve_provider(main) · single tier decision · cli | api | plan" { class: gate }
+}
+
+economy: "economy.py · tier ladder + cost ledger (wraps every call)" {
+  profile: "economy_profile · structured_gen_start tier" { class: code }
+  shift: "shift_tier · escalation step on invalid_json" { class: code }
+  telemetry: "append_telemetry · telemetry.jsonl cost ledger" { class: code }
+}
+
+cli_path: "CLI tier · keyless (host session auth)" {
+  cli_gen: "cli_agent.generate_json_via_cli" { class: code }
+  cli_model: "external model CLI · claude · codex · gemini" { class: ext }
+  cli_gen -> cli_model: "subprocess spawn · no API key"
+}
+
+api_path: "API tier · raw key (urllib)" {
+  api_gen: "llm_client.generate_json" { class: code }
+  vendor: "vendor API · anthropic · openai · google" { class: ext }
+  api_gen -> vendor: "HTTP POST · x-api-key"
+}
+
+plan_path: "Plan floor · agent_action_required" {
+  action: "returns agent_action_required packet" { class: iface }
+  insession: "in-session LLM · decomposes by hand" { class: llm }
+  action -> insession: "hand-off · NATIVE_PARSE_STEPS"
+}
+
+# economy wraps every generation call (tier in, telemetry out)
+engine.backend -> economy.profile: "economy_profile(config) sets start tier"
+economy.profile -> resolver.resolve: "start tier"
+
+# the single tier decision, made per role at gen time
+engine.backend -> resolver.resolve: "resolve_provider(main)"
+engine.fanout -> resolver.resolve: "per-packet handle.kind"
+
+# THREE branches out of the gate
+resolver.resolve -> cli_path.cli_gen: "kind == cli"
+resolver.resolve -> api_path.api_gen: "kind == api"
+resolver.resolve -> plan_path.action: "kind == plan (floor)"
+
+# economy wrapping: every call emits telemetry; api invalid_json triggers shift_tier escalation
+cli_path.cli_gen -> economy.telemetry: "append_telemetry (native-cli)"
+api_path.api_gen -> economy.telemetry: "append_telemetry (native-api)"
+api_path.api_gen -> economy.shift: "invalid_json · escalate one tier"
+economy.shift -> api_path.api_gen: "retry at higher tier (ceiling clamp)"
+

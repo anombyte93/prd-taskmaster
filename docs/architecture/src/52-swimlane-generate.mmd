@@ -1,0 +1,49 @@
+%% GENERATE phase — script vs LLM swimlane.
+%% Okabe-Ito colorblind-safe palette + shape redundancy:
+%%   hexagon  = LLM / agent step (output varies run-to-run)
+%%   rectangle = deterministic engine code
+%%   stadium   = external model execution
+%%   diamond   = deterministic gate
+%% Solid edge = deterministic control flow.  Dashed edge = LLM-routed / bounce-back.
+flowchart LR
+    classDef llm  fill:#E69F00,stroke:#8a6100,color:#111111;
+    classDef code fill:#56B4E9,stroke:#1f6f9c,color:#111111;
+    classDef ext  fill:#009E73,stroke:#00674c,color:#ffffff;
+    classDef gate fill:#F0E442,stroke:#9a8f00,color:#111111;
+
+    subgraph LANE_LLM["LLM / agent — non-deterministic"]
+      direction TB
+      L1{{"1 · write PRD prose, replace every placeholder<br/>phases/GENERATE.md · skills/generate"}}:::llm
+      L2{{"6c · plan-floor: decompose to schema by hand<br/>(when engine returns agent_action_required)"}}:::llm
+    end
+
+    subgraph LANE_CODE["deterministic engine — Python"]
+      direction TB
+      C1["2 · templates.run_load_template"]:::code
+      C2["3 · validation.run_validate_prd<br/>13 checks + placeholder HARD FAIL"]:::code
+      C3["4 · tasks.run_calc_tasks (count formula)"]:::code
+      C4["5 · provider_resolver.resolve_provider<br/>tier = cli | api | plan"]:::code
+      C5["7 · backend.NativeBackend.parse_prd / expand<br/>economy.shift_tier (escalate) · append_telemetry"]:::code
+      C6["8 · parallel.apply_results (atomic merge)<br/>tasks.run_enrich_tasks (complexity)"]:::code
+      C7["9 · validation.run_validate_tasks"]:::code
+      G1{"10 · pipeline.check_gate('GENERATE')<br/>grade ≥ GOOD · tasks>0 · 100% subtasks"}:::gate
+    end
+
+    subgraph LANE_EXT["external model execution"]
+      direction TB
+      E1(["6a · cli_agent.generate_json_via_cli<br/>claude / codex / gemini CLI · keyless"]):::ext
+      E2(["6b · llm_client.generate_json<br/>raw vendor API"]):::ext
+    end
+
+    L1 --> C1 --> C2
+    C2 -. "placeholders / low grade — regenerate" .-> L1
+    C2 --> C3 --> C4
+    C4 -- "cli tier" --> E1
+    C4 -- "api tier" --> E2
+    C4 -. "plan tier (no key + no CLI)" .-> L2
+    E1 --> C5
+    E2 --> C5
+    L2 -. "hand-built task JSON" .-> C5
+    C5 --> C6 --> C7 --> G1
+    G1 -. "fail — regenerate" .-> L1
+    G1 == "pass → advance_phase(HANDOFF)" ==> DONE(["HANDOFF ▶"]):::code

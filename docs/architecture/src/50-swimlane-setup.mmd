@@ -1,0 +1,48 @@
+%% SETUP phase — script vs LLM swimlane.
+%% Okabe-Ito colorblind-safe palette + shape redundancy:
+%%   hexagon  = LLM / agent step (output varies run-to-run)
+%%   rectangle = deterministic engine code
+%%   stadium   = external model execution
+%%   diamond   = deterministic gate
+%% Solid edge = deterministic control flow.  Dashed edge = LLM-routed / bounce-back.
+flowchart LR
+    classDef llm  fill:#E69F00,stroke:#8a6100,color:#111111;
+    classDef code fill:#56B4E9,stroke:#1f6f9c,color:#111111;
+    classDef ext  fill:#009E73,stroke:#00674c,color:#ffffff;
+    classDef gate fill:#F0E442,stroke:#9a8f00,color:#111111;
+
+    subgraph LANE_LLM["LLM / agent — non-deterministic"]
+      direction TB
+      L1{{"1 · enter SETUP, run go router preflight<br/>skills/go · skills/setup · check_gate diagnostic"}}:::llm
+      L2{{"4 · ship-check skel bootstrap<br/>copy customizations + ship-check.py if absent"}}:::llm
+      L3{{"6 · DETECT-FIRST judgment<br/>do not clobber a working provider config"}}:::llm
+      L4{{"10 · read rendered panel, announce<br/>MCP-vs-CLI backend, then advance_phase"}}:::llm
+    end
+
+    subgraph LANE_CODE["deterministic engine — Python"]
+      direction TB
+      C1["2 · batch.run_engine_preflight<br/>preflight.run_preflight (env + taskmaster probe)"]:::code
+      C2["3 · backend.NativeBackend.init_project<br/>taskmaster.init_taskmaster (vestigial file format)"]:::code
+      C3["5 · mode_recommend.detect_capabilities<br/>tier = free | cli | api"]:::code
+      C4["7 · providers.run_configure_providers<br/>fill empty roles only · run_detect_providers"]:::code
+      C5["8 · setup_wizard.run_setup (probe pipeline)<br/>fleet.save_engine_config (persist backend)"]:::code
+      C6["9 · mode_recommend.validate_setup<br/>6 checks · ready + 0 critical failures"]:::code
+      G1{"11 · pipeline.check_gate('SETUP')<br/>validate_setup.ready · critical_failures == 0"}:::gate
+    end
+
+    subgraph LANE_EXT["external model execution"]
+      direction TB
+      E1(["8a · setup_wizard._live_probe<br/>claude / codex / gemini CLI · keyless liveness"]):::ext
+    end
+
+    L1 --> C1 --> C2 --> L2
+    L2 --> C3 --> L3
+    L3 -. "all roles set — skip mutate" .-> C5
+    L3 --> C4 --> C5
+    C5 --> E1
+    E1 --> C6
+    C6 -. "not ready — reconfigure providers" .-> L3
+    C6 --> L4 --> G1
+    G1 -. "fail — fix provider config" .-> L3
+    G1 == "pass → advance_phase(DISCOVER)" ==> DONE(["DISCOVER ▶"]):::code
+

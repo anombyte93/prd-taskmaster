@@ -1,0 +1,54 @@
+# Atlas / prd-taskmaster — system overview (the whole engine on one page).
+# Four layers: LLM/agent prompts → fail-closed interface → deterministic Python core → external.
+# Detail for each core area lives in 10/11/12-component-*.d2.  Render: d2 --layout elk 00-system-overview.d2 00-system-overview.svg
+direction: down
+
+classes: {
+  llm:   { style.fill: "#E69F00"; style.stroke: "#8a6100"; style.font-color: "#111111"; shape: hexagon }
+  code:  { style.fill: "#56B4E9"; style.stroke: "#1f6f9c"; style.font-color: "#111111" }
+  ext:   { style.fill: "#009E73"; style.stroke: "#00674c"; style.font-color: "#ffffff"; shape: oval }
+  iface: { style.fill: "#0072B2"; style.stroke: "#013a5e"; style.font-color: "#ffffff" }
+  gate:  { style.fill: "#F0E442"; style.stroke: "#9a8f00"; style.font-color: "#111111"; shape: diamond }
+  human: { style.fill: "#CC79A7"; style.font-color: "#111111"; shape: person }
+}
+
+title: |md
+  # Atlas engine — system overview
+  hexagon = LLM step · rectangle = deterministic Python · blue = interface · oval = external · person = you
+| { near: top-center }
+
+human: "you" { class: human }
+
+llm_layer: "1 · LLM / agent layer — non-deterministic (prompts the model executes)" {
+  skillmd: "SKILL.md · /atlas · /go entrypoint" { class: llm }
+  phases: "phases/*.md · DISCOVER · GENERATE · HANDOFF" { class: llm }
+  skills: "skills/* · discover · generate · handoff · setup · expand-tasks · execute-task · execute-fleet" { class: llm }
+}
+
+iface_layer: "2 · interface boundary — fail-closed" {
+  mcp: "mcp-server/server.py · _HardenedMCP · ~31 MCP tools" { class: iface }
+  cli: "cli.py · DISPATCH · CLI subcommands" { class: iface }
+}
+
+core_layer: "3 · deterministic engine — Python (state in .atlas-ai/)" {
+  pipeline: "pipeline.py · phase state-machine · check_gate · advance_phase CAS" { class: code }
+  gen: "GENERATE engine · backend · provider_resolver · cli_agent · llm_client · economy  → 11" { class: code }
+  graph: "task graph · tasks · task_state · validation · parallel  → 10" { class: code }
+  detect: "detect / setup · preflight · batch · mode_recommend · providers · setup_wizard · fleet  → 12" { class: code }
+  ship: "shipcheck.py · 5 gates → SHIP_CHECK_OK" { class: code }
+  lib: "lib.py · locked_update · atomic IO · shared substrate" { class: code }
+}
+
+ext_layer: "4 · external — out of process" {
+  clis: "model CLIs · claude · codex · gemini · keyless" { class: ext }
+  apis: "raw vendor APIs · anthropic · openai · google" { class: ext }
+  tm: "task-master backend · optional" { class: ext }
+}
+
+human -> llm_layer: "one-line goal"
+llm_layer -> iface_layer: "the LLM only reaches the core through these"
+iface_layer -> core_layer: "translate calls → deterministic ops"
+core_layer.gen -> ext_layer.clis: "cli tier"
+core_layer.gen -> ext_layer.apis: "api tier"
+core_layer.detect -> ext_layer.clis: "liveness probe"
+core_layer.graph -> ext_layer.tm: "optional backend"
