@@ -215,7 +215,13 @@ def gate_reachability(repo_root: Path, tasks: list) -> Tuple[bool, List[str]]:
         if verdict in _PASS_VERDICTS:
             continue
         elif verdict in _FAIL_VERDICTS:
-            modules = reach.get("modules", []) if isinstance(reach, dict) else []
+            raw_modules = reach.get("modules", []) if isinstance(reach, dict) else []
+            # modules may be plain strings (test fixtures / legacy) or dicts written
+            # by reachability.sweep_task with keys {verdict, module, importers, ...}.
+            modules = [
+                m["module"] if isinstance(m, dict) else str(m)
+                for m in raw_modules
+            ]
             mod_str = f" ({', '.join(modules)})" if modules else ""
             failures.append(
                 f"task {tid}: reachability {verdict}{mod_str} — wire the module(s)"

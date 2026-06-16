@@ -447,3 +447,103 @@ class TestGate6Subprocess:
         r = _run_subprocess(tmp_path)
         assert r.returncode == 1
         assert "wire" in r.stderr.lower() or "re-status" in r.stderr.lower(), r.stderr
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Regression tests: dict-shaped modules (real sweep_task / reachability-sweep output)
+# Both copies of gate_reachability must handle this without crashing.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_DICT_MODULES_REACHABILITY = {
+    "verdict": "ORPHAN",
+    "modules": [
+        {"verdict": "ORPHAN", "module": "pkg/widget.py", "importers": []},
+    ],
+}
+
+
+def _add_reachability_raw(atlas: Path, tid, reach: dict) -> None:
+    """Patch a CDD card to set the reachability block to a raw dict."""
+    card_path = atlas / "cdd" / f"task-{tid}.json"
+    card = json.loads(card_path.read_text())
+    card["reachability"] = reach
+    card_path.write_text(json.dumps(card))
+
+
+class TestGateReachabilityDictModules:
+    """Regression: gate_reachability must NOT crash when modules are dicts.
+
+    Both copies — skel/ship-check.py (loaded via importlib) and
+    prd_taskmaster.shipcheck — are exercised with the exact shape that
+    reachability.sweep_task / reachability-sweep writes:
+
+        {"verdict": "ORPHAN", "module": "pkg/widget.py", "importers": []}
+    """
+
+    def test_skel_dict_modules_no_crash_and_module_name_in_failure(self, tmp_path):
+        """skel copy: dict-shaped modules → no TypeError, module name appears in failure."""
+        tasks = [{"id": 50, "status": "done", "tier": "wired"}]
+        atlas = _setup_base(tmp_path, tasks)
+        _add_reachability_raw(atlas, 50, _DICT_MODULES_REACHABILITY)
+        mod = _load()
+        # Must not raise TypeError
+        ok, failures = mod.gate_reachability(tmp_path, tasks)
+        assert ok is False, "ORPHAN verdict should block ship"
+        assert failures, "expected at least one failure message"
+        assert any("pkg/widget.py" in f for f in failures), (
+            f"module name missing from failure messages: {failures!r}"
+        )
+
+    def test_twin_dict_modules_no_crash_and_module_name_in_failure(self, tmp_path):
+        """prd_taskmaster.shipcheck twin: dict-shaped modules → no TypeError, module name in failure."""
+        from prd_taskmaster import shipcheck as twin
+
+        tasks = [{"id": 51, "status": "done", "tier": "wired"}]
+        atlas = _setup_base(tmp_path, tasks)
+        _add_reachability_raw(atlas, 51, _DICT_MODULES_REACHABILITY)
+        # Must not raise TypeError
+        ok, failures = twin.gate_reachability(tmp_path, tasks)
+        assert ok is False, "ORPHAN verdict should block ship"
+        assert failures, "expected at least one failure message"
+        assert any("pkg/widget.py" in f for f in failures), (
+            f"module name missing from failure messages: {failures!r}"
+        )
+
+    def test_skel_dict_modules_multi_module(self, tmp_path):
+        """skel copy: multiple dict-shaped modules all appear in the failure message."""
+        reach = {
+            "verdict": "ORPHAN",
+            "modules": [
+                {"verdict": "ORPHAN", "module": "pkg/alpha.py", "importers": []},
+                {"verdict": "ORPHAN", "module": "pkg/beta.py", "importers": []},
+            ],
+        }
+        tasks = [{"id": 52, "status": "done", "tier": "wired"}]
+        atlas = _setup_base(tmp_path, tasks)
+        _add_reachability_raw(atlas, 52, reach)
+        mod = _load()
+        ok, failures = mod.gate_reachability(tmp_path, tasks)
+        assert ok is False
+        combined = " ".join(failures)
+        assert "pkg/alpha.py" in combined, failures
+        assert "pkg/beta.py" in combined, failures
+
+    def test_twin_dict_modules_multi_module(self, tmp_path):
+        """twin: multiple dict-shaped modules all appear in the failure message."""
+        from prd_taskmaster import shipcheck as twin
+
+        reach = {
+            "verdict": "ORPHAN",
+            "modules": [
+                {"verdict": "ORPHAN", "module": "pkg/alpha.py", "importers": []},
+                {"verdict": "ORPHAN", "module": "pkg/beta.py", "importers": []},
+            ],
+        }
+        tasks = [{"id": 53, "status": "done", "tier": "wired"}]
+        atlas = _setup_base(tmp_path, tasks)
+        _add_reachability_raw(atlas, 53, reach)
+        ok, failures = twin.gate_reachability(tmp_path, tasks)
+        assert ok is False
+        combined = " ".join(failures)
+        assert "pkg/alpha.py" in combined, failures
+        assert "pkg/beta.py" in combined, failures
