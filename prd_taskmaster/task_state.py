@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from prd_taskmaster import fleet, parallel
 from prd_taskmaster.lib import CommandError, emit, fail, locked_update
+
+# Tiers that require a reachability verdict before done is accepted.
+_GATED_TIERS = {"wired", "live"}
+# Reachability verdicts that allow done.
+_PASSING_VERDICTS = {"WIRED", "EXEMPT"}
 
 VALID_STATUSES = {
     "pending",
@@ -227,8 +233,23 @@ def _split_id(id_str: str) -> tuple[str, str | None]:
     raise CommandError(f"unknown id: {id_str}")
 
 
-def run_set_status(id_str: str, status: str, tag: str | None = None) -> dict:
-    """Set a parent task or subtask status under a file lock."""
+def run_set_status(
+    id_str: str,
+    status: str,
+    tag: str | None = None,
+    evidence_ref: str | None = None,
+    reachability: dict | None = None,
+) -> dict:
+    """Set a parent task or subtask status under a file lock.
+
+    For status != "done": evidence_ref and reachability are accepted but ignored.
+    For status == "done" on a wired/live task: a reachability dict with verdict
+    in {WIRED, EXEMPT} is required; absence or a blocking verdict (ORPHAN, ERROR)
+    raises CommandError.
+
+    When evidence_ref or reachability is provided (any tier), the proof is
+    persisted on the task object as doneEvidence / reachability fields.
+    """
     if status not in VALID_STATUSES:
         raise CommandError(f"unknown status: {status}")
 
@@ -258,7 +279,35 @@ def run_set_status(id_str: str, status: str, tag: str | None = None) -> dict:
             if str(task.get("id")) != parent_id:
                 continue
             if subtask_id is None:
+                # Tier-gated reachability check for parent tasks marked done.
+                if status == "done":
+                    tier = (
+                        (task.get("phaseConfig") or {}).get("tier")
+                        or task.get("tier")
+                        or "domain-model"
+                    )
+                    if tier in _GATED_TIERS:
+                        if reachability is None:
+                            raise CommandError(
+                                f"cannot mark task {id_str} (tier={tier}) done without a"
+                                f" reachability verdict — run the reachability sweep"
+                            )
+                        verdict = reachability.get("verdict")
+                        if verdict not in _PASSING_VERDICTS:
+                            raise CommandError(
+                                f"cannot mark task {id_str} done: reachability {verdict}"
+                                f" — wire the module(s) into the running system or"
+                                f" re-status deferred/scaffold"
+                            )
                 task["status"] = status
+                # Persist evidence additively when provided (any tier).
+                if evidence_ref is not None:
+                    task["doneEvidence"] = {
+                        "evidence_ref": evidence_ref,
+                        "at": datetime.now(timezone.utc).isoformat(),
+                    }
+                if reachability is not None:
+                    task["reachability"] = reachability
                 result.update({
                     "ok": True,
                     "tag": resolved_tag,

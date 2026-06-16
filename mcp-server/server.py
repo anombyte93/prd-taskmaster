@@ -142,10 +142,29 @@ def claim_task(tag: str = "") -> dict:
 
 
 @mcp.tool()
-def set_task_status(id: str, status: str, tag: str = "") -> dict:
-    """Set a task or subtask status without terminating the MCP host."""
+def set_task_status(
+    id: str,
+    status: str,
+    tag: str = "",
+    evidence_ref: str | None = None,
+    reachability: dict | None = None,
+) -> dict:
+    """Set a task or subtask status without terminating the MCP host.
+
+    For status != "done": evidence_ref and reachability are ignored.
+    For status == "done" on a wired/live task: reachability must be provided
+    with verdict in {WIRED, EXEMPT}.  Pass the dict returned by the
+    reachability sweep (mcp__atlas-engine__check_gate / sweep_task).
+    Evidence is persisted on the task when provided (any tier).
+    """
     try:
-        return TS.run_set_status(id_str=id, status=status, tag=tag or None)
+        return TS.run_set_status(
+            id_str=id,
+            status=status,
+            tag=tag or None,
+            evidence_ref=evidence_ref,
+            reachability=reachability,
+        )
     except LIB.CommandError as exc:
         return {"ok": False, "error": exc.message, **exc.extra}
 
