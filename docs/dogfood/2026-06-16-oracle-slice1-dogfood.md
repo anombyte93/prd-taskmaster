@@ -30,8 +30,9 @@ appends a tamper-evident ledger event.
 ## ATLAS_ORACLE_CMD used
 
 ```
-ATLAS_ORACLE_CMD="/home/anombyte/Hermes/current-projects/.worktrees/atlas-coin-oracle/node_modules/.bin/tsx /home/anombyte/Hermes/current-projects/.worktrees/atlas-coin-oracle/apps/cli/src/index.ts"
+ATLAS_ORACLE_CMD="<spine>/node_modules/.bin/tsx <spine>/apps/cli/src/index.ts"
 ```
+(`<spine>` = your local atlas-protocol checkout. The test reads `ATLAS_ORACLE_CMD` from the environment and skips when it is unset.)
 
 `ship-check.py` shlex-splits `ATLAS_ORACLE_CMD` and appends
 `oracle grade --repo <root> --commit <HEAD> --card ... --held ... --evidence ... --ledger ...`.

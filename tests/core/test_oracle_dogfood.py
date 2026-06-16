@@ -42,6 +42,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -52,12 +53,12 @@ import pytest
 ENGINE_ROOT = Path(__file__).resolve().parents[2]
 SKEL_SHIP_CHECK = ENGINE_ROOT / "skel" / "ship-check.py"
 
-# ── Spine (oracle CLI) paths ──────────────────────────────────────────────────
-SPINE_ROOT = Path("/home/anombyte/Hermes/current-projects/.worktrees/atlas-coin-oracle")
-TSX_BIN = SPINE_ROOT / "node_modules" / ".bin" / "tsx"
-CLI_SRC = SPINE_ROOT / "apps" / "cli" / "src" / "index.ts"
-# The oracle invocation prefix consumed by ship-check.py via ATLAS_ORACLE_CMD.
-CLI_CMD = f"{TSX_BIN} {CLI_SRC}"
+# ── Spine (oracle CLI) ────────────────────────────────────────────────────────
+# The oracle invocation prefix is supplied via the ATLAS_ORACLE_CMD env var so
+# this test stays portable (no hardcoded paths). Point it at your built atlas CLI,
+# e.g.  ATLAS_ORACLE_CMD="<spine>/node_modules/.bin/tsx <spine>/apps/cli/src/index.ts"
+# ship-check.py shlex-splits it and appends `oracle grade ...`.
+CLI_CMD = os.environ.get("ATLAS_ORACLE_CMD", "")
 
 ALPINE_REF = "docker.io/library/alpine:3.20"
 
@@ -68,7 +69,7 @@ def has_podman() -> bool:
 
 
 def has_oracle_cli() -> bool:
-    return TSX_BIN.exists() and CLI_SRC.exists()
+    return bool(CLI_CMD.strip())
 
 
 def resolve_alpine_digest() -> str:
@@ -86,7 +87,7 @@ def resolve_alpine_digest() -> str:
     return digest
 
 
-SKIP_REASON = "requires podman + the built atlas oracle CLI (tsx) in the spine worktree"
+SKIP_REASON = "requires podman + ATLAS_ORACLE_CMD pointing at a built atlas oracle CLI"
 podman_and_cli = pytest.mark.skipif(
     not (has_podman() and has_oracle_cli()), reason=SKIP_REASON
 )
@@ -260,7 +261,7 @@ def test_ledger_integrity(tmp_path):
 
     ledger_dir = root / ".atlas-ai" / "ledger"
     verify = subprocess.run(
-        [str(TSX_BIN), str(CLI_SRC), "ledger", "verify", str(ledger_dir)],
+        shlex.split(CLI_CMD) + ["ledger", "verify", str(ledger_dir)],
         capture_output=True, text=True,
     )
     if verify.returncode == 0 and verify.stdout.strip():
