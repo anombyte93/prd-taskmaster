@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Deterministic ship-check for prd-taskmaster pipelines.
+"""NON-BINDING status-display heuristic for prd-taskmaster pipelines.
 
-Emits SHIP_CHECK_OK to stdout ONLY when all gates pass. Called by execute-task
-at termination AND by Step 9 (--dry-run) as a per-task predicate.
+This module is imported by status.py (dry_run=True) ONLY for display purposes.
+It is NOT the binding ship gate — the binding gate is skel/ship-check.py
+(oracle-backed, unfakable). Do not add an oracle call here.
 
 Gate logic (grounded against actual pipeline.json / tasks.json schemas
 observed 2026-06-04 in ai-human-tasker):
@@ -27,22 +28,20 @@ observed 2026-06-04 in ai-human-tasker):
     skel checked .atlas-ai/ralph-loop-prompt.md — wrong path and irrelevant
     after /goal migration.
 
-  Gate 5 (HARD) — No non-zero "Exit status N" line in any .atlas-ai/evidence/
-    file. This is the convergent must-do from the 2026-06-04 forensic audit
-    (T12 marked DONE while pnpm test exited 1 with 11 failing tests).
-    Override only via SHIP_CHECK_OVERRIDE_ADMIN token; overrides are logged
-    to .atlas-ai/state/execute-log.jsonl as an audit record.
+  Gate 5 (display only) — No non-zero "Exit status N" line in any
+    .atlas-ai/evidence/ file. This is a heuristic display signal only;
+    the binding oracle check is in skel/ship-check.py. There is no override
+    path — the gate result cannot be bypassed.
 
 Interface (standalone shim, created in a later step):
   python3 .atlas-ai/ship-check.py                              # standard gate
   python3 .atlas-ai/ship-check.py --dry-run                    # always exit 0; report on stderr
-  python3 .atlas-ai/ship-check.py --override SHIP_CHECK_OVERRIDE_ADMIN  # bypass Gate 5
   python3 .atlas-ai/ship-check.py --cwd /path/to/project       # explicit project root
 
 Exit codes:
-  0 — SHIP_CHECK_OK (stdout: exactly "SHIP_CHECK_OK\n", with " [OVERRIDE]" suffix if applicable)
+  0 — SHIP_CHECK_OK (stdout: exactly "SHIP_CHECK_OK\n")
   1 — gate failures (stderr only; nothing on stdout — log watchers must not see partial matches)
-  2 — script error (IO, JSON parse, bad token)
+  2 — script error (IO, JSON parse)
 """
 from __future__ import annotations
 
@@ -50,11 +49,9 @@ import argparse
 import json
 import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-OVERRIDE_TOKEN = "SHIP_CHECK_OVERRIDE_ADMIN"
 EXIT_STATUS_RE = re.compile(r"\bExit status\s+(\d+)\b", re.IGNORECASE)
 
 
@@ -163,21 +160,7 @@ def gate_exit_codes(atlas: Path) -> Tuple[bool, List[str]]:
     return len(failures) == 0, failures
 
 
-def log_override(atlas: Path, message: str) -> None:
-    log = atlas / "state" / "execute-log.jsonl"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    entry = {
-        "iteration": "OVERRIDE",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "task_id": "SHIP_CHECK",
-        "event": "override_invoked",
-        "message": message,
-    }
-    with log.open("a") as fp:
-        fp.write(json.dumps(entry) + "\n")
-
-
-def run_all_gates(repo_root: Path, override_active: bool) -> Tuple[bool, List[str]]:
+def run_all_gates(repo_root: Path) -> Tuple[bool, List[str]]:
     failures: List[str] = []
     atlas = repo_root / ".atlas-ai"
 
@@ -194,60 +177,37 @@ def run_all_gates(repo_root: Path, override_active: bool) -> Tuple[bool, List[st
     _, f4 = gate_plan(repo_root)
     failures.extend(f4)
 
-    ok5, f5 = gate_exit_codes(atlas)
-    if not ok5:
-        if override_active:
-            log_override(atlas, f"Gate 5 bypassed: {'; '.join(f5[:3])}{' ...' if len(f5) > 3 else ''}")
-            # Override accepts the failures; no append to global failures list
-        else:
-            failures.extend(f5)
+    _, f5 = gate_exit_codes(atlas)
+    failures.extend(f5)
 
     return len(failures) == 0, failures
 
 
-def run_ship_check(cwd: Optional[str] = None, dry_run: bool = False,
-                   override: Optional[str] = None) -> dict:
-    """Importable ship-check entry point. NEVER calls sys.exit.
+def run_ship_check(cwd: Optional[str] = None, dry_run: bool = False) -> dict:
+    """Importable ship-check entry point. NON-BINDING display heuristic only.
+    NEVER calls sys.exit. There is no override path.
 
     Args:
       cwd: project root (defaults to current working directory).
       dry_run: when True, the returned exit_code is forced to 0 regardless of
                gate outcome (gates still run and the report is preserved).
-      override: if equal to OVERRIDE_TOKEN, Gate 5 (exit codes) is bypassed.
 
     Returns a dict:
-      passed: bool          — True when all (non-overridden) gates pass.
-      failures: list[str]   — per-gate failure detail (empty when passed).
-      override_active: bool — whether a valid override token was supplied.
-      override_invalid: bool — an override value was supplied but did not match.
+      passed: bool        — True when all gates pass.
+      failures: list[str] — per-gate failure detail (empty when passed).
       dry_run: bool
-      exit_code: int        — 0 / 1 / 2 mirroring the CLI contract.
-      error: str | None     — populated on a script error (exit_code 2).
-      stdout: str | None    — the exact stdout line the CLI would print, if any.
+      exit_code: int      — 0 / 1 / 2 mirroring the CLI contract.
+      error: str | None   — populated on a script error (exit_code 2).
+      stdout: str | None  — the exact stdout line the CLI would print, if any.
     """
-    if override is not None and override != OVERRIDE_TOKEN:
-        return {
-            "passed": False,
-            "failures": [],
-            "override_active": False,
-            "override_invalid": True,
-            "dry_run": dry_run,
-            "exit_code": 2,
-            "error": "--override value does not match expected token",
-            "stdout": None,
-        }
-
-    override_active = override == OVERRIDE_TOKEN
     repo_root = Path(cwd).resolve() if cwd else Path.cwd()
 
     try:
-        ok, failures = run_all_gates(repo_root, override_active=override_active)
+        ok, failures = run_all_gates(repo_root)
     except Exception as exc:  # noqa: BLE001 — top-level guard
         return {
             "passed": False,
             "failures": [],
-            "override_active": override_active,
-            "override_invalid": False,
             "dry_run": dry_run,
             "exit_code": 2,
             "error": f"ship-check script error: {exc!r}",
@@ -259,8 +219,7 @@ def run_ship_check(cwd: Optional[str] = None, dry_run: bool = False,
         stdout = None
     elif ok:
         exit_code = 0
-        suffix = " [OVERRIDE]" if override_active else ""
-        stdout = f"SHIP_CHECK_OK{suffix}"
+        stdout = "SHIP_CHECK_OK"
     else:
         exit_code = 1
         stdout = None
@@ -268,8 +227,6 @@ def run_ship_check(cwd: Optional[str] = None, dry_run: bool = False,
     return {
         "passed": ok,
         "failures": failures,
-        "override_active": override_active,
-        "override_invalid": False,
         "dry_run": dry_run,
         "exit_code": exit_code,
         "error": None,
@@ -278,16 +235,14 @@ def run_ship_check(cwd: Optional[str] = None, dry_run: bool = False,
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Deterministic ship-check for prd-taskmaster pipelines.")
+    parser = argparse.ArgumentParser(description="NON-BINDING status-display ship-check for prd-taskmaster pipelines.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Run all gates but always exit 0. Report goes to stderr. Used by execute-task Step 9 as a per-task predicate.")
-    parser.add_argument("--override", type=str, default=None,
-                        help=f"Bypass Gate 5 (exit codes) if value equals {OVERRIDE_TOKEN}. Logged to execute-log.jsonl.")
     parser.add_argument("--cwd", type=str, default=None,
                         help="Project root (defaults to current working directory).")
     args = parser.parse_args(argv)
 
-    result = run_ship_check(cwd=args.cwd, dry_run=args.dry_run, override=args.override)
+    result = run_ship_check(cwd=args.cwd, dry_run=args.dry_run)
 
     # Script error (bad token or IO/JSON failure) — exit 2, message on stderr.
     if result["exit_code"] == 2:

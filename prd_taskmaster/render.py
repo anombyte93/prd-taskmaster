@@ -261,7 +261,7 @@ def shipcheck_panel(shipcheck: dict, *, ascii_mode: bool = False) -> str:
         lines.append(f"{sym} Gate {i}  {name:<26} {word}")
     lines.append("")
     if shipcheck.get("passed"):
-        token = "SHIP_CHECK_OK" + (" [OVERRIDE]" if shipcheck.get("override_active") else "")
+        token = "SHIP_CHECK_OK"
         lines.append(f"{ok} {token}")
     else:
         lines.append(f"{blocked} not shippable — {len(shipcheck.get('failures', []))} gate(s) failed")
