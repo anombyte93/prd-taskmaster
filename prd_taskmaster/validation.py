@@ -159,7 +159,14 @@ def run_validate_prd(input_path: str) -> dict:
     })
 
     # Check 9: Technical considerations address architecture
-    tech_section = get_section_content(text, "Technical")
+    # Prefer the canonical "Technical Considerations" section. A bare substring
+    # match on "Technical" wrongly latches onto an earlier heading that merely
+    # *contains* the word (e.g. "### Goal 1: Enable non-technical editing"),
+    # capturing that subsection's prose instead of the real architecture text.
+    # Fall back to a bare "Technical" heading for PRDs that use that shorter name.
+    tech_section = get_section_content(text, "Technical Considerations")
+    if not tech_section:
+        tech_section = get_section_content(text, "Technical")
     has_arch = bool(re.search(
         r'(architecture|system\s+design|component|integration|diagram)',
         tech_section, re.IGNORECASE

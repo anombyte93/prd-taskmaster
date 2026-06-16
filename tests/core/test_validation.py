@@ -612,6 +612,51 @@ class TestAngleBracketPlaceholderRegex:
             f"<file> in testStrategy was falsely flagged: {placeholder_probs}"
         )
 
+    def test_html_jsx_tags_in_details_not_flagged(self, tmp_path):
+        """<script>, <Render>, <div> HTML/JSX tags in details must not be flagged."""
+        task = _good_task(
+            details="Inject a <script> tag, mount the <Render> component, wrap it in a <div>."
+        )
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"HTML/JSX tags were falsely flagged: {placeholder_probs}"
+        )
+
+    def test_generic_type_tokens_not_flagged(self, tmp_path):
+        """Generic-type tokens like Config<Props> and Array<string> must not be flagged."""
+        task = _good_task(
+            details="Type the component as Config<Props> and the list as Array<string>."
+        )
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"generic-type tokens were falsely flagged: {placeholder_probs}"
+        )
+
+    def test_capitalized_jsx_component_in_subtask_not_flagged(self, tmp_path):
+        """A capitalized JSX component tag <Render> in a subtask description is legit."""
+        task = _good_task(subtasks=[
+            {"id": 1, "title": "render", "description": "Mount the <Render> component.",
+             "status": "pending", "dependencies": []},
+            {"id": 2, "title": "wire", "description": "Pass props of type Config<Props>.",
+             "status": "pending", "dependencies": [1]},
+        ])
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"JSX component / generic token in subtask was falsely flagged: {placeholder_probs}"
+        )
+
+    def test_next_route_segment_bracket_not_flagged(self, tmp_path):
+        """Next.js route segment [slug] must not be flagged as a placeholder."""
+        task = _good_task(details="Create the dynamic route app/blog/[slug]/page.tsx.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"Next.js [slug] route segment was falsely flagged: {placeholder_probs}"
+        )
+
     # ── MUST still flag (real template placeholders) ───────────────────────
 
     def test_uppercase_placeholder_flagged(self, tmp_path):
@@ -634,6 +679,13 @@ class TestAngleBracketPlaceholderRegex:
         problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
         placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
         assert placeholder_probs, "<YOUR_VALUE> was not caught as a placeholder"
+
+    def test_uppercase_project_name_flagged(self, tmp_path):
+        """<PROJECT_NAME> must be caught as a placeholder."""
+        task = _good_task(details="Deploy under the <PROJECT_NAME> namespace.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "<PROJECT_NAME> was not caught as a placeholder"
 
     def test_mustache_placeholder_flagged(self, tmp_path):
         """{{variable}} mustache tokens must still be caught."""
@@ -765,3 +817,81 @@ class TestValidateTasksTagResolution:
                                  require_phase_config=False)
         assert out["ok"] is True
         assert out["task_count"] == 3
+
+
+class TestCheck9TechnicalArchitecture:
+    """Regression suite for check 9 (Technical considerations address
+    architecture). The section extractor does a *substring* match on the
+    heading, so a bare 'Technical' query wrongly latches onto an earlier
+    heading containing the word (e.g. '### Goal 1: ... non-technical ...'),
+    capturing that subsection instead of the real '## Technical Considerations'
+    body — yielding a false 'No architectural detail found'."""
+
+    def _check9(self, tmp_project, body: str):
+        prd = tmp_project / ".taskmaster" / "docs" / "prd.md"
+        prd.write_text("# PRD\n\n## Executive Summary\nA summary.\n\n" + body)
+        out = run_validate_prd(str(prd))
+        return next(c for c in out["checks"] if c["id"] == 9)
+
+    def test_arch_passes_despite_earlier_non_technical_heading(self, tmp_project):
+        """An earlier '### ... non-technical ...' heading must not shadow the
+        real '## Technical Considerations' section."""
+        body = (
+            "## Goals\n"
+            "### Goal 1: Enable non-technical visual editing without code\n"
+            "Let collaborators edit pages with no developer involvement.\n\n"
+            "## Technical Considerations\n"
+            "### System Architecture\n"
+            "The system follows a microservice architecture with clear integration "
+            "points, an event-driven component model, and a data-flow diagram.\n"
+        )
+        check9 = self._check9(tmp_project, body)
+        assert check9["passed"] is True, check9
+
+    def test_arch_passes_with_bare_technical_heading(self, tmp_project):
+        """A PRD using the shorter '## Technical' heading with architecture
+        content still passes (fallback path)."""
+        body = (
+            "## Technical\n"
+            "We use a microservice architecture with clear integration points.\n"
+        )
+        check9 = self._check9(tmp_project, body)
+        assert check9["passed"] is True, check9
+
+    def test_arch_fails_when_no_architecture_content(self, tmp_project):
+        """A Technical Considerations section with no architecture keywords
+        must still FAIL check 9 (the fix must not trivially always-pass)."""
+        body = (
+            "## Goals\n"
+            "### Goal 1: Enable non-technical editing\n"
+            "Collaborators edit pages.\n\n"
+            "## Technical Considerations\n"
+            "Use CSS variables and a colour palette for theming the UI.\n"
+        )
+        check9 = self._check9(tmp_project, body)
+        assert check9["passed"] is False, check9
+
+    def test_arch_fails_when_no_technical_section_at_all(self, tmp_project):
+        """No Technical section + only a 'non-technical' mention elsewhere must
+        FAIL check 9 (no architecture content anywhere)."""
+        body = (
+            "## Goals\n"
+            "### Goal 1: Enable non-technical editing\n"
+            "Collaborators edit pages without developers.\n"
+        )
+        check9 = self._check9(tmp_project, body)
+        assert check9["passed"] is False, check9
+
+    def test_real_puck_editor_prd_passes_check9(self, tmp_project):
+        """The real prd-puck-editor.md (## Technical Considerations with a
+        ### System Architecture subsection) must pass check 9."""
+        import os
+        real = (
+            "/home/anombyte/Shade_Gen/Projects/morgan-project"
+            "/.taskmaster/docs/prd-puck-editor.md"
+        )
+        if not os.path.isfile(real):
+            pytest.skip("real puck-editor PRD not present in this checkout")
+        out = run_validate_prd(real)
+        check9 = next(c for c in out["checks"] if c["id"] == 9)
+        assert check9["passed"] is True, check9
