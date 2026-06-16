@@ -129,16 +129,23 @@ _RESEARCH_KEYWORDS = re.compile(
 # _TIER_RESEARCH_RE: overlaps with _RESEARCH_KEYWORDS but uses prefix \b so
 # "investigate", "evaluate", "analyze" are reliably caught.
 _TIER_RESEARCH_RE = re.compile(
-    r'\b(research|investigat|analyz|explor|evaluat|assess|discover|'
-    r'benchmark|audit|review|spike|poc|proof.of.concept)',
+    r'\b(research|investigat|analyz|explor|evaluat|discover|'
+    r'benchmark|audit|spike|poc|proof.of.concept)',
     re.IGNORECASE,
 )
 
 # _WIRED_KEYWORDS: integration / API / CLI signals that require reachability.
-# Prefix \b with no trailing \b so "integrate", "authenticate", etc. match.
+# Anchored carefully to avoid false-positives:
+#   cli     — \bcli(?!ent|mat|nic) excludes client/climate/clinic/clinical
+#   auth    — authenticat|authoriz|\bauth\b excludes author/authority/authentic
+#   wire    — wire(?!frame|less) excludes wireframe/wireless
+# Other stems (integrat, webhook, deploy, pipeline, api, endpoint, route,
+# connect, mcp, database, migration) retain prefix \b; no trailing collisions
+# identified for these.
 _WIRED_KEYWORDS = re.compile(
-    r'\b(integrat|auth|webhook|deploy|pipeline|api|endpoint|route|'
-    r'wire|connect|cli|mcp|database|migration)',
+    r'(\bintegrat|\bauthenticat|\bauthoriz|\bauth\b|\bwebhook|\bdeploy|'
+    r'\bpipeline|\bapi\b|\bendpoint|\broute|\bwire(?!frame|less)|\bconnect|'
+    r'\bcli(?!ent|mat|nic)|\bmcp\b|\bdatabase|\bmigration)',
     re.IGNORECASE,
 )
 

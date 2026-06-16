@@ -129,6 +129,73 @@ class TestClassifyTier:
         task = {"name": "Implement token counter", "description": ""}
         assert _classify_tier(task) == "domain-model"
 
+    # ── Negative regression tests: keyword over-matching ─────────────────────
+    # Each of these MUST classify as domain-model, not wired or spike.
+    # They fail against the pre-fix regexes (cli/auth/wire stem collisions,
+    # review/assess in _TIER_RESEARCH_RE).
+
+    def test_client_side_does_not_give_wired(self):
+        """'client' must not match the 'cli' wired stem."""
+        task = {"title": "Build a client-side validation rules module", "description": ""}
+        assert _classify_tier(task) == "domain-model"
+
+    def test_client_validation_does_not_give_wired(self):
+        """'client' (standalone) must not match the 'cli' wired stem."""
+        task = {"title": "Client validation module", "description": ""}
+        assert _classify_tier(task) == "domain-model"
+
+    def test_wireframe_does_not_give_wired(self):
+        """'wireframe' must not match the 'wire' wired stem."""
+        task = {"title": "Create wireframes for the dashboard", "description": ""}
+        assert _classify_tier(task) == "domain-model"
+
+    def test_author_does_not_give_wired(self):
+        """'author' must not match the 'auth' wired stem."""
+        task = {"title": "Author bio component", "description": ""}
+        assert _classify_tier(task) == "domain-model"
+
+    def test_authority_does_not_give_wired(self):
+        """'authority' must not match the 'auth' wired stem."""
+        task = {"title": "Model the authority hierarchy", "description": ""}
+        assert _classify_tier(task) == "domain-model"
+
+    def test_code_review_does_not_give_spike(self):
+        """'review' in a task title must not trigger the spike tier."""
+        task = {"title": "Code review the scoring PR", "description": ""}
+        assert _classify_tier(task) != "spike"
+
+    def test_assess_alone_does_not_give_spike(self):
+        """'assess' alone must not trigger the spike tier (dropped from _TIER_RESEARCH_RE)."""
+        task = {"title": "Assess the risk level of the change", "description": ""}
+        assert _classify_tier(task) != "spike"
+
+    # Confirm genuine wired / spike cases still classify correctly (no over-correction)
+
+    def test_wire_scorer_into_cli_still_gives_wired(self):
+        """'Wire … CLI' — both 'wire' and 'cli' must still match as wired."""
+        task = {"title": "Wire the scorer into the CLI", "description": ""}
+        assert _classify_tier(task) == "wired"
+
+    def test_cli_entrypoint_still_gives_wired(self):
+        """'cli' as a bare token (not followed by ent/mat/nic) must still match."""
+        task = {"title": "Set up the cli entrypoint", "description": ""}
+        assert _classify_tier(task) == "wired"
+
+    def test_authenticate_via_oauth_still_gives_wired(self):
+        """'authenticate' must still match as a wired integration signal."""
+        task = {"title": "Authenticate users via OAuth", "description": ""}
+        assert _classify_tier(task) == "wired"
+
+    def test_auth_token_still_gives_wired(self):
+        """'\bauth\b' (bare word) must still fire as wired."""
+        task = {"title": "Rotate the auth token on each request", "description": ""}
+        assert _classify_tier(task) == "wired"
+
+    def test_investigate_still_gives_spike(self):
+        """'investigate' must remain a spike trigger despite 'review'/'assess' removal."""
+        task = {"title": "Investigate caching options for the feed", "description": ""}
+        assert _classify_tier(task) == "spike"
+
     # wired beats domain-model when integration keyword appears in details
     def test_integration_signal_in_details_gives_wired(self):
         task = {
