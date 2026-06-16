@@ -11,11 +11,15 @@ Coverage:
   AS8. release(claimant_id=None) frees all entries for a job.
   AS9. release(claimant_id=X) frees only that claimant, not others.
   AS10. admit with custom entry_fee + stake_mult propagates correctly.
+  AS11. sweep_expired deactivates entries past expires_at (pure helper).
+  AS12. Expired entries auto-free inside admit's transform (TTL sweep).
+  AS13. Concurrency: exactly PER_JOB_CAP_N threads succeed; the rest raise job_cap_exceeded.
 """
 
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -25,16 +29,22 @@ from prd_taskmaster.tournament.antisybil import (
     FAKERY_STAKE_MULT,
     PER_JOB_CAP_N,
     PER_OPERATOR_RATE_LIMIT,
+    TTL_SECONDS,
     SybilLimitError,
     active_count_for_job,
     active_count_for_operator,
     admit,
     release,
+    sweep_expired,
 )
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 NOW = "2026-06-17T00:00:00+00:00"
+# A timestamp far in the future (past any TTL)
+FAR_FUTURE = "2099-01-01T00:00:00+00:00"
+# A timestamp well in the past (already expired)
+PAST = "2020-01-01T00:00:00+00:00"
 
 
 @pytest.fixture()
@@ -306,6 +316,8 @@ class TestPersistence:
         assert entry["claimant_id"] == "job-persist:0:sonnet"
         assert entry["admitted_at"] == NOW
         assert entry["active"] is True
+        # TTL field must be present
+        assert "expires_at" in entry
 
     def test_multiple_admits_accumulate(self, ops_path: Path) -> None:
         """Multiple admits append to entries list; all are valid JSON."""
@@ -366,6 +378,157 @@ class TestPureHelpers:
         assert active_count_for_job({}, "job-1") == 0
         assert active_count_for_operator({}, "claude:sonnet") == 0
         assert active_count_for_job({"entries": []}, "job-1") == 0
+
+
+# ─── AS11: sweep_expired (pure helper, I2) ────────────────────────────────────
+
+class TestSweepExpired:
+    def test_sweep_deactivates_past_entries(self) -> None:
+        """AS11 (I2): sweep_expired marks entries with expires_at in the past as inactive."""
+        state = {
+            "entries": [
+                {
+                    "operator_id": "claude:sonnet",
+                    "job_id": "job-ttl",
+                    "claimant_id": "c1",
+                    "active": True,
+                    "expires_at": PAST,  # already expired
+                },
+                {
+                    "operator_id": "claude:haiku",
+                    "job_id": "job-ttl",
+                    "claimant_id": "c2",
+                    "active": True,
+                    "expires_at": FAR_FUTURE,  # still valid
+                },
+            ]
+        }
+        sweep_expired(state, NOW)
+        assert state["entries"][0]["active"] is False, "expired entry should be deactivated"
+        assert state["entries"][1]["active"] is True, "future entry should remain active"
+
+    def test_sweep_leaves_already_inactive_alone(self) -> None:
+        """sweep_expired doesn't touch entries already inactive."""
+        state = {
+            "entries": [
+                {
+                    "operator_id": "claude:sonnet",
+                    "job_id": "job-x",
+                    "claimant_id": "c1",
+                    "active": False,
+                    "expires_at": PAST,
+                },
+            ]
+        }
+        sweep_expired(state, NOW)
+        # Still False, not changed (already inactive)
+        assert state["entries"][0]["active"] is False
+
+    def test_sweep_leaves_no_expires_at_alone(self) -> None:
+        """Entries without expires_at are not touched (backwards compat)."""
+        state = {
+            "entries": [
+                {
+                    "operator_id": "claude:sonnet",
+                    "job_id": "job-old",
+                    "claimant_id": "c1",
+                    "active": True,
+                    # No expires_at field
+                },
+            ]
+        }
+        sweep_expired(state, NOW)
+        assert state["entries"][0]["active"] is True
+
+    def test_sweep_returns_same_state_dict(self) -> None:
+        """sweep_expired returns the same dict object (mutates in place)."""
+        state = {"entries": []}
+        result = sweep_expired(state, NOW)
+        assert result is state
+
+    def test_expired_entry_no_longer_counts_toward_cap(self, ops_path: Path) -> None:
+        """AS12 (I2): an entry past its TTL auto-frees inside admit's locked transform."""
+        # Admit PER_JOB_CAP_N racers with expires_at in the PAST (simulate crashed jobs).
+        # We directly write the state to operators.json with past expires_at.
+        ops_path.parent.mkdir(parents=True, exist_ok=True)
+        state = {
+            "entries": [
+                {
+                    "operator_id": f"claude:racer-{i}",
+                    "job_id": "job-ttl-sweep",
+                    "claimant_id": f"job-ttl-sweep:{i}:racer",
+                    "admitted_at": PAST,
+                    "expires_at": PAST,   # already expired
+                    "active": True,
+                }
+                for i in range(PER_JOB_CAP_N)
+            ]
+        }
+        ops_path.write_text(json.dumps(state, indent=2))
+
+        # Now admit should succeed because the TTL sweep fires inside the transform
+        # and frees all the expired (phantom) slots.
+        result = admit(
+            ops_path,
+            operator_id="claude:newcomer",
+            job_id="job-ttl-sweep",
+            claimant_id=f"job-ttl-sweep:{PER_JOB_CAP_N}:newcomer",
+            now=NOW,
+        )
+        assert result["entry_fee_paid"] == ENTRY_FEE_E
+
+    def test_ttl_constant_is_4_hours(self) -> None:
+        """TTL_SECONDS must be 4 hours (matching launcher max_lifetime)."""
+        assert TTL_SECONDS == 4 * 3600
+
+
+# ─── AS13: concurrency / atomicity (I4) ──────────────────────────────────────
+
+class TestConcurrencyAtomicity:
+    def test_exactly_n_admits_succeed_under_concurrency(self, ops_path: Path) -> None:
+        """AS13 (I4): 20 concurrent threads → exactly PER_JOB_CAP_N succeed, rest raise."""
+        N_THREADS = 20
+        successes: list[str] = []
+        failures: list[str] = []
+        lock = threading.Lock()
+
+        def _try_admit(thread_id: int) -> None:
+            try:
+                admit(
+                    ops_path,
+                    operator_id=f"claude:racer-{thread_id}",
+                    job_id="job-concurrent",
+                    claimant_id=f"job-concurrent:{thread_id}:racer",
+                    now=NOW,
+                )
+                with lock:
+                    successes.append(f"thread-{thread_id}")
+            except SybilLimitError as exc:
+                with lock:
+                    failures.append(exc.reason)
+
+        threads = [threading.Thread(target=_try_admit, args=(i,)) for i in range(N_THREADS)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Exactly PER_JOB_CAP_N slots must have been admitted.
+        assert len(successes) == PER_JOB_CAP_N, (
+            f"Expected {PER_JOB_CAP_N} successes, got {len(successes)}: {successes}"
+        )
+        # The rest must all be job_cap_exceeded (not some silent data corruption).
+        assert len(failures) == N_THREADS - PER_JOB_CAP_N
+        assert all(r == "job_cap_exceeded" for r in failures), (
+            f"Unexpected failure reasons: {set(failures)}"
+        )
+
+        # Verify the on-disk state is consistent.
+        state = json.loads(ops_path.read_text())
+        active = [e for e in state["entries"] if e.get("active")]
+        assert len(active) == PER_JOB_CAP_N, (
+            f"On-disk active count mismatch: {len(active)}"
+        )
 
 
 # ─── SybilLimitError typing ───────────────────────────────────────────────────

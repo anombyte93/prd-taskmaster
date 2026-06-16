@@ -15,6 +15,7 @@ Usage::
         job_id="job-abc",
         task_prompt="...",
         card_ref="card-123",
+        base_ref="abc1234",          # REQUIRED: fork-point commit for diff hash
         report_to="orchestrator-inbox",
         operators_path=Path(".atlas-ai/tournament/operators.json"),
         now="2026-06-17T00:00:00+00:00",
@@ -23,9 +24,9 @@ Usage::
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 from prd_taskmaster.tournament import antisybil
 from prd_taskmaster.tournament.antisybil import PER_JOB_CAP_N, SybilLimitError
@@ -79,6 +80,8 @@ def _build_racer_prompt(
     job_id: str,
     card_ref: str,
     claimant_id: str,
+    base_ref: str,
+    report_to: str,
 ) -> str:
     """Build the commit-reveal prompt for one racer.
 
@@ -86,6 +89,10 @@ def _build_racer_prompt(
       - The original task_prompt.
       - The shared job_id (so the orchestrator can match replies).
       - The card_ref (the CDD card this racer must satisfy).
+      - base_ref: the fork-point commit so racers compute a reproducible diff hash
+        via ``git diff {base_ref}..HEAD | sha256sum``.
+      - report_to: the orchestrator inbox address where the racer must send its
+        commit-reveal report (claimant_id, commit SHA, diff hash).
       - Explicit commit-reveal instructions.
     """
     return (
@@ -98,13 +105,15 @@ def _build_racer_prompt(
         f"## Commit-Reveal Instructions\n\n"
         f"1. Perform all your work in your assigned worktree.\n"
         f"2. When complete, commit your changes with a clear commit message.\n"
-        f"3. Report the following to the orchestrator inbox keyed by job_id={job_id!r}:\n"
+        f"3. Compute your diff hash: `git diff {base_ref}..HEAD | sha256sum`.\n"
+        f"4. Report the following to the orchestrator inbox **{report_to}** "
+        f"(keyed by job_id={job_id!r}):\n"
         f"   - Your commit SHA (`git rev-parse HEAD`).\n"
-        f"   - The SHA-256 hash of your diff (`git diff <base>..HEAD | sha256sum`).\n"
+        f"   - The SHA-256 hash of your diff (from step 3).\n"
         f"   - Your claimant_id={claimant_id!r}.\n"
         f"   - Your self-reported exit code (0=success, non-zero=failure).\n"
-        f"4. Do NOT push to the main branch. Work only in your worktree.\n"
-        f"5. The oracle will independently verify your commit against the card spec.\n"
+        f"5. Do NOT push to the main branch. Work only in your worktree.\n"
+        f"6. The oracle will independently verify your commit against the card spec.\n"
     )
 
 
@@ -116,17 +125,23 @@ def build_roster(
     job_id: str,
     task_prompt: str,
     card_ref: str,
+    base_ref: str,
     report_to: str = "",
     operators_path: "str | Path",
     now: str,
     _admit: "Callable[..., dict]" = antisybil.admit,
+    _release: "Callable[..., None]" = antisybil.release,
 ) -> "list[RacerSpec]":
     """Build a deterministic admission-gated roster of RacerSpecs.
 
     Parameters
     ----------
     models:
-        Ordered list of model strings (e.g. ["claude:sonnet", "claude:haiku"]).
+        Ordered list of DISTINCT model strings (e.g. ["claude:sonnet", "claude:haiku"]).
+        Duplicate models are rejected up-front with ValueError — a tournament
+        races DISTINCT executors.  Note: operator_id = model string, so the same
+        model submitted twice would trip the per-operator rate-limit at the 2nd
+        entry; the up-front dup check catches this earlier with a clearer error.
         len(models) must be <= PER_JOB_CAP_N or SybilLimitError is raised up front.
     job_id:
         Unique tournament job identifier.
@@ -134,6 +149,10 @@ def build_roster(
         The task description for all racers.
     card_ref:
         CDD card reference (shared across all racers in the job).
+    base_ref:
+        REQUIRED. The fork-point / base commit SHA that all worktrees branch from.
+        Embedded verbatim in every racer's commit-reveal prompt so they can compute
+        a reproducible diff hash: ``git diff {base_ref}..HEAD | sha256sum``.
     report_to:
         Orchestrator inbox identifier; embedded in each racer's prompt.
     operators_path:
@@ -142,6 +161,9 @@ def build_roster(
         ISO-8601 UTC timestamp (deterministic; never calls datetime.now()).
     _admit:
         Injectable admit function (default = antisybil.admit). Tests inject a stub.
+    _release:
+        Injectable release function (default = antisybil.release). Used for
+        rollback when a mid-roster admit fails.
 
     Returns
     -------
@@ -149,12 +171,26 @@ def build_roster(
 
     Raises
     ------
+    ValueError
+        If models contains duplicates (a tournament races DISTINCT executors).
     SybilLimitError("job_cap_exceeded")
         Up-front if len(models) > PER_JOB_CAP_N.
     SybilLimitError("job_cap_exceeded") / SybilLimitError("operator_rate_limited")
-        Per-racer if antisybil.admit rejects the entry.
+        Per-racer if antisybil.admit rejects the entry.  Any already-admitted
+        racers from THIS roster are released before re-raising, leaving no leaked
+        active entries.
     """
     operators_path = Path(operators_path)
+
+    # I3: dup-model guard — duplicates are confusing and will hit rate-limit.
+    seen: set[str] = set()
+    dups: list[str] = []
+    for m in models:
+        if m in seen:
+            dups.append(m)
+        seen.add(m)
+    if dups:
+        raise ValueError(f"duplicate models in roster: {sorted(set(dups))!r}")
 
     # Up-front cap guard — fail fast before any admit calls.
     if len(models) > PER_JOB_CAP_N:
@@ -166,20 +202,33 @@ def build_roster(
         operator_id = _derive_operator_id(model)
         claimant_id = f"{job_id}:{i}:{model}"
 
-        # Admission gate — may raise SybilLimitError; caller decides how to handle.
-        admission = _admit(
-            operators_path,
-            operator_id=operator_id,
-            job_id=job_id,
-            claimant_id=claimant_id,
-            now=now,
-        )
+        # I1: Admission gate — on failure, roll back all already-admitted entries
+        # from THIS roster so no active slots are leaked.
+        try:
+            admission = _admit(
+                operators_path,
+                operator_id=operator_id,
+                job_id=job_id,
+                claimant_id=claimant_id,
+                now=now,
+            )
+        except SybilLimitError:
+            # Release every claimant admitted so far in this roster call.
+            for already in roster:
+                _release(
+                    operators_path,
+                    job_id=job_id,
+                    claimant_id=already.claimant_id,
+                )
+            raise
 
         prompt = _build_racer_prompt(
             task_prompt=task_prompt,
             job_id=job_id,
             card_ref=card_ref,
             claimant_id=claimant_id,
+            base_ref=base_ref,
+            report_to=report_to,
         )
 
         roster.append(

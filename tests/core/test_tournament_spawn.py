@@ -3,6 +3,8 @@
 Coverage:
   SP1.  build_roster with 3 models → 3 RacerSpecs, distinct claimant_ids.
   SP2.  Each prompt contains: job_id, card_ref, commit-reveal instructions.
+  SP2d. Each prompt contains the real base_ref (not a literal '<base>' placeholder).
+  SP2e. Each prompt contains the report_to inbox address.
   SP3.  _admit stub is called once per racer with correct kwargs.
   SP4.  build_roster with >PER_JOB_CAP_N models → raises SybilLimitError("job_cap_exceeded").
   SP5.  spawn_roster with stub _spawn_fn → returns N handles, all spawned=True.
@@ -14,6 +16,8 @@ Coverage:
   SP11. default_launcher_adapter raises RuntimeError (not at import time, only when called).
   SP12. spawn_roster returns all handles even when all spawns fail (no abort).
   SP13. build_roster passes report_to= through to RacerSpec.report_to.
+  SP14. Duplicate models in roster raises ValueError (I3).
+  SP15. Mid-roster admit failure rolls back all already-admitted entries (I1).
 """
 
 from __future__ import annotations
@@ -40,6 +44,8 @@ NOW = "2026-06-17T00:00:00+00:00"
 JOB_ID = "job-test-xyz"
 CARD_REF = "card-abc-001"
 TASK_PROMPT = "Implement the XYZ feature with full test coverage."
+BASE_REF = "abc1234def5678"
+REPORT_TO = "orch-inbox-id"
 
 # ─── Stub helpers ─────────────────────────────────────────────────────────────
 
@@ -63,6 +69,34 @@ class AdmitRecorder:
         return {"entry_fee_paid": self._entry_fee, "fakery_stake": self._fakery_stake}
 
 
+class AdmitFailsAtK:
+    """Stub that succeeds for the first k-1 calls then raises SybilLimitError."""
+
+    def __init__(self, fail_at: int) -> None:
+        self.call_count = 0
+        self.fail_at = fail_at
+        self.admitted_claimant_ids: list[str] = []
+
+    def __call__(self, operators_path: Path, *, operator_id: str, job_id: str,
+                 claimant_id: str, now: str, **kwargs: Any) -> dict:
+        self.call_count += 1
+        if self.call_count > self.fail_at:
+            raise SybilLimitError("operator_rate_limited")
+        self.admitted_claimant_ids.append(claimant_id)
+        return {"entry_fee_paid": 1, "fakery_stake": 5}
+
+
+class ReleaseRecorder:
+    """Stub that records release calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def __call__(self, operators_path: Path, *, job_id: str,
+                 claimant_id: str | None = None, **kwargs: Any) -> None:
+        self.calls.append({"job_id": job_id, "claimant_id": claimant_id})
+
+
 def _stub_spawn(spec: RacerSpec) -> dict:
     """Stub spawn that returns a minimal handle dict."""
     return {"claimant_id": spec.claimant_id, "session_id": f"sess-{spec.claimant_id}"}
@@ -77,19 +111,24 @@ class TestBuildRoster:
         tmp_path: Path,
         *,
         admit_recorder: "AdmitRecorder | None" = None,
-        report_to: str = "",
+        release_recorder: "ReleaseRecorder | None" = None,
+        report_to: str = REPORT_TO,
+        base_ref: str = BASE_REF,
     ) -> "tuple[list[RacerSpec], AdmitRecorder]":
         recorder = admit_recorder or AdmitRecorder()
+        rel = release_recorder or ReleaseRecorder()
         ops = tmp_path / "operators.json"
         roster = build_roster(
             models=models,
             job_id=JOB_ID,
             task_prompt=TASK_PROMPT,
             card_ref=CARD_REF,
+            base_ref=base_ref,
             report_to=report_to,
             operators_path=ops,
             now=NOW,
             _admit=recorder,
+            _release=rel,
         )
         return roster, recorder
 
@@ -137,6 +176,27 @@ class TestBuildRoster:
             assert "commit" in spec.prompt.lower()
             assert "sha" in spec.prompt.lower() or "commit sha" in spec.prompt.lower()
             assert "sha256" in spec.prompt.lower() or "sha-256" in spec.prompt.lower()
+
+    def test_prompt_contains_real_base_ref_not_placeholder(self, tmp_path: Path) -> None:
+        """SP2d (B1): prompt contains the actual base_ref, not the literal '<base>'."""
+        models = ["claude:sonnet", "claude:haiku"]
+        roster, _ = self._build(models, tmp_path, base_ref=BASE_REF)
+        for spec in roster:
+            assert BASE_REF in spec.prompt, (
+                f"base_ref {BASE_REF!r} not found in prompt"
+            )
+            assert "<base>" not in spec.prompt, (
+                "Literal '<base>' placeholder still present — diff hash will be wrong"
+            )
+
+    def test_prompt_contains_report_to_inbox(self, tmp_path: Path) -> None:
+        """SP2e (B2): prompt contains the report_to inbox address."""
+        models = ["claude:sonnet"]
+        roster, _ = self._build(models, tmp_path, report_to=REPORT_TO)
+        for spec in roster:
+            assert REPORT_TO in spec.prompt, (
+                f"report_to {REPORT_TO!r} not embedded in racer prompt"
+            )
 
     def test_admit_called_once_per_racer(self, tmp_path: Path) -> None:
         """SP3: _admit stub is called exactly once per model."""
@@ -208,6 +268,7 @@ class TestBuildRosterCapGuard:
                 job_id=JOB_ID,
                 task_prompt=TASK_PROMPT,
                 card_ref=CARD_REF,
+                base_ref=BASE_REF,
                 operators_path=tmp_path / "ops.json",
                 now=NOW,
                 _admit=recorder,
@@ -227,11 +288,140 @@ class TestBuildRosterCapGuard:
             job_id=JOB_ID,
             task_prompt=TASK_PROMPT,
             card_ref=CARD_REF,
+            base_ref=BASE_REF,
             operators_path=tmp_path / "ops.json",
             now=NOW,
             _admit=recorder,
         )
         assert len(roster) == PER_JOB_CAP_N
+
+
+# ─── SP14: duplicate model guard (I3) ────────────────────────────────────────
+
+class TestDuplicateModelGuard:
+    def test_duplicate_models_raises_value_error(self, tmp_path: Path) -> None:
+        """SP14 (I3): duplicate models in roster raises ValueError before any admit."""
+        recorder = AdmitRecorder()
+
+        with pytest.raises(ValueError, match="duplicate models in roster"):
+            build_roster(
+                models=["claude:sonnet", "claude:haiku", "claude:sonnet"],
+                job_id=JOB_ID,
+                task_prompt=TASK_PROMPT,
+                card_ref=CARD_REF,
+                base_ref=BASE_REF,
+                operators_path=tmp_path / "ops.json",
+                now=NOW,
+                _admit=recorder,
+            )
+
+        # No admits should have happened — the dup check fires first.
+        assert len(recorder.calls) == 0
+
+    def test_all_duplicates_named_in_error(self, tmp_path: Path) -> None:
+        """I3: the ValueError message names the duplicate model(s)."""
+        recorder = AdmitRecorder()
+
+        with pytest.raises(ValueError) as exc_info:
+            build_roster(
+                models=["claude:sonnet", "claude:sonnet", "claude:haiku"],
+                job_id=JOB_ID,
+                task_prompt=TASK_PROMPT,
+                card_ref=CARD_REF,
+                base_ref=BASE_REF,
+                operators_path=tmp_path / "ops.json",
+                now=NOW,
+                _admit=recorder,
+            )
+
+        assert "claude:sonnet" in str(exc_info.value)
+
+    def test_all_distinct_models_do_not_raise(self, tmp_path: Path) -> None:
+        """Non-duplicate models pass through without error."""
+        recorder = AdmitRecorder()
+
+        roster = build_roster(
+            models=["claude:sonnet", "claude:haiku"],
+            job_id=JOB_ID,
+            task_prompt=TASK_PROMPT,
+            card_ref=CARD_REF,
+            base_ref=BASE_REF,
+            operators_path=tmp_path / "ops.json",
+            now=NOW,
+            _admit=recorder,
+        )
+        assert len(roster) == 2
+
+
+# ─── SP15: roster rollback on partial admit (I1) ──────────────────────────────
+
+class TestRosterRollback:
+    def test_partial_admit_failure_releases_prior_entries(self, tmp_path: Path) -> None:
+        """SP15 (I1): if _admit raises at the k-th model, all k-1 prior entries are released."""
+        # Succeed for the first 2 models, fail on the 3rd.
+        admit_stub = AdmitFailsAtK(fail_at=2)
+        release_stub = ReleaseRecorder()
+
+        with pytest.raises(SybilLimitError) as exc_info:
+            build_roster(
+                models=["claude:sonnet", "claude:haiku", "claude:opus"],
+                job_id=JOB_ID,
+                task_prompt=TASK_PROMPT,
+                card_ref=CARD_REF,
+                base_ref=BASE_REF,
+                operators_path=tmp_path / "ops.json",
+                now=NOW,
+                _admit=admit_stub,
+                _release=release_stub,
+            )
+
+        assert exc_info.value.reason == "operator_rate_limited"
+
+        # The 2 already-admitted claimants must have been released.
+        released_ids = {c["claimant_id"] for c in release_stub.calls}
+        assert f"{JOB_ID}:0:claude:sonnet" in released_ids
+        assert f"{JOB_ID}:1:claude:haiku" in released_ids
+        # The 3rd (which never admitted) must NOT appear.
+        assert f"{JOB_ID}:2:claude:opus" not in released_ids
+
+    def test_first_admit_failure_releases_nothing(self, tmp_path: Path) -> None:
+        """I1: if the FIRST admit fails, there is nothing to roll back."""
+        admit_stub = AdmitFailsAtK(fail_at=0)
+        release_stub = ReleaseRecorder()
+
+        with pytest.raises(SybilLimitError):
+            build_roster(
+                models=["claude:sonnet"],
+                job_id=JOB_ID,
+                task_prompt=TASK_PROMPT,
+                card_ref=CARD_REF,
+                base_ref=BASE_REF,
+                operators_path=tmp_path / "ops.json",
+                now=NOW,
+                _admit=admit_stub,
+                _release=release_stub,
+            )
+
+        assert len(release_stub.calls) == 0
+
+    def test_successful_roster_does_not_call_release(self, tmp_path: Path) -> None:
+        """I1: on a fully successful build, _release is never called."""
+        admit_stub = AdmitRecorder()
+        release_stub = ReleaseRecorder()
+
+        build_roster(
+            models=["claude:sonnet", "claude:haiku"],
+            job_id=JOB_ID,
+            task_prompt=TASK_PROMPT,
+            card_ref=CARD_REF,
+            base_ref=BASE_REF,
+            operators_path=tmp_path / "ops.json",
+            now=NOW,
+            _admit=admit_stub,
+            _release=release_stub,
+        )
+
+        assert len(release_stub.calls) == 0
 
 
 # ─── SP10: operator_id derivation ─────────────────────────────────────────────
@@ -245,6 +435,7 @@ class TestOperatorIdDerivation:
             job_id=JOB_ID,
             task_prompt=TASK_PROMPT,
             card_ref=CARD_REF,
+            base_ref=BASE_REF,
             operators_path=tmp_path / "ops.json",
             now=NOW,
             _admit=recorder,
@@ -252,21 +443,6 @@ class TestOperatorIdDerivation:
         # Different models → different operator_ids
         assert recorder.calls[0]["operator_id"] == "claude:sonnet"
         assert recorder.calls[1]["operator_id"] == "claude:haiku"
-
-    def test_same_model_twice_same_operator(self, tmp_path: Path) -> None:
-        """Same model twice → same operator_id in both calls."""
-        recorder = AdmitRecorder()
-        build_roster(
-            models=["claude:sonnet", "claude:sonnet"],
-            job_id=JOB_ID,
-            task_prompt=TASK_PROMPT,
-            card_ref=CARD_REF,
-            operators_path=tmp_path / "ops.json",
-            now=NOW,
-            _admit=recorder,
-        )
-        assert recorder.calls[0]["operator_id"] == "claude:sonnet"
-        assert recorder.calls[1]["operator_id"] == "claude:sonnet"
 
     def test_openrouter_model_different_from_claude(self, tmp_path: Path) -> None:
         """SP10: openrouter:X is distinct from claude:X."""
@@ -276,6 +452,7 @@ class TestOperatorIdDerivation:
             job_id=JOB_ID,
             task_prompt=TASK_PROMPT,
             card_ref=CARD_REF,
+            base_ref=BASE_REF,
             operators_path=tmp_path / "ops.json",
             now=NOW,
             _admit=recorder,
@@ -406,7 +583,6 @@ class TestDefaultLauncherAdapter:
     def test_no_live_launcher_import_at_module_load(self) -> None:
         """Importing spawn.py must not import the atlas_launcher MCP module."""
         import sys
-        import importlib
 
         # Ensure spawn is already loaded (it was imported above)
         assert "prd_taskmaster.tournament.spawn" in sys.modules

@@ -16,17 +16,27 @@ Shape::
                 "job_id": str,
                 "claimant_id": str,
                 "admitted_at": str,   # ISO-8601 UTC
+                "expires_at": str,    # ISO-8601 UTC  (admitted_at + TTL_SECONDS)
                 "active": bool
             },
             ...
         ]
     }
+
+TTL / crashed-job cleanup
+-------------------------
+Each admitted entry carries ``expires_at`` (now + TTL_SECONDS).  Inside every
+``admit`` call the transform sweeps expired entries (sets active=False) BEFORE
+counting, so crashed-job slots self-free after TTL_SECONDS.
+
+``sweep_expired(state, now)`` is a pure helper — also useful from tests or a
+separate maintenance job.
 """
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from prd_taskmaster.lib import locked_update
 
@@ -36,6 +46,8 @@ ENTRY_FEE_E: int = 1
 FAKERY_STAKE_MULT: int = 5        # S = 5 * E
 PER_JOB_CAP_N: int = 8
 PER_OPERATOR_RATE_LIMIT: int = 3
+TTL_SECONDS: int = 4 * 3600      # 4 hours — matches launcher max_lifetime
+
 
 
 # ─── Typed errors ─────────────────────────────────────────────────────────────
@@ -59,6 +71,44 @@ class SybilLimitError(Exception):
 
 
 # ─── Pure helpers (no I/O) ────────────────────────────────────────────────────
+
+def sweep_expired(state: dict, now: str) -> dict:
+    """Deactivate entries whose expires_at is in the past (pure — mutates in place).
+
+    Parameters
+    ----------
+    state:
+        Loaded operators.json dict (mutated in place for efficiency).
+    now:
+        ISO-8601 UTC timestamp to compare against expires_at.
+
+    Returns the same dict (mutated) for chaining convenience.
+
+    Notes
+    -----
+    Entries without an ``expires_at`` field are left untouched (backwards
+    compatible with data written before TTL was introduced).
+    """
+    try:
+        now_dt = datetime.fromisoformat(now)
+    except (ValueError, TypeError):
+        return state
+
+    for entry in state.get("entries", []):
+        if not entry.get("active", False):
+            continue
+        expires_at = entry.get("expires_at")
+        if not expires_at:
+            continue
+        try:
+            exp_dt = datetime.fromisoformat(expires_at)
+        except (ValueError, TypeError):
+            continue
+        if exp_dt <= now_dt:
+            entry["active"] = False
+
+    return state
+
 
 def active_count_for_job(state: dict, job_id: str) -> int:
     """Count active entries for a given job_id (pure, on a loaded dict)."""
@@ -128,7 +178,19 @@ def admit(
     """
     operators_path = Path(operators_path)
 
-    result: dict[str, Any] = {}
+    # Compute expires_at from now + TTL_SECONDS.
+    try:
+        now_dt = datetime.fromisoformat(now)
+        # Ensure timezone-aware for arithmetic; fallback to UTC if naive.
+        if now_dt.tzinfo is None:
+            now_dt = now_dt.replace(tzinfo=timezone.utc)
+        from datetime import timedelta
+        expires_dt = now_dt + timedelta(seconds=TTL_SECONDS)
+        expires_at = expires_dt.isoformat()
+    except (ValueError, TypeError):
+        expires_at = now  # degenerate fallback
+
+    result: dict = {}
     error: SybilLimitError | None = None
 
     def _transform(current: str) -> str:
@@ -146,17 +208,20 @@ def admit(
         if not isinstance(state.get("entries"), list):
             state["entries"] = []
 
+        # ── Sweep expired entries BEFORE counting (I2) ────────────────────────
+        sweep_expired(state, now)
+
         # ── Check per-job cap ─────────────────────────────────────────────────
         job_active = active_count_for_job(state, job_id)
         if job_active >= n_cap:
             error = SybilLimitError("job_cap_exceeded")
-            return current  # no change — abort inside transform
+            return current  # no change — abort inside transform (m3: no ghost write)
 
         # ── Check per-operator rate limit ─────────────────────────────────────
         op_active = active_count_for_operator(state, operator_id)
         if op_active >= rate_limit:
             error = SybilLimitError("operator_rate_limited")
-            return current  # no change
+            return current  # no change (m3: no ghost write)
 
         # ── Admit ─────────────────────────────────────────────────────────────
         state["entries"].append({
@@ -164,6 +229,7 @@ def admit(
             "job_id": job_id,
             "claimant_id": claimant_id,
             "admitted_at": now,
+            "expires_at": expires_at,
             "active": True,
         })
 

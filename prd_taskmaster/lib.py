@@ -77,7 +77,13 @@ def atomic_write(path: Path, content: str) -> None:
 
 def locked_update(path: Path, transform: Callable[[str], str]) -> str:
     """Read-modify-write under flock. transform takes current content, returns new content.
-    Returns the new content for convenience."""
+    Returns the new content for convenience.
+
+    The write is skipped when the transform returns the same string as ``current``
+    (identity check: ``new is current`` or ``new == current``) to avoid creating
+    ghost empty files when the transform signals a no-op / error abort by returning
+    the unchanged input.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.with_suffix(path.suffix + ".lock")
@@ -86,7 +92,8 @@ def locked_update(path: Path, transform: Callable[[str], str]) -> str:
         try:
             current = path.read_text() if path.exists() else ""
             new = transform(current)
-            atomic_write(path, new)
+            if new is not current and new != current:
+                atomic_write(path, new)
             return new
         finally:
             fcntl.flock(lock_f, fcntl.LOCK_UN)
