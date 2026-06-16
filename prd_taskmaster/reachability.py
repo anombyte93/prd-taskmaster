@@ -78,11 +78,13 @@ _EXCLUDE_NAMES = {
 
 _EXCLUDE_NAME_RE = re.compile(
     r"(^|/)("
-    r"test_[^/]+\.(py|ts|js|go)"  # test_*.py / test_*.ts …
-    r"|[^/]+_test\.(py|ts|js|go)"  # *_test.py …
-    r"|[^/]+\.test\.(py|ts|js|go)"  # *.test.py / *.test.ts …
+    r"test_[^/]+\.(py|ts|js|jsx|tsx|go|cjs|mjs)"  # test_*.py / test_*.ts …
+    r"|[^/]+_test\.(py|ts|js|jsx|tsx|go|cjs|mjs)"  # *_test.py …
+    r"|[^/]+\.test\.(py|ts|js|jsx|tsx|go|cjs|mjs)"  # *.test.py / *.test.ts …
+    r"|[^/]+\.spec\.(py|ts|js|jsx|tsx|go|cjs|mjs)"  # *.spec.ts / *.spec.js (Jest/Vitest/Angular)
+    r"|[^/]+\.cy\.(ts|js|jsx|tsx|cjs|mjs)"           # *.cy.ts / *.cy.js (Cypress)
     r"|index\.[^/]+"               # index.* barrels
-    r"|[^/]+migration[^/]*\.(py|ts|js|go)"  # migration files
+    r"|[^/]+migration[^/]*\.(py|ts|js|jsx|tsx|go|cjs|mjs)"  # migration files
     r")$"
 )
 
@@ -232,7 +234,7 @@ def find_importers(repo_root: Path, module: Path, lang: str) -> list[Path]:
         raw = _grep_patterns(repo_root, patterns, "*.py")
     elif lang in ("ts", "js"):
         patterns = _ts_import_patterns(module)
-        globs = ["*.ts", "*.tsx", "*.js", "*.jsx", "*.mjs"]
+        globs = ["*.ts", "*.tsx", "*.js", "*.jsx", "*.mjs", "*.cjs"]
         raw = []
         for g in globs:
             raw.extend(_grep_patterns(repo_root, patterns, g))

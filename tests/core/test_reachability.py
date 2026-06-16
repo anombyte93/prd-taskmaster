@@ -672,3 +672,126 @@ class TestTsSubstringIsOrphan:
             f"got {verdict['verdict']!r} with importers {verdict['importers']!r}. "
             "Pre-fix code would return WIRED."
         )
+
+
+# ─── 10. Regression: .spec/.cy importer → ORPHAN (JS/TS false-WIRED fix) ─────
+
+class TestSpecCyImporterIsOrphan:
+    """.spec.ts / .cy.ts importers must be excluded from reachability importers.
+
+    PRE-FIX BEHAVIOR: *.spec.ts / *.cy.ts were not in _EXCLUDE_NAME_RE →
+    they appeared as production importers → WIRED (false pass).
+    POST-FIX BEHAVIOR: _EXCLUDE_NAME_RE matches *.spec.<ext> and *.cy.<ext> →
+    excluded from find_importers → ORPHAN (correct blocking verdict).
+    """
+
+    def _make_ts_repo_with_spec(
+        self, tmp_path: Path, spec_suffix: str
+    ) -> tuple[Path, Path]:
+        """Create a minimal TS repo where src/bar.ts is imported ONLY by a .spec file.
+
+        Returns (repo, spec_path).
+        """
+        repo = _init_repo(tmp_path)
+        (repo / "package.json").write_text('{"name": "test"}')
+        (repo / "tsconfig.json").write_text("{}")
+        src = repo / "src"
+        src.mkdir()
+        (src / "bar.ts").write_text("export const bar = 42;\n")
+        spec_file = src / f"bar{spec_suffix}"
+        spec_file.write_text("import { bar } from './bar';\n")
+        _commit_all(repo, f"add bar.ts + {spec_file.name}")
+        return repo, spec_file
+
+    def test_spec_ts_importer_yields_orphan(self, tmp_path):
+        """src/bar.spec.ts is the ONLY importer of src/bar.ts → ORPHAN.
+
+        PRE-FIX: bar.spec.ts not excluded → counted as importer → WIRED.
+        POST-FIX: bar.spec.ts excluded by _EXCLUDE_NAME_RE → ORPHAN.
+        """
+        repo, spec_file = self._make_ts_repo_with_spec(tmp_path, ".spec.ts")
+        verdict = reachability_verdict(repo, Path("src/bar.ts"), "ts")
+        assert verdict["verdict"] == "ORPHAN", (
+            f"Expected ORPHAN — only importer is {spec_file.name} (.spec.ts), "
+            f"got {verdict['verdict']!r} with importers {verdict['importers']!r}. "
+            "Pre-fix code would return WIRED (false pass)."
+        )
+        assert verdict["importers"] == []
+
+    def test_cy_ts_importer_yields_orphan(self, tmp_path):
+        """src/bar.cy.ts is the ONLY importer of src/bar.ts → ORPHAN.
+
+        PRE-FIX: bar.cy.ts not excluded → counted as importer → WIRED.
+        POST-FIX: bar.cy.ts excluded by _EXCLUDE_NAME_RE → ORPHAN.
+        """
+        repo, spec_file = self._make_ts_repo_with_spec(tmp_path, ".cy.ts")
+        verdict = reachability_verdict(repo, Path("src/bar.ts"), "ts")
+        assert verdict["verdict"] == "ORPHAN", (
+            f"Expected ORPHAN — only importer is {spec_file.name} (.cy.ts), "
+            f"got {verdict['verdict']!r} with importers {verdict['importers']!r}. "
+            "Pre-fix code would return WIRED (false pass)."
+        )
+        assert verdict["importers"] == []
+
+    def test_spec_ts_plus_real_importer_yields_wired(self, tmp_path):
+        """When BOTH src/bar.spec.ts AND src/app.ts import src/bar.ts → WIRED.
+
+        The .spec file is excluded but the real production importer still wires it.
+        """
+        repo = _init_repo(tmp_path)
+        (repo / "package.json").write_text('{"name": "test"}')
+        (repo / "tsconfig.json").write_text("{}")
+        src = repo / "src"
+        src.mkdir()
+        (src / "bar.ts").write_text("export const bar = 42;\n")
+        (src / "bar.spec.ts").write_text("import { bar } from './bar';\n")
+        (src / "app.ts").write_text("import { bar } from './bar';\n")
+        _commit_all(repo, "add bar.ts + spec + app")
+
+        verdict = reachability_verdict(repo, Path("src/bar.ts"), "ts")
+        assert verdict["verdict"] == "WIRED", (
+            "Expected WIRED — src/app.ts is a genuine production importer alongside bar.spec.ts"
+        )
+        importer_names = [Path(p).name for p in verdict["importers"]]
+        assert "app.ts" in importer_names, "app.ts must appear as importer"
+        assert "bar.spec.ts" not in importer_names, "bar.spec.ts must NOT appear as importer"
+
+    def test_spec_file_not_swept_as_new_module(self, tmp_path):
+        """A newly-added src/foo.spec.ts must NOT appear in new_modules_for_task.
+
+        It's a test file, not a production module — should be excluded by _EXCLUDE_NAME_RE.
+        """
+        repo = _init_repo(tmp_path)
+        (repo / "package.json").write_text('{"name": "test"}')
+        (repo / "tsconfig.json").write_text("{}")
+        src = repo / "src"
+        src.mkdir()
+        start = _commit_all(repo, "init")
+
+        (src / "foo.ts").write_text("export const foo = 1;\n")
+        (src / "foo.spec.ts").write_text("import { foo } from './foo';\n")
+        head = _commit_all(repo, "add foo + spec")
+
+        modules = new_modules_for_task(repo, start, head)
+        names = [m.name for m in modules]
+        assert "foo.spec.ts" not in names, (
+            "foo.spec.ts is a test file and must be excluded from new_modules_for_task"
+        )
+        assert "foo.ts" in names, "foo.ts (production module) must be included"
+
+    def test_cy_js_importer_yields_orphan(self, tmp_path):
+        """src/bar.cy.js is the ONLY importer of src/bar.ts → ORPHAN.
+
+        Verifies .cy.<ext> exclusion works for JS as well as TS.
+        """
+        repo, spec_file = self._make_ts_repo_with_spec(tmp_path, ".cy.js")
+        # bar.cy.js imports './bar' — but since it's a JS file we need a JS-repo
+        # detection for find_importers to sweep it. The repo has tsconfig.json
+        # so it's detected as 'ts', which includes *.js globs — correct.
+        verdict = reachability_verdict(repo, Path("src/bar.ts"), "ts")
+        assert verdict["verdict"] == "ORPHAN", (
+            f"Expected ORPHAN — only importer is {spec_file.name} (.cy.js), "
+            f"got {verdict['verdict']!r} with importers {verdict['importers']!r}. "
+            "Pre-fix code would return WIRED (false pass)."
+        )
+        assert verdict["importers"] == []
