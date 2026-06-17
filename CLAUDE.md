@@ -53,9 +53,16 @@ a UCB reputation store routes the next job to the cheapest proven-capable execut
 - `collect.py` is the security core — **commit-reveal** (`commit_hash = sha256(diff base..HEAD)`)
   defeats the diff-copy attack. `antisybil.py` enforces per-job / per-operator economic caps.
 - `goose_backend.py` is the cheap-API racer (one OpenRouter model via `goose run`).
-- **Invariants (enforced + tested — keep them):** **shadow-slash only** until an independent
-  out-of-band watcher exists (proven cheating is logged, no AtlasCoin burned); honest losers
-  are **always refunded**; **AtlasCoin is conserved** (no mint/burn, even under account aliasing).
+- `watcher.py` (`watcher-run` / `watcher-status`) is the **independent out-of-band re-execution
+  watcher** — the precondition for real slashing. It re-adjudicates settled submissions from
+  primary evidence (re-runs the oracle, independently re-derives `sha256(diff base..HEAD)` to
+  catch diff-copy), abstains when it cannot verify (never a false confirm), and **engine-gates**
+  real forfeiture: `run_tournament` downgrades `--enforce-slash` to shadow unless the fail-closed
+  `permit_enforce_slash` confirms the whole job behind a concordance track record.
+- **Invariants (enforced + tested — keep them):** **shadow-slash by default**; real slashing only
+  behind the watcher's fail-closed permit (no AtlasCoin burned without an independent positive
+  confirmation); honest losers are **always refunded**; **AtlasCoin is conserved** (no mint/burn,
+  even under account aliasing).
 
 ## The spine (`atlas-protocol`, separate repo)
 
@@ -94,7 +101,8 @@ Key modules: `cli.py` (dispatch) · `backend.py` (5-op backend protocol) · `val
 `tasks.py` (graded PRD + task graph) · `task_state.py` (atomic next/claim/set-status) ·
 `reachability.py` (Gate 6) · `oracle_bridge.py` + `shipcheck.py` (Gate 5 wiring) · `economy.py`
 + `reputation.py` (cost ledger + UCB routing) · `fleet.py` / `parallel.py` (fleet waves) ·
-`tournament/` (the settled marketplace). The binding ship gate is `skel/ship-check.py`; the
+`tournament/` (the settled marketplace; `tournament/watcher.py` is the independent re-execution
+watcher that engine-gates real slashing). The binding ship gate is `skel/ship-check.py`; the
 skill/slash commands live in `skills/` (atlas, go, generate, execute-task, execute-fleet, …) and
 ship inside the package. `SKILL.md` is the normative behavior spec. Tests split into
 `tests/core` + `tests/plugin` (stdlib-only), `tests/mcp` (needs the mcp package), and
@@ -126,6 +134,8 @@ python3 script.py engine-preflight                 # one-call environment + back
 python3 script.py validate-tasks <tasks.json>      # gate before any tasks.json write
 python3 script.py reachability-sweep               # Gate 6 — orphan-module detection
 python3 script.py tournament-run                   # settled marketplace: spawn→…→reputation
+python3 script.py watcher-run --job <dir> --card <card> --task <id> --base-ref <sha>  # out-of-band re-adjudication
+python3 script.py watcher-status                   # watcher concordance + whether real slashing is permitted yet
 python3 script.py economy-report                   # cost ledger from .atlas-ai/telemetry.jsonl
 ```
 

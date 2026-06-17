@@ -654,3 +654,58 @@ def test_b2_report_to_wired_in_racer_prompts(tmp_path):
             f"racer {spec.claimant_id!r} prompt does not contain {orch_session!r}:\n"
             f"{spec.prompt[:300]}"
         )
+
+
+# ─── Watcher gate on REAL slashing (engine-enforced shadow-until-permitted) ───
+
+def _settle_spy():
+    """A settle stub that records the enforce_slash it was called with."""
+    calls = []
+    def _stub(*, job_dir, enforce_slash=False):
+        calls.append(enforce_slash)
+        return _make_settle_ok()(job_dir=job_dir, enforce_slash=enforce_slash)
+    return _stub, calls
+
+
+def test_watcher_gate_downgrades_to_shadow_when_not_permitted(tmp_path):
+    """enforce_slash=True but the watcher does NOT permit → settle runs in SHADOW."""
+    settle_fn, calls = _settle_spy()
+    kwargs = _run_args(tmp_path, settle_fn=settle_fn)
+    kwargs["enforce_slash"] = True
+    kwargs["_re_adjudicate"] = lambda **kw: {"ok": True, "job_id": JOB_ID, "submissions": []}
+    kwargs["_permit"] = lambda rec, **kw: {"permitted": False, "reason": "thin track record"}
+
+    summary = run_tournament(**kwargs)
+
+    assert calls == [False], "real slashing must be downgraded to shadow when not permitted"
+    assert summary["enforce_slash_downgraded"] is True
+    assert summary["watcher_permit"]["permitted"] is False
+
+
+def test_watcher_gate_allows_real_slash_when_permitted(tmp_path):
+    """enforce_slash=True and the watcher permits → settle runs with real enforcement."""
+    settle_fn, calls = _settle_spy()
+    kwargs = _run_args(tmp_path, settle_fn=settle_fn)
+    kwargs["enforce_slash"] = True
+    kwargs["_re_adjudicate"] = lambda **kw: {"ok": True, "job_id": JOB_ID, "submissions": []}
+    kwargs["_permit"] = lambda rec, **kw: {"permitted": True, "reason": "ok", "confirmed": ["x"]}
+
+    summary = run_tournament(**kwargs)
+
+    assert calls == [True], "real slashing must proceed when the watcher permits"
+    assert summary.get("enforce_slash_downgraded") is not True
+
+
+def test_watcher_gate_fail_closed_when_watcher_errors(tmp_path):
+    """A crashing watcher must FAIL-CLOSED to shadow, never burn coin."""
+    settle_fn, calls = _settle_spy()
+    kwargs = _run_args(tmp_path, settle_fn=settle_fn)
+    kwargs["enforce_slash"] = True
+    def _boom(**kw):
+        raise RuntimeError("watcher exploded")
+    kwargs["_re_adjudicate"] = _boom
+
+    summary = run_tournament(**kwargs)
+
+    assert calls == [False], "a watcher error must downgrade to shadow (fail-closed)"
+    assert summary["enforce_slash_downgraded"] is True

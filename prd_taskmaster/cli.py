@@ -26,7 +26,12 @@ from prd_taskmaster.context_pack import build_context_pack
 from prd_taskmaster import fleet, parallel, task_state
 from prd_taskmaster.lib import _detect_taskmaster_method
 from prd_taskmaster.reachability_cmd import cmd_reachability_sweep
-from prd_taskmaster.tournament.cmd import cmd_tournament_run, cmd_tournament_status
+from prd_taskmaster.tournament.cmd import (
+    cmd_tournament_run,
+    cmd_tournament_status,
+    cmd_watcher_run,
+    cmd_watcher_status,
+)
 
 
 def _backend_source() -> str:
@@ -419,6 +424,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reputation-path", default=None, help="Path to reputation.jsonl (default: .atlas-ai/reputation.jsonl)")
     p.add_argument("--operators-path", default=None, help="Path to operators.json (default: .atlas-ai/tournament/operators.json)")
 
+    # watcher-run — independent out-of-band re-adjudication of a settled job
+    p = sub.add_parser(
+        "watcher-run",
+        help="Re-adjudicate a settled tournament job out-of-band; append concordance; report the real-slash permit",
+    )
+    p.add_argument("--job", required=True, help="Path to the settled job dir (contains submissions.json)")
+    p.add_argument("--card", required=True, help="Path to the CDD card JSON")
+    p.add_argument("--task", required=True, help="Task id (e.g. 7 or 1.2)")
+    p.add_argument("--base-ref", required=True, help="Fork-point git SHA the diff range is measured from")
+    p.add_argument("--repo-root", default=".", help="Repo containing the racer commits (default: .)")
+    p.add_argument("--held-root", default=None, help="Held root for the oracle gate (default: .atlas-ai/cdd)")
+    p.add_argument("--ledger-path", default=None, help="Watcher ledger path (default: .atlas-ai/tournament/watcher.jsonl)")
+
+    # watcher-status — report watcher concordance + real-slash readiness
+    p = sub.add_parser(
+        "watcher-status",
+        help="Show the watcher's historical concordance and whether real slashing is permitted yet",
+    )
+    p.add_argument("--ledger-path", default=None, help="Watcher ledger path (default: .atlas-ai/tournament/watcher.jsonl)")
+
     # status — render progress panels
     p = sub.add_parser("status", help="Render Atlas progress panels for the current phase")
     p.add_argument("--phase", default=None, help="Render a specific phase instead of the current one")
@@ -476,6 +501,8 @@ DISPATCH = {
     "reachability-sweep": cmd_reachability_sweep,
     "tournament-run": cmd_tournament_run,
     "tournament-status": cmd_tournament_status,
+    "watcher-run": cmd_watcher_run,
+    "watcher-status": cmd_watcher_status,
     "economy-report": cmd_economy_report,
     "context-pack": cmd_context_pack,
     "feedback-add": cmd_feedback_add,

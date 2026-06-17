@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -47,7 +48,26 @@ from prd_taskmaster.tournament.collect import (
     FakeClock,
 )
 from prd_taskmaster.tournament.adjudicate import adjudicate_job, settle_job
+from prd_taskmaster.tournament import watcher as _watcher
 from prd_taskmaster.reputation import record_tournament, summarize_reputation, _winner_id
+
+
+def _resolve_repo_root(cwd: "str | None" = None, default: str = ".") -> str:
+    """Resolve the git repo root for the watcher's re-execution worktrees.
+
+    Falls back to *default* (never raises) when not in a git repo, so the
+    watcher gate degrades gracefully rather than crashing the settle path.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd, capture_output=True, text=True, timeout=10,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return proc.stdout.strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return default
 
 
 # ─── Core orchestration function ─────────────────────────────────────────────
@@ -74,6 +94,10 @@ def run_tournament(
     now: str,
     window_s: float = 120.0,
     enforce_slash: bool = False,
+    repo_root: str = ".",
+    watcher_ledger_path: "str | Path | None" = None,
+    _re_adjudicate: "Optional[Callable[..., dict]]" = None,
+    _permit: "Optional[Callable[..., dict]]" = None,
     _spawn_fn: "Callable[[Any], dict]" = default_launcher_adapter,
     _inbox_read: "Callable[..., list[dict]]" = default_inbox_adapter,
     _dispatch_reveal: "Callable[..., Optional[dict]]" = default_reveal_adapter,
@@ -290,8 +314,38 @@ def run_tournament(
                 job_poster=job_poster,
             )
 
+            # ── Step 5b: Watcher gate on REAL slashing (engine-enforced) ─────
+            # Shadow-slash only until the independent out-of-band watcher PERMITS
+            # real forfeiture for THIS job. Fail-closed: a watcher error, a failed
+            # re-adjudication, or a non-permit downgrades enforce_slash to shadow
+            # so no AtlasCoin is ever burned without an independent confirmation.
+            effective_enforce = enforce_slash
+            if enforce_slash:
+                _radj = _re_adjudicate or _watcher.re_adjudicate_job
+                _perm = _permit or _watcher.permit_enforce_slash
+                w_ledger = (
+                    Path(watcher_ledger_path) if watcher_ledger_path
+                    else Path(".atlas-ai/tournament/watcher.jsonl")
+                )
+                try:
+                    wrec = _radj(
+                        job_dir=job_dir, repo_root=repo_root, card_path=card_path,
+                        held_root=held_root, task_id=task_id, start_commit=base_ref,
+                        base_ref=base_ref, now=now, ledger_path=w_ledger,
+                    )
+                    if not wrec.get("ok"):
+                        permit = {"permitted": False, "reason": "watcher re-adjudication failed"}
+                    else:
+                        permit = _perm(wrec, ledger_path=w_ledger, current_job_id=job_id)
+                except Exception as exc:  # noqa: BLE001 — fail-closed → shadow
+                    permit = {"permitted": False, "reason": f"watcher error: {exc}"}
+                summary["watcher_permit"] = permit
+                if not permit.get("permitted"):
+                    effective_enforce = False
+                    summary["enforce_slash_downgraded"] = True
+
             # ── Step 6: Settle (FAIL-CLOSED on ok:false) ─────────────────────
-            settle_env = _settle_fn(job_dir=job_dir, enforce_slash=enforce_slash)
+            settle_env = _settle_fn(job_dir=job_dir, enforce_slash=effective_enforce)
 
             settled_ok = settle_env.get("ok") is True
             summary["settled_ok"] = settled_ok
@@ -415,6 +469,7 @@ def cmd_tournament_run(args: argparse.Namespace) -> None:
             now=now,
             window_s=float(getattr(args, "window", 120.0)),
             enforce_slash=bool(getattr(args, "enforce_slash", False)),
+            repo_root=_resolve_repo_root(),
             # Real adapters must be wired by the orchestrator skill; the defaults
             # raise RuntimeError with guidance if called directly.
             _spawn_fn=default_launcher_adapter,
@@ -424,6 +479,60 @@ def cmd_tournament_run(args: argparse.Namespace) -> None:
         _emit({"ok": True, **summary})
     except Exception as exc:  # noqa: BLE001
         _emit({"ok": False, "error": str(exc)})
+
+
+def cmd_watcher_run(args: argparse.Namespace) -> None:
+    """CLI handler for ``watcher-run``.
+
+    Re-adjudicates a settled job out-of-band from primary evidence, appends a
+    concordance row to the watcher ledger, and reports the fail-closed
+    real-slash permit for the job. FAIL-CLOSED: a missing/unreadable job → ok:false.
+    """
+    job_dir = Path(args.job)
+    repo_root = getattr(args, "repo_root", None) or "."
+    card_path = Path(args.card)
+    held_root = Path(getattr(args, "held_root", None) or ".atlas-ai/cdd")
+    ledger_path = Path(getattr(args, "ledger_path", None) or ".atlas-ai/tournament/watcher.jsonl")
+
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    try:
+        rec = _watcher.re_adjudicate_job(
+            job_dir=job_dir,
+            repo_root=repo_root,
+            card_path=card_path,
+            held_root=held_root,
+            task_id=args.task,
+            start_commit=args.base_ref,
+            base_ref=args.base_ref,
+            now=now,
+            ledger_path=ledger_path,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _emit({"ok": False, "error": str(exc)})
+        return
+
+    if not rec.get("ok"):
+        _emit({"ok": False, **rec})
+        return
+
+    # Exclude the in-flight job (just appended to the ledger) from its own gate.
+    permit = _watcher.permit_enforce_slash(
+        rec, ledger_path=ledger_path, current_job_id=rec.get("job_id")
+    )
+    _emit({"ok": True, **rec, "permit": permit})
+
+
+def cmd_watcher_status(args: argparse.Namespace) -> None:
+    """CLI handler for ``watcher-status``.
+
+    Reports the watcher's historical concordance and whether the track record
+    would clear the real-slash gate (``real_slash_ready``). A view command.
+    """
+    ledger_path = Path(getattr(args, "ledger_path", None) or ".atlas-ai/tournament/watcher.jsonl")
+    summ = _watcher.concordance_summary(ledger_path)
+    _emit({"ok": True, **summ})
 
 
 def cmd_tournament_status(args: argparse.Namespace) -> None:
