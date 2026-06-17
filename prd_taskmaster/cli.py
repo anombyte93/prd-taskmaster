@@ -12,7 +12,12 @@ from prd_taskmaster.capabilities import cmd_detect_capabilities
 from prd_taskmaster.setup_wizard import cmd_setup
 from prd_taskmaster.templates import cmd_load_template
 from prd_taskmaster.validation import cmd_validate_prd, cmd_validate_tasks
-from prd_taskmaster.tasks import cmd_calc_tasks, cmd_backup_prd, cmd_enrich_tasks
+from prd_taskmaster.tasks import (
+    cmd_calc_tasks,
+    cmd_backup_prd,
+    cmd_enrich_tasks,
+    cmd_expand_structural,
+)
 from prd_taskmaster.taskmaster import cmd_init_taskmaster
 from prd_taskmaster.batch import cmd_engine_preflight
 from prd_taskmaster.economy import cmd_economy_report
@@ -270,6 +275,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="TaskMaster tag to enrich (default: state.json currentTag, else flat/master)",
     )
 
+    # expand-structural — deterministic, zero-AI subtask decomposition fallback
+    p = sub.add_parser(
+        "expand-structural",
+        help="Decompose under-expanded tasks into subtasks with no AI/network (offline fallback)",
+    )
+    p.add_argument(
+        "--input",
+        default=None,
+        help="Path to tasks.json (default: .taskmaster/tasks/tasks.json)",
+    )
+    p.add_argument(
+        "--tag",
+        default=None,
+        help="TaskMaster tag to expand (default: state.json currentTag, else flat/master)",
+    )
+    p.add_argument(
+        "--min-subtasks",
+        dest="min_subtasks",
+        type=int,
+        default=2,
+        help="Minimum subtasks per task (default: 2)",
+    )
+
     # ─── parallel research bridge (agent-parallel research fan-out) ───────────
     # parallel-plan
     p = sub.add_parser("parallel-plan", help="Emit per-task research packets for parallel subagents")
@@ -378,6 +406,7 @@ DISPATCH = {
     "backup-prd": cmd_backup_prd,
     "validate-tasks": cmd_validate_tasks,
     "enrich-tasks": cmd_enrich_tasks,
+    "expand-structural": cmd_expand_structural,
     "init-taskmaster": cmd_init_taskmaster,
     "parallel-plan": parallel.cmd_plan,
     "parallel-apply": parallel.cmd_apply,

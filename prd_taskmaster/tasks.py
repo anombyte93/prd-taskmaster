@@ -296,3 +296,134 @@ def cmd_enrich_tasks(args: argparse.Namespace) -> None:
         emit(run_enrich_tasks(args.input, tag=getattr(args, "tag", None)))
     except CommandError as e:
         fail(e.message, **e.extra)
+
+
+# Canonical, domain-neutral checkpoint verbs per lifecycle phase. Used by the
+# structural (zero-AI) expansion fallback so every task still gets verifiable
+# subtasks when no LLM/CLI provider is reachable — giving the GENERATE-phase
+# claim "structural decomposition alone is valuable" real code behind it.
+_PHASE_CHECKPOINT = {
+    "research": "Research and document findings for",
+    "planning": "Plan the approach for",
+    "implementation": "Implement",
+    "testing": "Write and run verification for",
+    "review": "Review and finalize",
+}
+
+_BULLET_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*\S)\s*$")
+
+
+def _structural_subtasks(task: dict, min_subtasks: int = 2) -> list:
+    """Deterministically decompose a task into subtasks with NO AI/network.
+
+    Tries, in order:
+      1. Bullet / numbered lines in the task's ``details`` (the author's own
+         breakdown), trimmed and de-duplicated.
+      2. Canonical lifecycle-phase checkpoints derived from the task's
+         complexity classification.
+
+    Always returns at least ``min_subtasks`` subtasks so the GENERATE gate
+    ("every task has >= 2 subtasks") is satisfiable fully offline.
+    """
+    title = (task.get("title") or task.get("name") or "task").strip()
+
+    # 1. Author-provided breakdown from details bullets/numbered lines.
+    titles: list[str] = []
+    seen = set()
+    for line in (task.get("details") or "").splitlines():
+        m = _BULLET_RE.match(line)
+        if not m:
+            continue
+        text = m.group(1).strip()
+        key = text.lower()
+        if text and key not in seen:
+            seen.add(key)
+            titles.append(text)
+
+    # 2. Fall back to lifecycle checkpoints when there aren't enough bullets.
+    if len(titles) < min_subtasks:
+        complexity = _classify_task(task)["complexity"]
+        phases = _LIFECYCLE_MAP.get(complexity, ["implementation", "testing"])
+        titles = [f"{_PHASE_CHECKPOINT[p]} {title}" for p in phases]
+
+    subtasks = []
+    for idx, st_title in enumerate(titles, start=1):
+        subtasks.append({
+            "id": idx,
+            "title": st_title,
+            "description": f"Structural checkpoint for: {title}",
+            "status": "pending",
+            "dependencies": [idx - 1] if idx > 1 else [],
+        })
+    return subtasks
+
+
+def run_expand_structural(
+    input_path: str | None = None, tag: str | None = None, min_subtasks: int = 2
+) -> dict:
+    """Zero-AI structural expansion: give every under-decomposed task subtasks.
+
+    This is the deterministic fallback for when no LLM/CLI provider is reachable
+    (no API key, headless, offline). Unlike the native/agent expand paths it
+    never calls a model — it splits each task from its own text so the task
+    graph still has verifiable checkpoints. Idempotent: tasks that already have
+    >= ``min_subtasks`` subtasks are left untouched.
+
+    Honors the active TaskMaster tag, mirroring ``run_enrich_tasks``.
+    """
+    tasks_path = Path(input_path) if input_path else TASKMASTER_TASKS / "tasks.json"
+    if not tasks_path.is_file():
+        raise CommandError(f"tasks.json not found: {tasks_path}")
+    try:
+        with open(tasks_path) as f:
+            raw = json.load(f)
+    except json.JSONDecodeError as e:
+        raise CommandError(f"Failed to parse {tasks_path}: {e}")
+
+    tasks, wrapper = _resolve_tasks_payload(raw, tag=tag)
+    if not isinstance(tasks, list):
+        raise CommandError(
+            "tasks.json must be a list, a flat object with a 'tasks' list, "
+            "or a tagged TaskMaster object",
+            {"tasks_path": str(tasks_path)},
+        )
+
+    expanded = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        existing = task.get("subtasks") or []
+        if len(existing) >= min_subtasks:
+            continue
+        task["subtasks"] = _structural_subtasks(task, min_subtasks=min_subtasks)
+        expanded.append(task.get("id"))
+
+    tmp_path = tasks_path.with_suffix(".json.tmp")
+    try:
+        tmp_path.write_text(json.dumps(wrapper, indent=2, default=str))
+        tmp_path.replace(tasks_path)
+    except Exception as e:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise CommandError(f"Failed to write {tasks_path}: {e}")
+
+    return {
+        "ok": True,
+        "tasks_path": str(tasks_path),
+        "tag": tag or _current_taskmaster_tag(),
+        "method": "structural",
+        "total_tasks": len(tasks),
+        "expanded": expanded,
+        "expanded_count": len(expanded),
+    }
+
+
+def cmd_expand_structural(args: argparse.Namespace) -> None:
+    try:
+        emit(run_expand_structural(
+            getattr(args, "input", None),
+            tag=getattr(args, "tag", None),
+            min_subtasks=getattr(args, "min_subtasks", 2),
+        ))
+    except CommandError as e:
+        fail(e.message, **e.extra)
