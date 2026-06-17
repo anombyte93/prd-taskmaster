@@ -429,12 +429,15 @@ def permit_enforce_slash(
                 f"permitted: {len(confirmed)} confirmed slash(es), "
                 f"concordance={concordance:.3f} over {observations} prior decisions"
             )
-        elif not to_slash:
-            reason = "blocked: no to-be-slashed submissions to confirm"
+        # Surface the most-serious finding FIRST: a discrepancy (incl. a cheating
+        # winner) or an abstain must never be masked by the benign "nothing to
+        # slash" message when to_slash happens to be empty.
         elif discrepancies:
             reason = f"blocked: {len(discrepancies)} discrepancy(ies) in the job"
         elif abstained:
             reason = f"blocked: {len(abstained)} submission(s) in the job could not be independently verified (abstain)"
+        elif not to_slash:
+            reason = "blocked: no to-be-slashed submissions to confirm"
         elif not track_record_ok:
             reason = (
                 f"blocked: thin track record — {observations}/{MIN_OBSERVATIONS} prior "

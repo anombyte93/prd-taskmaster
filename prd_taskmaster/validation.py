@@ -123,15 +123,28 @@ def run_validate_prd(input_path: str) -> dict:
     reqs_section = get_section_content(text, "Functional Requirements")
     if not reqs_section:
         reqs_section = get_section_content(text, "Requirements")
-    vague_in_reqs = VAGUE_PATTERN.findall(reqs_section)
-    checks.append({
-        "id": 6,
-        "category": "required",
-        "name": "Functional requirements are testable",
-        "passed": len(vague_in_reqs) == 0,
-        "detail": f"Vague terms found: {vague_in_reqs}" if vague_in_reqs else "All requirements are specific",
-        "points": 5,
-    })
+    if not reqs_section.strip():
+        # Fail-closed: an ABSENT requirements section must not vacuously pass and
+        # claim "all requirements are specific" — functional requirements aren't
+        # optional, so their absence is itself a testability failure.
+        checks.append({
+            "id": 6,
+            "category": "required",
+            "name": "Functional requirements are testable",
+            "passed": False,
+            "detail": "No requirements section found",
+            "points": 5,
+        })
+    else:
+        vague_in_reqs = VAGUE_PATTERN.findall(reqs_section)
+        checks.append({
+            "id": 6,
+            "category": "required",
+            "name": "Functional requirements are testable",
+            "passed": len(vague_in_reqs) == 0,
+            "detail": f"Vague terms found: {vague_in_reqs}" if vague_in_reqs else "All requirements are specific",
+            "points": 5,
+        })
 
     # Check 7: Each requirement has priority (Must/Should/Could or P0/P1/P2)
     has_priority = bool(re.search(
