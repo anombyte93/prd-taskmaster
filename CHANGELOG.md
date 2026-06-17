@@ -4,6 +4,50 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.0] — 2026-06-17
+
+The "unfakable done" release: a task ships only when its test genuinely re-ran green AND
+the code it tested is wired in — and that trustworthy signal now drives a competitive
+marketplace. Consolidates the oracle + reachability gates, the settled tournament, and the
+dogfooded first-run UX into one engine.
+
+### Added
+- **Re-execution oracle (ship-check Gate 5)** — re-grades each "done" task by re-running the
+  operator-held tests at the claimed commit in a network-isolated, digest-pinned podman
+  sandbox. A submitter can no longer pass by editing their own logs; the self-grantable
+  `SHIP_CHECK_OVERRIDE_ADMIN` bypass is removed.
+- **Reachability gate (Gate 6)** — `done = oracle-PASS AND the tested code is wired in`. A
+  green test on an orphan module (imported by nothing) is blocked and surfaced as
+  `⚠ scaffolded`.
+- **Settled-tournament marketplace** (`tournament run` / `tournament-status`) — N executors
+  race one job, every submission is adjudicated through both gates, the winner is paid in
+  AtlasCoin, honest losers are refunded, and a trusted reputation store (UCB explore/exploit)
+  routes the next job to the cheapest proven-capable executor. Includes a cheap OpenRouter
+  (goose) racer.
+- **Deterministic `expand-structural`** — decomposes an under-specified task into ≥2
+  verifiable subtasks with no model or network.
+
+### Changed
+- `/atlas` now opens with a **Confirm-Intent / plan-mode gate** before any file is written,
+  and gate prompts are harness-adaptive (AskUserQuestion on Claude Code; nearest equivalent
+  on codex/gemini).
+- `task-master-ai` is now **optional** (the native engine stands alone); the
+  `tm-parallel`/`tm-plan`/`tm-run`/`tm-harvest` surfaces were removed.
+- Fakery is **shadow-logged only** this release — proven cheating is recorded, no AtlasCoin is
+  burned, and honest losers always get their stake back.
+
+### Fixed
+- Preflight `configure` no longer silently no-ops on a fresh project (returns an explicit
+  "configuration deferred").
+- `tournament settle` always returns a parseable `{ok, stage}` envelope (no empty stdout on a
+  bad job dir); settlement is crash-resumable (no paid-but-stuck winner).
+- The cheap (goose) racer is no longer falsely rejected on non-ASCII diffs; tournament racers
+  are wired to the real orchestrator inbox.
+- AtlasCoin is conserved (no mint/burn) under account aliasing.
+
+### Tests
+- 872 passing + 4 real-podman e2e gates green (oracle dogfood + tournament settle/pay/reputation).
+
 ## [5.2.2] — 2026-06-14
 
 Front-door UX flow fixes (a UX-flow audit found the *journey* still broke before a
