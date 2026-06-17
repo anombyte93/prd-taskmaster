@@ -323,6 +323,21 @@ def test_permit_blocks_on_abstained_winner(tmp_path):
     assert "ex-win" in out["abstained"]
 
 
+def test_permit_reason_surfaces_winner_discrepancy_over_empty_slash(tmp_path):
+    # A cheating winner (recorded PASS, watcher DISCREPANCY) with NO to-be-slashed
+    # subs must surface the discrepancy in the reason, not a benign 'no to-be-slashed'.
+    ledger = tmp_path / "watcher.jsonl"
+    _seed_ledger(ledger, decisions=watcher.MIN_OBSERVATIONS, confirmed=watcher.MIN_OBSERVATIONS)
+    record = {"job_id": "job-1", "submissions": [
+        _v("ex-win", agreement="DISCREPANCY", slash_grounds=True, recorded_passes_both=True),
+    ]}
+    out = watcher.permit_enforce_slash(record, ledger_path=ledger)
+    assert out["permitted"] is False
+    assert "ex-win" in out["discrepancies"]
+    assert "discrepanc" in out["reason"].lower()
+    assert "no to-be-slashed" not in out["reason"].lower()
+
+
 def test_permit_blocks_on_empty_to_slash(tmp_path):
     # No to-be-slashed submissions → never a blanket green-light.
     ledger = tmp_path / "watcher.jsonl"

@@ -405,12 +405,23 @@ class TestValidatePrd:
         empty_prd.write_text("")
         out = run_validate_prd(str(empty_prd))
         assert out["grade"] == "NEEDS_WORK"
-        # 3 checks pass vacuously on empty PRD:
-        #   ch 5: no stories found → pass
-        #   ch 6: no vague reqs → pass
-        #   ch 10: no NFR section → pass
-        assert out["checks_passed"] == 3
-        assert out["score"] == 13  # 5 + 5 + 3
+        # 2 checks pass on absent-but-OPTIONAL sections; ch 6 (functional
+        # requirements) now FAILS-closed on an absent requirements section rather
+        # than vacuously claiming "all requirements are specific".
+        #   ch 5: no stories found → pass (user stories optional)
+        #   ch 10: no NFR section → pass (NFRs optional)
+        assert out["checks_passed"] == 2
+        assert out["score"] == 8  # 5 (ch5) + 3 (ch10)
+
+    def test_check6_fails_closed_on_absent_requirements(self, tmp_project):
+        """Check 6 must not vacuously pass (and assert specificity) when there is
+        no requirements section at all — functional requirements aren't optional."""
+        prd = tmp_project / ".taskmaster" / "docs" / "prd.md"
+        prd.write_text("# PRD: Thing\n\n## Overview\nA thing.\n")  # no requirements section
+        out = run_validate_prd(str(prd))
+        check6 = next(c for c in out["checks"] if c["id"] == 6)
+        assert check6["passed"] is False
+        assert "no requirements" in check6["detail"].lower()
 
     def test_validate_grade_boundaries(self, tmp_project):
         """Verify grade boundary calculations match documented thresholds."""

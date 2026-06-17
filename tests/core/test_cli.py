@@ -390,3 +390,23 @@ def test_native_expand_and_rate_no_key_return_agent_action_json(tmp_path, monkey
     )
     assert rate["ok"] is False
     assert rate["agent_action_required"]["op"] == "rate"
+
+
+def test_cli_flags_have_discoverable_help():
+    """Walkthrough fix: previously-undocumented flags must carry help text;
+    set-status --status must reveal its valid vocabulary."""
+    from prd_taskmaster.cli import build_parser
+    p = build_parser()
+    subs = p._subparsers._group_actions[0].choices
+
+    def flag_help(cmd, flag):
+        for a in subs[cmd]._actions:
+            if flag in a.option_strings:
+                return a.help
+        return None
+
+    assert flag_help("set-status", "--status"), "set-status --status needs help"
+    assert "in-progress" in (flag_help("set-status", "--status") or ""), "status vocab must be discoverable"
+    assert flag_help("engine-preflight", "--no-configure"), "--no-configure needs help"
+    assert flag_help("next-task", "--tag"), "next-task --tag needs help"
+    assert flag_help("economy-report", "--input"), "economy-report --input needs help"

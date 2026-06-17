@@ -176,7 +176,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     # engine-preflight (batched Phase 1: preflight + taskmaster + providers + capabilities)
     p = sub.add_parser("engine-preflight", help="One-call Phase 1: all probes + summary")
-    p.add_argument("--no-configure", action="store_true")
+    p.add_argument(
+        "--no-configure", action="store_true",
+        help="Skip auto-configuring providers; read-only probe (default configures providers on an existing .taskmaster project)",
+    )
 
     # detect-taskmaster
     sub.add_parser("detect-taskmaster", help="Find MCP or CLI taskmaster")
@@ -329,7 +332,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # economy-report
     p = sub.add_parser("economy-report", help="Summarize .atlas-ai/telemetry.jsonl per (op_class, model)")
-    p.add_argument("--input", default=None)
+    p.add_argument("--input", default=None, help="Telemetry JSONL path (default: .atlas-ai/telemetry.jsonl)")
 
     # context-pack
     p = sub.add_parser("context-pack", help="Extract AST-based Python signature context")
@@ -357,17 +360,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     # next-task
     p = sub.add_parser("next-task", help="Select the next TaskMaster-compatible task")
-    p.add_argument("--tag")
+    p.add_argument("--tag", help="Tasks.json tag context to read (default: the active/master tag)")
 
     # claim-task
     p = sub.add_parser("claim-task", help="Atomically select and claim the next task")
-    p.add_argument("--tag")
+    p.add_argument("--tag", help="Tasks.json tag context to read (default: the active/master tag)")
 
     # set-status
     p = sub.add_parser("set-status", help="Set a task or subtask status")
-    p.add_argument("--id", required=True)
-    p.add_argument("--status", required=True)
-    p.add_argument("--tag")
+    p.add_argument("--id", required=True, help="Task or subtask id (e.g. 7 or 1.2)")
+    p.add_argument(
+        "--status", required=True,
+        help="Task status; one of: pending, in-progress, done, review, deferred, cancelled, blocked",
+    )
+    p.add_argument("--tag", help="Tasks.json tag context to write (default: the active/master tag)")
     p.add_argument(
         "--evidence-ref",
         default=None,
