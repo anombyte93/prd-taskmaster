@@ -4,6 +4,25 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Independent out-of-band re-execution watcher** (`prd_taskmaster/tournament/watcher.py`;
+  `watcher-run` / `watcher-status` CLI) — the precondition for ever enabling real
+  (`--enforce-slash`) forfeiture. It re-adjudicates settled tournament submissions from
+  **primary evidence** (the claimed commit + the CDD card) without trusting the recorded
+  verdict: it re-runs the oracle gate, re-derives `sha256(diff base..HEAD)` to catch diff-copy
+  tamper independently of the live collector, and accumulates a concordance ledger over real
+  *slash decisions*. A `permit_enforce_slash` gate is **fail-closed**: real slashing is permitted
+  only when every to-be-slashed submission is independently confirmed, there is **no discrepancy
+  or abstain anywhere in the job**, and the watcher's historical concordance clears a threshold
+  over a minimum number of prior decisions. Inability to verify (oracle could not run, no
+  worktree, failed hash recompute) **abstains** — it is never counted as grounds to slash.
+- **Engine-enforced shadow-until-permitted** — `run_tournament` now consults the watcher before
+  any real `--enforce-slash` settle and **downgrades to shadow** unless the watcher permits the
+  job (fail-closed on any watcher error). Real AtlasCoin is never burned without an independent
+  positive confirmation; the shadow-slash default path is unchanged.
+
 ## [5.3.0] — 2026-06-17
 
 The "unfakable done" release: a task ships only when its test genuinely re-ran green AND
