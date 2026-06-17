@@ -122,6 +122,34 @@ _RESEARCH_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
+# Tier-specific regexes — stem-matching (prefix \b, no trailing \b) so that
+# "integrate", "investigate", "evaluate" etc. are caught by their root stems.
+# These are intentionally separate from _RESEARCH_KEYWORDS / _COMPLEX_KEYWORDS
+# (which use \b…\b exact-word matching and must not be changed).
+#
+# _TIER_RESEARCH_RE: overlaps with _RESEARCH_KEYWORDS but uses prefix \b so
+# "investigate", "evaluate", "analyze" are reliably caught.
+_TIER_RESEARCH_RE = re.compile(
+    r'\b(research|investigat|analyz|explor|evaluat|discover|'
+    r'benchmark|audit|spike|poc|proof.of.concept)',
+    re.IGNORECASE,
+)
+
+# _WIRED_KEYWORDS: integration / API / CLI signals that require reachability.
+# Anchored carefully to avoid false-positives:
+#   cli     — \bcli(?!ent|mat|nic) excludes client/climate/clinic/clinical
+#   auth    — authenticat|authoriz|\bauth\b excludes author/authority/authentic
+#   wire    — wire(?!frame|less) excludes wireframe/wireless
+# Other stems (integrat, webhook, deploy, pipeline, api, endpoint, route,
+# connect, mcp, database, migration) retain prefix \b; no trailing collisions
+# identified for these.
+_WIRED_KEYWORDS = re.compile(
+    r'(\bintegrat|\bauthenticat|\bauthoriz|\bauth\b|\bwebhook|\bdeploy|'
+    r'\bpipeline|\bapi\b|\bendpoint|\broute|\bwire(?!frame|less)|\bconnect|'
+    r'\bcli(?!ent|mat|nic)|\bmcp\b|\bdatabase|\bmigration)',
+    re.IGNORECASE,
+)
+
 # Lifecycle phase assignments by complexity
 _LIFECYCLE_MAP = {
     "SIMPLE": ["implementation", "testing"],
@@ -130,6 +158,46 @@ _LIFECYCLE_MAP = {
     "RESEARCH": ["research", "planning", "review"],
     "VALIDATION": ["testing", "review"],
 }
+
+
+def _classify_tier(task: dict) -> str:
+    """Deterministically assign an altitude tier from keyword signals.
+
+    Mapping (in priority order):
+      VALIDATION / "user-test" / "user validation checkpoint" → live
+      RESEARCH keywords                                       → spike
+      WIRED keywords (integration signals)                   → wired
+      else                                                   → domain-model  (safe default)
+
+    The default (domain-model) means existing task graphs that have no
+    integration/research/validation signal will NOT require reachability
+    evidence when the reachability gate is enforced later.
+    """
+    title = task.get("title", "") or task.get("name", "") or ""
+    description = task.get("description", "") or ""
+    details = task.get("details", "") or ""
+    # Strip RESEARCH NOTES appended by the parallel enrichment pass — those
+    # notes should not influence tier any more than they influence complexity.
+    classification_details = re.split(
+        r'\n\s*RESEARCH NOTES\s*\(parallel pass\):',
+        details,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+
+    combined = f"{title} {description} {classification_details}".lower()
+
+    # Priority 1: user-visible / validation work → live
+    if "user-test" in combined or "user validation checkpoint" in title.lower():
+        return "live"
+    # Priority 2: research/spike work → spike
+    if _TIER_RESEARCH_RE.search(combined):
+        return "spike"
+    # Priority 3: integration/wiring signals → wired
+    if _WIRED_KEYWORDS.search(combined):
+        return "wired"
+    # Default: pure logic / domain work → domain-model
+    return "domain-model"
 
 
 def _classify_task(task: dict) -> dict:
@@ -169,6 +237,7 @@ def _classify_task(task: dict) -> dict:
 
     return {
         "complexity": complexity,
+        "tier": _classify_tier(task),
         "requiresCDD": requires_cdd,
         "requiresResearch": requires_research,
         "lifecycle": _LIFECYCLE_MAP[complexity],
@@ -263,8 +332,15 @@ def run_enrich_tasks(input_path: str | None, tag: str | None = None) -> dict:
         if not isinstance(task, dict):
             continue
 
-        # Skip if already enriched (idempotent)
         if "phaseConfig" in task:
+            # Idempotent back-fill: if an older enrich run wrote phaseConfig but
+            # did not include tier (pre-tier-feature), add it now rather than
+            # skipping the whole task.  An explicit non-empty tier already present
+            # is left untouched (honours LLM-set or manually-set values).
+            pc = task["phaseConfig"]
+            if not pc.get("tier"):
+                pc["tier"] = _classify_tier(task)
+                enriched_count += 1
             continue
 
         phase_config = _classify_task(task)

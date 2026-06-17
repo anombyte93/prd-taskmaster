@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from prd_taskmaster import fleet, parallel
 from prd_taskmaster.lib import CommandError, emit, fail, locked_update
+
+# Tiers that require a reachability verdict before done is accepted.
+_GATED_TIERS = {"wired", "live"}
+# Reachability verdicts that allow done.
+_PASSING_VERDICTS = {"WIRED", "EXEMPT"}
 
 VALID_STATUSES = {
     "pending",
@@ -17,6 +23,8 @@ VALID_STATUSES = {
     "deferred",
     "cancelled",
     "blocked",
+    "scaffold",  # auto-downgraded orphan: code exists but not wired into the system;
+                 # NOT done, NOT deferred (deferred = deliberate); blocks the ship gate.
 }
 
 _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
@@ -227,14 +235,35 @@ def _split_id(id_str: str) -> tuple[str, str | None]:
     raise CommandError(f"unknown id: {id_str}")
 
 
-def run_set_status(id_str: str, status: str, tag: str | None = None) -> dict:
-    """Set a parent task or subtask status under a file lock."""
+def run_set_status(
+    id_str: str,
+    status: str,
+    tag: str | None = None,
+    evidence_ref: str | None = None,
+    reachability: dict | None = None,
+) -> dict:
+    """Set a parent task or subtask status under a file lock.
+
+    For status != "done": evidence_ref and reachability are accepted but ignored.
+    For status == "done" on a wired/live task: a reachability dict with verdict
+    in {WIRED, EXEMPT} is required; absence or a blocking verdict (ORPHAN, ERROR)
+    raises CommandError.
+
+    When evidence_ref or reachability is provided (any tier), the proof is
+    persisted on the task object as doneEvidence / reachability fields.
+    """
     if status not in VALID_STATUSES:
         raise CommandError(f"unknown status: {status}")
 
     parent_id, subtask_id = _split_id(id_str)
     resolved_tag = parallel.current_tag(tag)
     result: dict[str, Any] = {}
+
+    # Auto-read reachability from CDD card when marking done without an explicit verdict.
+    # This allows `set-status done` to work transparently after the sweep has run and
+    # written the verdict into the card (execute-task Step 9 → Step 10 flow).
+    if reachability is None and status == "done" and subtask_id is None:
+        reachability = _read_cdd_reachability(parent_id)
 
     def transform(current: str) -> str:
         if not current.strip():
@@ -258,7 +287,35 @@ def run_set_status(id_str: str, status: str, tag: str | None = None) -> dict:
             if str(task.get("id")) != parent_id:
                 continue
             if subtask_id is None:
+                # Tier-gated reachability check for parent tasks marked done.
+                if status == "done":
+                    tier = (
+                        (task.get("phaseConfig") or {}).get("tier")
+                        or task.get("tier")
+                        or "domain-model"
+                    )
+                    if tier in _GATED_TIERS:
+                        if reachability is None:
+                            raise CommandError(
+                                f"cannot mark task {id_str} (tier={tier}) done without a"
+                                f" reachability verdict — run the reachability sweep"
+                            )
+                        verdict = reachability.get("verdict")
+                        if verdict not in _PASSING_VERDICTS:
+                            raise CommandError(
+                                f"cannot mark task {id_str} done: reachability {verdict}"
+                                f" — wire the module(s) into the running system or"
+                                f" re-status deferred/scaffold"
+                            )
                 task["status"] = status
+                # Persist evidence additively when provided (any tier).
+                if evidence_ref is not None:
+                    task["doneEvidence"] = {
+                        "evidence_ref": evidence_ref,
+                        "at": datetime.now(timezone.utc).isoformat(),
+                    }
+                if reachability is not None:
+                    task["reachability"] = reachability
                 result.update({
                     "ok": True,
                     "tag": resolved_tag,
@@ -301,8 +358,104 @@ def cmd_claim_task(args: argparse.Namespace) -> None:
         fail(exc.message, **exc.extra)
 
 
-def cmd_set_status(args: argparse.Namespace) -> None:
+def _parse_reachability_arg(value: "str | None") -> "dict | None":
+    """Parse the --reachability CLI argument.
+
+    Accepts:
+      - None             → None (not provided)
+      - "WIRED"          → {"verdict": "WIRED"}
+      - "EXEMPT"         → {"verdict": "EXEMPT"}
+      - "ORPHAN"         → {"verdict": "ORPHAN"}
+      - '{"verdict":…}'  → parsed JSON dict
+
+    Raises CommandError on invalid input.
+    """
+    if value is None:
+        return None
+    value = value.strip()
+    if value.startswith("{"):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise CommandError(f"--reachability: invalid JSON: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise CommandError("--reachability: JSON value must be an object")
+        return parsed
+    # Bare verdict string.
+    if value in ("WIRED", "EXEMPT", "ORPHAN", "ERROR"):
+        return {"verdict": value}
+    raise CommandError(
+        f"--reachability: expected WIRED, EXEMPT, ORPHAN, or a JSON dict; got {value!r}"
+    )
+
+
+def _read_cdd_reachability(task_id: str) -> "dict | None":
+    """Attempt to read the reachability block from the task's CDD card.
+
+    Looks for .atlas-ai/cdd/task-<id>.json (direct) or a combined card
+    whose hyphen-separated id-list contains the id (matching ship-check logic).
+    Returns the dict under the "reachability" key, or None if unavailable.
+    """
+    from pathlib import Path as _Path
+
+    cdd_dir = _Path(".atlas-ai") / "cdd"
+    if not cdd_dir.exists():
+        return None
+
+    tid_str = str(task_id)
+    # Direct card.
+    direct = cdd_dir / f"task-{tid_str}.json"
+    card_path = None
+    if direct.exists():
+        card_path = direct
+    else:
+        # Combined card fallback.
+        for card in cdd_dir.glob("task-*.json"):
+            stem = card.stem
+            if not stem.startswith("task-"):
+                continue
+            ids = stem[len("task-"):].split("-")
+            if tid_str in ids:
+                card_path = card
+                break
+
+    if card_path is None:
+        return None
+
     try:
-        emit(run_set_status(args.id, args.status, getattr(args, "tag", None)))
+        card = json.loads(card_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    reach = card.get("reachability")
+    return reach if isinstance(reach, dict) else None
+
+
+def cmd_set_status(args: argparse.Namespace) -> None:
+    # Parse --reachability flag (bare verdict string or JSON dict).
+    try:
+        reachability = _parse_reachability_arg(getattr(args, "reachability", None))
+    except CommandError as exc:
+        fail(exc.message, **exc.extra)
+        return
+
+    # Auto-read fallback: if marking done and --reachability not given, try the CDD card.
+    if reachability is None and args.status == "done":
+        # Only the parent task id matters for CDD card lookup.
+        parent_id = str(args.id).split(".")[0]
+        reachability = _read_cdd_reachability(parent_id)
+
+    evidence_ref = getattr(args, "evidence_ref", None)
+
+    try:
+        emit(
+            run_set_status(
+                args.id,
+                args.status,
+                getattr(args, "tag", None),
+                evidence_ref=evidence_ref,
+                reachability=reachability,
+            )
+        )
     except CommandError as exc:
         fail(exc.message, **exc.extra)

@@ -261,7 +261,7 @@ def shipcheck_panel(shipcheck: dict, *, ascii_mode: bool = False) -> str:
         lines.append(f"{sym} Gate {i}  {name:<26} {word}")
     lines.append("")
     if shipcheck.get("passed"):
-        token = "SHIP_CHECK_OK" + (" [OVERRIDE]" if shipcheck.get("override_active") else "")
+        token = "SHIP_CHECK_OK"
         lines.append(f"{ok} {token}")
     else:
         lines.append(f"{blocked} not shippable — {len(shipcheck.get('failures', []))} gate(s) failed")
@@ -284,10 +284,16 @@ def _gate_tokens(i: int) -> list[str]:
 def execute_panel(task_counts: dict, *, ascii_mode: bool = False) -> str:
     total = task_counts.get("total", 0)
     done = task_counts.get("done", 0)
+    scaffold = task_counts.get("scaffold", 0)
     g = bar(done, total or 1, ascii_mode=ascii_mode)
     running = _g("running", ascii_mode)
+    warn = _g("warn", ascii_mode)
     lines = [
         f"Progress  {g}  {done}/{total} tasks done",
+    ]
+    if scaffold:
+        lines.append(f"{warn} {scaffold} scaffolded (orphan — not wired, blocks ship gate)")
+    lines += [
         "",
         f"{running} executing — evidence required before a task counts done.",
     ]
