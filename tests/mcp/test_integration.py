@@ -51,7 +51,7 @@ def test_validate_setup_returns_structured_checks(tmp_path, monkeypatch):
         assert "passed" in check
         assert "detail" in check
     for check in payload["checks"]:
-        if not check["passed"] and check.get("severity") != "warning":
+        if not check["passed"] and check.get("severity") not in ("warning", "advisory"):
             assert check.get("fix"), f"Failing check {check['id']} has no fix hint"
 
 

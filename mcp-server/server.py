@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FastMCP server for prd-taskmaster.
 
-Registers 31 tools wrapping the sibling modules (pipeline, capabilities,
+Registers 32 tools wrapping the sibling modules (pipeline, capabilities,
 taskmaster, backend, validation, templates) plus server-native helpers
 (calc_tasks, backup_prd, append_workflow, debrief, log_progress,
 gen_test_tasks, read_state, gen_scripts, compute_fleet_waves, context_pack,
