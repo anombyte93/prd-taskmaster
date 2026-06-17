@@ -10,10 +10,14 @@ Coverage:
        recorded in reputation, slots STILL released.
   TC3. partial collect: one racer fails hash verification → only valid racers adjudicated;
        summary rejected non-empty.
-  TC4. release-on-crash: adjudicate_job (via _settle raising) → slots released in finally;
-       exception captured into summary (settled_ok=False), slots freed.
+  TC4. release-on-crash: _settle raises RuntimeError → run_tournament RETURNS (never raises),
+       summary settled_ok=False, settle_envelope_stage="orchestration_crashed", slots freed.
   TC5. status: after a run, cmd_tournament_status (via summarize_reputation) returns the
        recorded reputation.
+  TC8. zero racers collected → summary stage="no_racers_collected", settled_ok=False,
+       _settle NOT called, slots released.
+  TC9. slash data preserved → --enforce-slash settle envelope with non-empty applied.slashed
+       increments the slashed executor's slashed count in reputation.
 """
 
 from __future__ import annotations
@@ -327,23 +331,24 @@ def test_tc3_partial_collect_hash_mismatch(tmp_path):
 # ─── TC4: Release on crash ────────────────────────────────────────────────────
 
 def test_tc4_release_on_crash(tmp_path):
-    """TC4: _settle raises → slots still released (finally), settled_ok=False."""
+    """TC4: _settle raises → run_tournament RETURNS (never propagates), summary captures crash,
+    settle_envelope_stage="orchestration_crashed", settled_ok=False, slots freed.
+    """
     def _crashing_settle(*, job_dir, enforce_slash=False):
         raise RuntimeError("Simulated settle crash")
 
     kwargs = _run_args(tmp_path, settle_fn=_crashing_settle)
 
-    # run_tournament should NOT propagate the exception — it should catch it
-    # into the summary (settled_ok=False) and release slots in the finally.
-    # (If run_tournament lets it propagate, slots should STILL be released
-    # because of the finally block; in that case we catch it here.)
-    try:
-        summary = run_tournament(**kwargs)
-        # If it returns rather than raising, check settled_ok is False.
-        assert summary["settled_ok"] is False
-    except RuntimeError:
-        # Acceptable: exception propagated out; the finally must have still run.
-        pass
+    # run_tournament must NOT raise — it must return a summary with the crash captured.
+    summary = run_tournament(**kwargs)
+
+    assert summary["settled_ok"] is False, "settled_ok must be False on crash"
+    assert summary["settle_envelope_stage"] == "orchestration_crashed", (
+        f"stage must be 'orchestration_crashed'; got {summary.get('settle_envelope_stage')!r}"
+    )
+    assert "error" in summary, "summary must contain 'error' key on crash"
+    assert "Simulated settle crash" in summary["error"]
+    assert summary["reputation_recorded"] is False
 
     # The critical invariant: slots released.
     ops_path = Path(kwargs["operators_path"])
@@ -438,3 +443,82 @@ def test_tc7_summary_counts(tmp_path):
     assert summary["roster_size"] == 2
     assert summary["spawned"] == 2
     assert summary["collected"] == 2
+
+
+# ─── TC8: Zero racers collected → short-circuit ───────────────────────────────
+
+def test_tc8_zero_racers_collected(tmp_path):
+    """TC8: all racers rejected → stage=no_racers_collected, settle NOT called, slots released."""
+    settle_calls = []
+
+    def _never_settle(*, job_dir, enforce_slash=False):
+        settle_calls.append(True)
+        return {"ok": True, "stage": "done", "result": {}}
+
+    # inbox_read returns no commits → nobody commits → nobody collects.
+    def _empty_inbox(*, job_id):
+        return []  # no commits at all
+
+    kwargs = _run_args(tmp_path, settle_fn=_never_settle)
+    kwargs["_inbox_read"] = _empty_inbox
+
+    summary = run_tournament(**kwargs)
+
+    assert summary["settled_ok"] is False
+    assert summary["settle_envelope_stage"] == "no_racers_collected"
+    assert summary["collected"] == 0
+    assert len(settle_calls) == 0, "_settle must NOT be called when no racers collected"
+    assert summary["reputation_recorded"] is False
+
+    # Slots still released even though we short-circuited.
+    ops_path = Path(kwargs["operators_path"])
+    if ops_path.is_file():
+        ops = json.loads(ops_path.read_text())
+        active_entries = [
+            e for e in ops.get("entries", [])
+            if e.get("job_id") == JOB_ID and e.get("active", False)
+        ]
+        assert active_entries == [], f"Slots must be freed even on zero-racer path; active: {active_entries}"
+
+
+# ─── TC9: Slash data preserved to reputation ─────────────────────────────────
+
+def test_tc9_slash_data_preserved_to_reputation(tmp_path):
+    """TC9: settle envelope with applied.slashed non-empty → executor's slashed count increments."""
+    slashed_executor = "r1"  # this is the winner too — slash still counts
+
+    def _slash_settle(*, job_dir, enforce_slash=False):
+        return {
+            "ok": True,
+            "stage": "done",
+            "result": {
+                "winner": {"claimant": {"id": slashed_executor}},
+                "rankings": [
+                    {"claimant": {"id": slashed_executor}, "rank": 1},
+                    {"claimant": {"id": "r2"}, "rank": 2},
+                ],
+                "settledCost": 100,
+            },
+            "applied": {
+                # Real --enforce-slash shape: {addr, amount}
+                "slashed": [{"addr": slashed_executor, "amount": 50}],
+                "wouldSlash": [],
+            },
+        }
+
+    kwargs = _run_args(tmp_path, settle_fn=_slash_settle)
+    kwargs["enforce_slash"] = True
+
+    summary = run_tournament(**kwargs)
+
+    assert summary["settled_ok"] is True
+    assert summary["reputation_recorded"] is True
+
+    rep = summarize_reputation(kwargs["reputation_path"])
+
+    # The slashed executor must have slashed >= 1.
+    r1_coding = rep.get((slashed_executor, "coding"))
+    assert r1_coding is not None, f"{slashed_executor} must appear in reputation"
+    assert r1_coding["slashed"] >= 1, (
+        f"slashed executor {slashed_executor} must have slashed>=1; got {r1_coding['slashed']}"
+    )

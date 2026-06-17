@@ -209,118 +209,134 @@ def run_tournament(
 
     # ── Steps 2–7 inside try/finally (always release slots) ──────────────────
     try:
-        # ── Step 2: Spawn roster ─────────────────────────────────────────────
-        raw_handles = spawn_roster(roster, _spawn_fn=_spawn_fn)
+        # ── Orchestration body — NEVER propagates; any crash → summary ───────
+        try:
+            # ── Step 2: Spawn roster ─────────────────────────────────────────
+            raw_handles = spawn_roster(roster, _spawn_fn=_spawn_fn)
 
-        # Normalize spawn handles: collect_tournament requires
-        #   {claimant_id, session_name, worktree_path}
-        # spawn_roster emits {claimant_id, session_id, spawned, ...}
-        # The live launcher sets session_name=spec.claimant_id when calling
-        # session_spawn; we replicate that here as the orchestrator-side mapping.
-        normalized_handles: list[dict] = []
-        spawned_count = 0
-        for raw in raw_handles:
-            if not raw.get("spawned", False):
-                # Skip failed spawns — racer won't be in collect either.
-                continue
-            handle = dict(raw)
-            # Map session_name from session_id (or claimant_id as fallback).
-            if "session_name" not in handle:
-                handle["session_name"] = handle.get("session_id") or handle.get("claimant_id", "")
-            # worktree_path may be carried from the spawn response or from the spec.
-            if "worktree_path" not in handle:
-                handle["worktree_path"] = handle.get("worktree", "")
-            normalized_handles.append(handle)
-            spawned_count += 1
-        summary["spawned"] = spawned_count
+            # Normalize spawn handles: collect_tournament requires
+            #   {claimant_id, session_name, worktree_path}
+            # spawn_roster emits {claimant_id, session_id, spawned, ...}
+            # The live launcher sets session_name=spec.claimant_id when calling
+            # session_spawn; we replicate that here as the orchestrator-side mapping.
+            normalized_handles: list[dict] = []
+            spawned_count = 0
+            for raw in raw_handles:
+                if not raw.get("spawned", False):
+                    # Skip failed spawns — racer won't be in collect either.
+                    continue
+                handle = dict(raw)
+                # Map session_name from session_id (or claimant_id as fallback).
+                if "session_name" not in handle:
+                    handle["session_name"] = handle.get("session_id") or handle.get("claimant_id", "")
+                # worktree_path may be carried from the spawn response or from the spec.
+                if "worktree_path" not in handle:
+                    handle["worktree_path"] = handle.get("worktree", "")
+                normalized_handles.append(handle)
+                spawned_count += 1
+            summary["spawned"] = spawned_count
 
-        # ── Step 3: Collect (commit-reveal window) ───────────────────────────
-        # Only racers whose claimant_id appears in the normalized handles are
-        # collected; the roster drives the claimant_id index on the other side.
-        collect_kwargs: dict = dict(
-            job_id=job_id,
-            roster=roster,
-            handles=normalized_handles,
-            base_ref=base_ref,
-            orchestrator_session=orchestrator_session,
-            window_s=window_s,
-            _inbox_read=_inbox_read,
-            _dispatch_reveal=_dispatch_reveal,
-        )
-        if _compute_hash is not None:
-            collect_kwargs["_compute_hash"] = _compute_hash
-        if clock is not None:
-            collect_kwargs["clock"] = clock
+            # ── Step 3: Collect (commit-reveal window) ───────────────────────
+            # Only racers whose claimant_id appears in the normalized handles are
+            # collected; the roster drives the claimant_id index on the other side.
+            collect_kwargs: dict = dict(
+                job_id=job_id,
+                roster=roster,
+                handles=normalized_handles,
+                base_ref=base_ref,
+                orchestrator_session=orchestrator_session,
+                window_s=window_s,
+                _inbox_read=_inbox_read,
+                _dispatch_reveal=_dispatch_reveal,
+            )
+            if _compute_hash is not None:
+                collect_kwargs["_compute_hash"] = _compute_hash
+            if clock is not None:
+                collect_kwargs["clock"] = clock
 
-        collected = collect_tournament(**collect_kwargs)
-        summary["collected"] = len(collected.racers)
-        summary["rejected"] = list(collected.rejected)
+            collected = collect_tournament(**collect_kwargs)
+            summary["collected"] = len(collected.racers)
+            summary["rejected"] = list(collected.rejected)
 
-        # ── Step 4: Seed bank (optional, pre-settle escrow hook) ─────────────
-        if _seed_bank is not None:
-            job_meta = {
-                "jobId": job_id,
-                "cardId": card_id,
-                "bountyAmount": bounty_amount,
-                "jobPoster": job_poster,
-            }
-            _seed_bank(job_dir=job_dir, job=job_meta, racers=collected.racers)
+            # ── I2: Zero collected racers → short-circuit (no adjudicate/settle) ─
+            if not collected.racers:
+                summary["settle_envelope_stage"] = "no_racers_collected"
+                summary["settled_ok"] = False
+                return summary
 
-        # ── Step 5: Adjudicate (oracle + reachability gates) ─────────────────
-        # adjudicate_job is fail-closed per racer; writes submissions.json + job.json.
-        adjudicate_job(
-            job_dir=job_dir,
-            racers=collected.racers,
-            card_path=card_path,
-            held_root=held_root,
-            task_id=task_id,
-            start_commit=base_ref,
-            job_id=job_id,
-            card_id=card_id,
-            bounty_amount=bounty_amount,
-            job_poster=job_poster,
-        )
+            # ── Step 4: Seed bank (optional, pre-settle escrow hook) ─────────
+            if _seed_bank is not None:
+                job_meta = {
+                    "jobId": job_id,
+                    "cardId": card_id,
+                    "bountyAmount": bounty_amount,
+                    "jobPoster": job_poster,
+                }
+                _seed_bank(job_dir=job_dir, job=job_meta, racers=collected.racers)
 
-        # ── Step 6: Settle (FAIL-CLOSED on ok:false) ─────────────────────────
-        settle_env = _settle_fn(job_dir=job_dir, enforce_slash=enforce_slash)
+            # ── Step 5: Adjudicate (oracle + reachability gates) ─────────────
+            # adjudicate_job is fail-closed per racer; writes submissions.json + job.json.
+            adjudicate_job(
+                job_dir=job_dir,
+                racers=collected.racers,
+                card_path=card_path,
+                held_root=held_root,
+                task_id=task_id,
+                start_commit=base_ref,
+                job_id=job_id,
+                card_id=card_id,
+                bounty_amount=bounty_amount,
+                job_poster=job_poster,
+            )
 
-        settled_ok = settle_env.get("ok") is True
-        summary["settled_ok"] = settled_ok
-        summary["settle_envelope_stage"] = settle_env.get("stage")
+            # ── Step 6: Settle (FAIL-CLOSED on ok:false) ─────────────────────
+            settle_env = _settle_fn(job_dir=job_dir, enforce_slash=enforce_slash)
 
-        if not settled_ok:
-            # Fail-closed: no winner, no reputation update, slots released below.
-            return summary
+            settled_ok = settle_env.get("ok") is True
+            summary["settled_ok"] = settled_ok
+            summary["settle_envelope_stage"] = settle_env.get("stage")
 
-        # ── Step 7: Record reputation (TRUSTED result only) ──────────────────
-        # result comes from the TRUSTED settle output — never self-reported fields.
-        trusted_result = settle_env.get("result", {})
-        # Merge applied summary into result so _slashed_ids sees real-slash info.
-        applied = settle_env.get("applied", {})
-        if applied:
+            if not settled_ok:
+                # Fail-closed: no winner, no reputation update, slots released below.
+                return summary
+
+            # ── Step 7: Record reputation (TRUSTED result only) ──────────────
+            # result comes from the TRUSTED settle output — never self-reported.
+            trusted_result = settle_env.get("result", {})
+            # I3: ALWAYS merge applied into the result passed to record_tournament
+            # so _slashed_ids can see real-slash info whether applied is empty or not.
+            applied = settle_env.get("applied", {})
             merged_result = dict(trusted_result)
-            merged_result["applied"] = applied
-        else:
-            merged_result = trusted_result
+            merged_result["applied"] = applied if isinstance(applied, dict) else {}
 
-        record_tournament(
-            reputation_path=reputation_path,
-            result=merged_result,
-            task_class=task_class,
-            now=now,
-        )
-        summary["reputation_recorded"] = True
+            record_tournament(
+                reputation_path=reputation_path,
+                result=merged_result,
+                task_class=task_class,
+                now=now,
+            )
+            summary["reputation_recorded"] = True
 
-        # Extract the winner id from the trusted result for the summary.
-        winner = trusted_result.get("winner") if isinstance(trusted_result, dict) else None
-        if isinstance(winner, dict):
-            claimant = winner.get("claimant")
-            if isinstance(claimant, dict):
-                summary["winner"] = claimant.get("id")
+            # Extract the winner id from the trusted result for the summary.
+            winner = trusted_result.get("winner") if isinstance(trusted_result, dict) else None
+            if isinstance(winner, dict):
+                claimant = winner.get("claimant")
+                if isinstance(claimant, dict):
+                    summary["winner"] = claimant.get("id")
+
+        except Exception as exc:  # noqa: BLE001 — I1: never propagate
+            summary["settled_ok"] = False
+            summary["error"] = str(exc)
+            summary["settle_envelope_stage"] = "orchestration_crashed"
 
     finally:
         # ── Step 8: Release anti-sybil slots (ALWAYS, even on crash) ────────
-        antisybil.release(operators_path, job_id=job_id)
+        # B1: wrapped so a release failure never masks the original exception
+        # and never leaks slots (TTL sweep will free them if this raises).
+        try:
+            antisybil.release(operators_path, job_id=job_id)
+        except Exception:  # noqa: BLE001
+            pass  # never mask the original error; TTL sweep frees the slot later
 
     return summary
 
@@ -331,7 +347,8 @@ def run_tournament(
 def _emit(result: dict) -> None:
     """Emit the result as JSON to stdout and exit with the appropriate code."""
     print(json.dumps(result, indent=2, default=str))
-    sys.exit(0 if result.get("ok") is not False else 1)
+    # M2: exit 0 ONLY on explicit ok:True; anything else (False, missing) → 1.
+    sys.exit(0 if result.get("ok") is True else 1)
 
 
 def cmd_tournament_run(args: argparse.Namespace) -> None:
@@ -343,8 +360,16 @@ def cmd_tournament_run(args: argparse.Namespace) -> None:
 
     For production use, a skill/orchestrator wraps run_tournament with real
     session_spawn/inbox adapters. This CLI is the direct-invocation entry point.
+
+    Note: re-running the same job_id re-admits/re-records (no Python-side
+    idempotency guard; the TS settle CLI has a settled.json guard on its side).
     """
     models = [m.strip() for m in (args.models or "").split(",") if m.strip()]
+
+    # B2: guard against empty model list (would silently run a no-op tournament).
+    if not models:
+        _emit({"ok": False, "error": "--models is empty; provide at least one model string"})
+        return
 
     # Derive paths from args with sensible defaults.
     job_id: str = args.job_id
