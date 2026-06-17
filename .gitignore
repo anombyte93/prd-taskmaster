@@ -31,6 +31,9 @@ SHARING_TEMPLATES.md
 .taskmaster/
 .atlas-ai/
 
+# walkthrough RAG runlog store — local-only by owner decision (2026-06-17)
+.i-walkthroughs/
+
 # Logs
 logs
 *.log
