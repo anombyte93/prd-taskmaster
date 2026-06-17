@@ -19,6 +19,7 @@ from prd_taskmaster.feedback import HARNESS_CHOICES, cmd_feedback_add, cmd_feedb
 from prd_taskmaster.context_pack import build_context_pack
 from prd_taskmaster import fleet, parallel, task_state, tm_parallel
 from prd_taskmaster.reachability_cmd import cmd_reachability_sweep
+from prd_taskmaster.tournament.cmd import cmd_tournament_run, cmd_tournament_status
 
 
 def _backend_source() -> str:
@@ -355,6 +356,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Explicit repo root (defaults to the current working directory)",
     )
 
+    # tournament-run — run a full tournament job (spawn→collect→adjudicate→settle→reputation)
+    p = sub.add_parser(
+        "tournament-run",
+        help="Run a full tournament job: spawn racers, collect commit-reveals, adjudicate, settle, record reputation",
+    )
+    p.add_argument("--card", required=True, help="Path to CDD card JSON")
+    p.add_argument("--task", required=True, help="Task id (e.g. 7 or 1.2)")
+    p.add_argument("--base-ref", required=True, help="Fork-point git SHA all worktrees branch from")
+    p.add_argument("--models", required=True, help="Comma-separated model strings (e.g. claude:sonnet,claude:haiku)")
+    p.add_argument("--job-id", required=True, help="Unique tournament job identifier")
+    p.add_argument("--bounty", required=True, type=int, help="Bounty amount in coin units")
+    p.add_argument("--job-poster", required=True, help="Identity of the bounty poster")
+    p.add_argument("--window", type=float, default=120.0, help="Commit-reveal window in seconds (default 120)")
+    p.add_argument("--enforce-slash", action="store_true", help="Pass --enforce-slash to the settle CLI")
+    p.add_argument("--task-class", default="coding", help="Reputation bucket (default: coding)")
+
+    # tournament-status — read reputation snapshot + active operator count
+    p = sub.add_parser(
+        "tournament-status",
+        help="Show reputation snapshot and active operator slot count",
+    )
+    p.add_argument("--reputation-path", default=None, help="Path to reputation.jsonl (default: .atlas-ai/reputation.jsonl)")
+    p.add_argument("--operators-path", default=None, help="Path to operators.json (default: .atlas-ai/tournament/operators.json)")
+
     # status — render progress panels
     p = sub.add_parser("status", help="Render Atlas progress panels for the current phase")
     p.add_argument("--phase", default=None, help="Render a specific phase instead of the current one")
@@ -412,6 +437,8 @@ DISPATCH = {
     "claim-task": task_state.cmd_claim_task,
     "set-status": task_state.cmd_set_status,
     "reachability-sweep": cmd_reachability_sweep,
+    "tournament-run": cmd_tournament_run,
+    "tournament-status": cmd_tournament_status,
     "economy-report": cmd_economy_report,
     "context-pack": cmd_context_pack,
     "feedback-add": cmd_feedback_add,
