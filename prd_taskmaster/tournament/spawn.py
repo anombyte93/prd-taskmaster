@@ -212,8 +212,9 @@ def build_roster(
                 claimant_id=claimant_id,
                 now=now,
             )
-        except SybilLimitError:
-            # Release every claimant admitted so far in this roster call.
+        except Exception:  # noqa: BLE001 — broaden: release slots on ANY admit failure
+            # Release every claimant admitted so far in this roster call,
+            # then re-raise the original exception (SybilLimitError or other).
             for already in roster:
                 _release(
                     operators_path,

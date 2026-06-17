@@ -215,25 +215,41 @@ def _bounty_amount(result: dict) -> float:
 
     Looks at the common envelope shapes: result.bountyAmount / result.settledCost
     / result.summary.bountyAmount / winner.payout / winner.settledCost.
+
+    Fix 6/7: NaN and negative values are clamped to 0.0 so the snapshot never
+    contains a literal NaN token (invalid JSON for strict parsers) and cumulative
+    settled_cost is never corrupted by a negative bounty.
     """
+    def _safe_val(v) -> "float | None":
+        """Return float(v) only if finite and non-negative; else None (skip)."""
+        if v is None:
+            return None
+        fv = float(v)
+        if math.isfinite(fv) and fv >= 0:
+            return fv
+        return None  # NaN, Inf, or negative → skip
+
     if not isinstance(result, dict):
         return 0.0
     for key in ("settledCost", "bountyAmount", "settled_cost", "bounty_amount", "bounty"):
-        val = _as_number(result.get(key))
+        raw = _as_number(result.get(key))
+        val = _safe_val(raw)
         if val is not None:
-            return float(val)
+            return val
     summary = result.get("summary")
     if isinstance(summary, dict):
         for key in ("settledCost", "bountyAmount"):
-            val = _as_number(summary.get(key))
+            raw = _as_number(summary.get(key))
+            val = _safe_val(raw)
             if val is not None:
-                return float(val)
+                return val
     winner = result.get("winner")
     if isinstance(winner, dict):
         for key in ("payout", "settledCost", "bountyAmount"):
-            val = _as_number(winner.get(key))
+            raw = _as_number(winner.get(key))
+            val = _safe_val(raw)
             if val is not None:
-                return float(val)
+                return val
     return 0.0
 
 

@@ -424,6 +424,71 @@ class TestRosterRollback:
         assert len(release_stub.calls) == 0
 
 
+# ─── SP-FIX2: rollback on non-SybilLimitError (audit fix 2) ─────────────────
+
+class TestRosterRollbackNonSybilError:
+    """Audit fix 2: build_roster must roll back admitted slots on ANY _admit exception."""
+
+    def test_non_sybil_error_releases_prior_entries(self, tmp_path: Path) -> None:
+        """Fix 2 (I1): _admit raises OSError mid-roster → already-admitted claimants released."""
+
+        call_count = 0
+
+        def _admit_raises_oserror(operators_path, *, operator_id, job_id,
+                                   claimant_id, now, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise OSError("locked_update: file locked")
+            return {"entry_fee_paid": 1, "fakery_stake": 5}
+
+        release_stub = ReleaseRecorder()
+
+        with pytest.raises(OSError):
+            build_roster(
+                models=["claude:sonnet", "claude:haiku", "claude:opus"],
+                job_id=JOB_ID,
+                task_prompt=TASK_PROMPT,
+                card_ref=CARD_REF,
+                base_ref=BASE_REF,
+                operators_path=tmp_path / "ops.json",
+                now=NOW,
+                _admit=_admit_raises_oserror,
+                _release=release_stub,
+            )
+
+        # Exactly 1 claimant was admitted before the crash; it must be released.
+        released_ids = {c["claimant_id"] for c in release_stub.calls}
+        assert f"{JOB_ID}:0:claude:sonnet" in released_ids, (
+            "The first admitted claimant must be released on non-SybilLimitError"
+        )
+        # The failing and subsequent ones were never admitted.
+        assert f"{JOB_ID}:1:claude:haiku" not in released_ids
+        assert f"{JOB_ID}:2:claude:opus" not in released_ids
+
+    def test_non_sybil_error_re_raised_after_rollback(self, tmp_path: Path) -> None:
+        """Fix 2: the original non-SybilLimitError is re-raised after rollback."""
+
+        def _admit_raises_type_error(operators_path, *, operator_id, job_id,
+                                      claimant_id, now, **kwargs):
+            raise TypeError("unexpected type in admit")
+
+        release_stub = ReleaseRecorder()
+
+        with pytest.raises(TypeError, match="unexpected type"):
+            build_roster(
+                models=["claude:sonnet"],
+                job_id=JOB_ID,
+                task_prompt=TASK_PROMPT,
+                card_ref=CARD_REF,
+                base_ref=BASE_REF,
+                operators_path=tmp_path / "ops.json",
+                now=NOW,
+                _admit=_admit_raises_type_error,
+                _release=release_stub,
+            )
+
+
 # ─── SP10: operator_id derivation ─────────────────────────────────────────────
 
 class TestOperatorIdDerivation:

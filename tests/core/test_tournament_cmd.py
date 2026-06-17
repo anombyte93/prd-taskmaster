@@ -522,3 +522,62 @@ def test_tc9_slash_data_preserved_to_reputation(tmp_path):
     assert r1_coding["slashed"] >= 1, (
         f"slashed executor {slashed_executor} must have slashed>=1; got {r1_coding['slashed']}"
     )
+
+
+# ─── Fix 8: reputation_recorded only True when there is a real winner ─────────
+
+def test_fix8_reputation_recorded_false_when_no_winner(tmp_path):
+    """Fix 8: reputation_recorded=False when settle ok:true but result has no winner."""
+    def _settle_no_winner(*, job_dir, enforce_slash=False):
+        return {
+            "ok": True,
+            "stage": "done",
+            # result has rankings but NO winner (null winner)
+            "result": {
+                "winner": None,
+                "rankings": [
+                    {"claimant": {"id": "r1"}, "rank": 1},
+                ],
+                "settledCost": 0,
+            },
+            "applied": {"slashed": [], "wouldSlash": []},
+        }
+
+    kwargs = _run_args(tmp_path, settle_fn=_settle_no_winner)
+    summary = run_tournament(**kwargs)
+
+    assert summary["settled_ok"] is True
+    assert summary["winner"] is None
+    # Fix 8: reputation_recorded must be False when there is no winner
+    assert summary["reputation_recorded"] is False, (
+        "reputation_recorded must be False when the settle result has no winner"
+    )
+
+
+# ─── Fix 9: settle_envelope_stage defaults to 'settle_failed' on ok:false ────
+
+def test_fix9_settle_envelope_stage_defaults_on_ok_false_no_stage(tmp_path):
+    """Fix 9: ok:false settle with no 'stage' field → stage defaults to 'settle_failed'."""
+    def _settle_no_stage(*, job_dir, enforce_slash=False):
+        # ok:false with no 'stage' key at all
+        return {"ok": False, "error": "something went wrong"}
+
+    kwargs = _run_args(tmp_path, settle_fn=_settle_no_stage)
+    summary = run_tournament(**kwargs)
+
+    assert summary["settled_ok"] is False
+    assert summary["settle_envelope_stage"] == "settle_failed", (
+        f"Expected 'settle_failed' default; got {summary['settle_envelope_stage']!r}"
+    )
+
+
+def test_fix9_settle_envelope_stage_uses_real_stage_when_present(tmp_path):
+    """Fix 9: when ok:false carries a real 'stage', it is used (not overridden)."""
+    def _settle_with_stage(*, job_dir, enforce_slash=False):
+        return {"ok": False, "stage": "apply_settlement", "error": "slash threshold not met"}
+
+    kwargs = _run_args(tmp_path, settle_fn=_settle_with_stage)
+    summary = run_tournament(**kwargs)
+
+    assert summary["settled_ok"] is False
+    assert summary["settle_envelope_stage"] == "apply_settlement"

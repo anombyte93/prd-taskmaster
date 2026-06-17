@@ -447,3 +447,67 @@ def test_route_falls_back_when_reference_router_errors(tmp_path):
     )
     assert out["base_route"] is None
     assert out["chosen"] in ("a", "b")
+
+
+# ---------------------------------------------------------------------------
+# Fix 6/7: _bounty_amount — NaN and negative values are clamped to 0.0
+# ---------------------------------------------------------------------------
+
+def test_nan_settled_cost_not_recorded_in_snapshot(tmp_path):
+    """Fix 6: NaN settledCost in the result must fold to 0.0 (not serialized as NaN token)."""
+    path = _rep_path(tmp_path)
+    import math as _math
+
+    # Use a result with NaN settledCost
+    result = {
+        "rankings": [{"claimant": {"id": "exec-a"}, "rank": 1}],
+        "winner": {"claimant": {"id": "exec-a"}},
+        "settledCost": float("nan"),
+    }
+    record_tournament(
+        reputation_path=path,
+        result=result,
+        task_class="coding",
+        now="2026-06-17T01:00:00+00:00",
+    )
+
+    # The snapshot must be valid JSON (no literal NaN token).
+    snapshot_path = path.with_suffix(".json")
+    assert snapshot_path.is_file()
+    raw = snapshot_path.read_text()
+    parsed = json.loads(raw)  # must not raise — NaN would break strict parsers
+
+    # settled_cost must be 0.0 (clamped), not NaN.
+    rep = summarize_reputation(path)
+    entry = rep.get(("exec-a", "coding"))
+    assert entry is not None
+    assert _math.isfinite(entry["settled_cost"]), (
+        f"settled_cost must be finite (not NaN); got {entry['settled_cost']}"
+    )
+    assert entry["settled_cost"] == 0.0, (
+        f"NaN settledCost must be clamped to 0.0; got {entry['settled_cost']}"
+    )
+
+
+def test_negative_settled_cost_clamped_to_zero(tmp_path):
+    """Fix 7: negative settledCost must be clamped to 0.0 (never corrupts cumulative cost)."""
+    path = _rep_path(tmp_path)
+
+    result = {
+        "rankings": [{"claimant": {"id": "exec-b"}, "rank": 1}],
+        "winner": {"claimant": {"id": "exec-b"}},
+        "settledCost": -100,
+    }
+    record_tournament(
+        reputation_path=path,
+        result=result,
+        task_class="coding",
+        now="2026-06-17T01:00:00+00:00",
+    )
+
+    rep = summarize_reputation(path)
+    entry = rep.get(("exec-b", "coding"))
+    assert entry is not None
+    assert entry["settled_cost"] == 0.0, (
+        f"Negative settledCost must be clamped to 0.0; got {entry['settled_cost']}"
+    )

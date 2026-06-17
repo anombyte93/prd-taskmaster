@@ -94,6 +94,11 @@ def sweep_expired(state: dict, now: str) -> dict:
     except (ValueError, TypeError):
         return state
 
+    # Normalize now_dt to tz-aware (UTC) so comparisons with tz-aware entries
+    # never raise TypeError: can't compare offset-naive and offset-aware datetimes.
+    if now_dt.tzinfo is None:
+        now_dt = now_dt.replace(tzinfo=timezone.utc)
+
     for entry in state.get("entries", []):
         if not entry.get("active", False):
             continue
@@ -104,6 +109,9 @@ def sweep_expired(state: dict, now: str) -> dict:
             exp_dt = datetime.fromisoformat(expires_at)
         except (ValueError, TypeError):
             continue
+        # Normalize exp_dt to tz-aware (UTC) for a safe comparison.
+        if exp_dt.tzinfo is None:
+            exp_dt = exp_dt.replace(tzinfo=timezone.utc)
         if exp_dt <= now_dt:
             entry["active"] = False
 

@@ -97,6 +97,11 @@ def adjudicate_submission(
             claimant_id, commit_sha, worktree_path,
             self_reported_exit, commit_hash, revealed_at,
             entry_fee_paid, fakery_stake
+
+        REQUIRED (will raise KeyError if absent): claimant_id, commit_sha,
+        worktree_path.  adjudicate_submission is only fail-closed via the
+        wrapping adjudicate_job; callers that bypass the wrapper must ensure
+        the racer dict is fully formed or catch KeyError themselves.
     card_path:
         Path to the CDD card JSON (shared across all racers in a job).
     held_root:
@@ -142,8 +147,8 @@ def adjudicate_submission(
             ledger_dir=ledger_dir,
             oracle_cmd=oracle_cmd,
         )
-    except OracleCardError as exc:
-        # Bad card: fail-closed — FAIL for this submission, never raise.
+    except Exception as exc:  # noqa: BLE001 — Fix 4: broaden to catch any _grade failure
+        # Bad card or unexpected error: fail-closed — FAIL for this submission, never raise.
         oracle_verdict = "FAIL"
         oracle_detail = {"error": str(exc)}
 
@@ -246,7 +251,11 @@ def adjudicate_job(
                 "commitSha": str(commit_sha),
                 "selfReportedExit": None,
                 "oracle": {
-                    "verdict": "ERROR",
+                    # Fix 3: use the in-contract "FAIL" value (not "ERROR") so
+                    # the TS Submission type union is satisfied.  The diagnostic
+                    # lives in oracle.error; the outer reachability still carries
+                    # "ERROR" (that field's union does include ERROR).
+                    "verdict": "FAIL",
                     "exitCode": None,
                     "evidenceRef": "",
                     "sandboxImageDigest": "",

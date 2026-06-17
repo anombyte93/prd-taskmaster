@@ -449,9 +449,11 @@ def test_adjudicate_job_malformed_racer_fail_closed(tmp_path):
     # Both entries present
     assert len(submissions) == 2
 
-    # The ERROR (fail-closed) submission for the malformed racer
+    # The fail-closed submission for the malformed racer.
+    # oracle.verdict must be "FAIL" (in-contract; the TS type union is "PASS"|"FAIL").
+    # reachability.verdict carries "ERROR" (that union does include ERROR).
     err_sub = submissions[0]
-    assert err_sub["oracle"]["verdict"] == "ERROR"
+    assert err_sub["oracle"]["verdict"] == "FAIL"
     assert err_sub["reachability"]["verdict"] == "ERROR"
     assert "error" in err_sub["oracle"]
 
@@ -568,3 +570,77 @@ def test_adjudicate_submission_claimant_id_path_sanitized(tmp_path):
     )
     # And it must not contain the literal traversal sequence
     assert ".." not in str(evidence_dir), f".. still in path: {evidence_dir}"
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: fail-closed adjudicate_job ERROR submission → oracle.verdict == "FAIL"
+# ---------------------------------------------------------------------------
+
+def test_adjudicate_job_fail_closed_oracle_verdict_is_fail(tmp_path):
+    """Fix 3: fail-closed ERROR submission from adjudicate_job must set
+    oracle.verdict='FAIL' (in-contract), NOT 'ERROR' (out-of-union).
+    reachability.verdict remains 'ERROR' (that union includes ERROR).
+    """
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+
+    # Malformed racer forces adjudicate_job's except branch.
+    malformed = {}  # missing claimant_id, commit_sha, worktree_path
+
+    submissions = adjudicate_job(
+        job_dir=job_dir,
+        racers=[malformed],
+        card_path=tmp_path / "card.json",
+        held_root=tmp_path / "held",
+        task_id="1",
+        start_commit="start123",
+        job_id="job-fail-closed",
+        card_id="card-1",
+        bounty_amount=0,
+        job_poster="poster",
+        _grade=_stub_grade_pass,
+        _sweep=_stub_sweep_wired,
+    )
+
+    assert len(submissions) == 1
+    sub = submissions[0]
+    # The key assertion: oracle.verdict must be the in-contract "FAIL"
+    assert sub["oracle"]["verdict"] == "FAIL", (
+        f"oracle.verdict should be 'FAIL' (in-contract); got {sub['oracle']['verdict']!r}"
+    )
+    assert sub["reachability"]["verdict"] == "ERROR"
+    assert "error" in sub["oracle"]
+
+
+# ---------------------------------------------------------------------------
+# Fix 4: unexpected _grade failure → fail-closed FAIL (not crash)
+# ---------------------------------------------------------------------------
+
+def test_adjudicate_submission_unexpected_grade_failure_fail_closed(tmp_path):
+    """Fix 4: a _grade raising TypeError (not OracleCardError) must be caught,
+    set oracle.verdict='FAIL' and oracle.error, not propagate.
+    """
+    def _grade_raises_type_error(*, card_path, repo_path, commit_sha, held_root,
+                                  evidence_dir, ledger_dir, oracle_cmd=None):
+        raise TypeError("unexpected type in grade_card")
+
+    racer = _make_racer()
+    sub = adjudicate_submission(
+        racer,
+        card_path=tmp_path / "card.json",
+        held_root=tmp_path / "held",
+        job_dir=tmp_path / "job",
+        task_id="1",
+        start_commit="start123",
+        _grade=_grade_raises_type_error,
+        _sweep=_stub_sweep_wired,
+    )
+
+    assert sub["oracle"]["verdict"] == "FAIL", (
+        f"Unexpected _grade error must degrade to FAIL; got {sub['oracle']['verdict']!r}"
+    )
+    assert "error" in sub["oracle"]
+    assert "TypeError" in sub["oracle"]["error"] or "unexpected type" in sub["oracle"]["error"]
+    # Submission is otherwise complete (no crash).
+    assert sub["claimant"]["id"] == "racer-1"
+    assert sub["reachability"]["verdict"] == "WIRED"

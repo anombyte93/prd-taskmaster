@@ -47,7 +47,7 @@ from prd_taskmaster.tournament.collect import (
     FakeClock,
 )
 from prd_taskmaster.tournament.adjudicate import adjudicate_job, settle_job
-from prd_taskmaster.reputation import record_tournament, summarize_reputation
+from prd_taskmaster.reputation import record_tournament, summarize_reputation, _winner_id
 
 
 # ─── Core orchestration function ─────────────────────────────────────────────
@@ -294,7 +294,12 @@ def run_tournament(
 
             settled_ok = settle_env.get("ok") is True
             summary["settled_ok"] = settled_ok
-            summary["settle_envelope_stage"] = settle_env.get("stage")
+            # Fix 9: default stage to 'settle_failed' on ok:false with missing stage field
+            # so the caller can distinguish "never reached settle" from "settle returned failure".
+            if settled_ok:
+                summary["settle_envelope_stage"] = settle_env.get("stage")
+            else:
+                summary["settle_envelope_stage"] = settle_env.get("stage") or "settle_failed"
 
             if not settled_ok:
                 # Fail-closed: no winner, no reputation update, slots released below.
@@ -315,7 +320,10 @@ def run_tournament(
                 task_class=task_class,
                 now=now,
             )
-            summary["reputation_recorded"] = True
+            # Fix 8: only set reputation_recorded=True when there is a real winner
+            # (or participants); a settle with an empty/winner-less result that folds
+            # zero rows is not "recorded" in any meaningful sense.
+            summary["reputation_recorded"] = _winner_id(merged_result) is not None
 
             # Extract the winner id from the trusted result for the summary.
             winner = trusted_result.get("winner") if isinstance(trusted_result, dict) else None

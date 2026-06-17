@@ -531,6 +531,76 @@ class TestConcurrencyAtomicity:
         )
 
 
+# ─── AS-FIX1: sweep_expired tz-normalization (audit fix 1) ──────────────────
+
+class TestSweepExpiredTzNormalization:
+    """Verify sweep_expired never crashes on tz-naive/tz-aware mismatch."""
+
+    def test_naive_expires_at_with_aware_now_sweeps_without_crash(self) -> None:
+        """Fix 1: tz-naive expires_at + tz-aware now must not raise TypeError."""
+        from datetime import timezone
+        # expires_at is naive (no tzinfo)
+        state = {
+            "entries": [
+                {
+                    "operator_id": "claude:sonnet",
+                    "job_id": "job-naive",
+                    "claimant_id": "c1",
+                    "active": True,
+                    "expires_at": "2020-01-01T00:00:00",  # naive — already in the past
+                },
+            ]
+        }
+        # now is tz-aware (UTC)
+        now_aware = "2026-06-17T00:00:00+00:00"
+        # Must NOT raise TypeError
+        result = sweep_expired(state, now_aware)
+        # The entry is in the past → must be deactivated
+        assert result["entries"][0]["active"] is False, (
+            "tz-naive expires_at in the past should be swept when now is tz-aware"
+        )
+
+    def test_aware_expires_at_with_naive_now_sweeps_without_crash(self) -> None:
+        """Fix 1: tz-aware expires_at + tz-naive now must not raise TypeError."""
+        # expires_at is tz-aware UTC, now is naive
+        state = {
+            "entries": [
+                {
+                    "operator_id": "claude:haiku",
+                    "job_id": "job-aware-exp",
+                    "claimant_id": "c2",
+                    "active": True,
+                    "expires_at": "2020-01-01T00:00:00+00:00",  # tz-aware past
+                },
+            ]
+        }
+        # now is naive
+        now_naive = "2026-06-17T00:00:00"
+        result = sweep_expired(state, now_naive)
+        assert result["entries"][0]["active"] is False, (
+            "tz-aware expires_at in the past should be swept when now is tz-naive"
+        )
+
+    def test_naive_future_expires_at_with_aware_now_stays_active(self) -> None:
+        """Fix 1: tz-naive expires_at in the future stays active (no crash)."""
+        state = {
+            "entries": [
+                {
+                    "operator_id": "claude:opus",
+                    "job_id": "job-future-naive",
+                    "claimant_id": "c3",
+                    "active": True,
+                    "expires_at": "2099-01-01T00:00:00",  # naive future
+                },
+            ]
+        }
+        now_aware = "2026-06-17T00:00:00+00:00"
+        result = sweep_expired(state, now_aware)
+        assert result["entries"][0]["active"] is True, (
+            "tz-naive future expires_at should remain active"
+        )
+
+
 # ─── SybilLimitError typing ───────────────────────────────────────────────────
 
 class TestSybilLimitError:
