@@ -14,6 +14,7 @@ from prd_taskmaster.lib import (
     emit,
     fail,
     _resolve_tasks_payload,
+    _current_taskmaster_tag,
 )
 
 
@@ -121,6 +122,34 @@ _RESEARCH_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
+# Tier-specific regexes — stem-matching (prefix \b, no trailing \b) so that
+# "integrate", "investigate", "evaluate" etc. are caught by their root stems.
+# These are intentionally separate from _RESEARCH_KEYWORDS / _COMPLEX_KEYWORDS
+# (which use \b…\b exact-word matching and must not be changed).
+#
+# _TIER_RESEARCH_RE: overlaps with _RESEARCH_KEYWORDS but uses prefix \b so
+# "investigate", "evaluate", "analyze" are reliably caught.
+_TIER_RESEARCH_RE = re.compile(
+    r'\b(research|investigat|analyz|explor|evaluat|discover|'
+    r'benchmark|audit|spike|poc|proof.of.concept)',
+    re.IGNORECASE,
+)
+
+# _WIRED_KEYWORDS: integration / API / CLI signals that require reachability.
+# Anchored carefully to avoid false-positives:
+#   cli     — \bcli(?!ent|mat|nic) excludes client/climate/clinic/clinical
+#   auth    — authenticat|authoriz|\bauth\b excludes author/authority/authentic
+#   wire    — wire(?!frame|less) excludes wireframe/wireless
+# Other stems (integrat, webhook, deploy, pipeline, api, endpoint, route,
+# connect, mcp, database, migration) retain prefix \b; no trailing collisions
+# identified for these.
+_WIRED_KEYWORDS = re.compile(
+    r'(\bintegrat|\bauthenticat|\bauthoriz|\bauth\b|\bwebhook|\bdeploy|'
+    r'\bpipeline|\bapi\b|\bendpoint|\broute|\bwire(?!frame|less)|\bconnect|'
+    r'\bcli(?!ent|mat|nic)|\bmcp\b|\bdatabase|\bmigration)',
+    re.IGNORECASE,
+)
+
 # Lifecycle phase assignments by complexity
 _LIFECYCLE_MAP = {
     "SIMPLE": ["implementation", "testing"],
@@ -129,6 +158,46 @@ _LIFECYCLE_MAP = {
     "RESEARCH": ["research", "planning", "review"],
     "VALIDATION": ["testing", "review"],
 }
+
+
+def _classify_tier(task: dict) -> str:
+    """Deterministically assign an altitude tier from keyword signals.
+
+    Mapping (in priority order):
+      VALIDATION / "user-test" / "user validation checkpoint" → live
+      RESEARCH keywords                                       → spike
+      WIRED keywords (integration signals)                   → wired
+      else                                                   → domain-model  (safe default)
+
+    The default (domain-model) means existing task graphs that have no
+    integration/research/validation signal will NOT require reachability
+    evidence when the reachability gate is enforced later.
+    """
+    title = task.get("title", "") or task.get("name", "") or ""
+    description = task.get("description", "") or ""
+    details = task.get("details", "") or ""
+    # Strip RESEARCH NOTES appended by the parallel enrichment pass — those
+    # notes should not influence tier any more than they influence complexity.
+    classification_details = re.split(
+        r'\n\s*RESEARCH NOTES\s*\(parallel pass\):',
+        details,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+
+    combined = f"{title} {description} {classification_details}".lower()
+
+    # Priority 1: user-visible / validation work → live
+    if "user-test" in combined or "user validation checkpoint" in title.lower():
+        return "live"
+    # Priority 2: research/spike work → spike
+    if _TIER_RESEARCH_RE.search(combined):
+        return "spike"
+    # Priority 3: integration/wiring signals → wired
+    if _WIRED_KEYWORDS.search(combined):
+        return "wired"
+    # Default: pure logic / domain work → domain-model
+    return "domain-model"
 
 
 def _classify_task(task: dict) -> dict:
@@ -168,6 +237,7 @@ def _classify_task(task: dict) -> dict:
 
     return {
         "complexity": complexity,
+        "tier": _classify_tier(task),
         "requiresCDD": requires_cdd,
         "requiresResearch": requires_research,
         "lifecycle": _LIFECYCLE_MAP[complexity],
@@ -225,7 +295,7 @@ def _generate_acceptance_criteria(task: dict, complexity: str) -> list:
     return criteria
 
 
-def run_enrich_tasks(input_path: str | None) -> dict:
+def run_enrich_tasks(input_path: str | None, tag: str | None = None) -> dict:
     """Enrich tasks.json with phaseConfig metadata.
 
     Classifies each task's complexity (SIMPLE/MEDIUM/COMPLEX/RESEARCH/VALIDATION),
@@ -234,6 +304,10 @@ def run_enrich_tasks(input_path: str | None) -> dict:
 
     This is intentionally a direct write — TaskMaster CLI cannot inject structured
     JSON metadata, so we own the enrichment as a post-parse step.
+
+    Honors the active TaskMaster tag (explicit ``tag`` arg, else ``state.json``
+    ``currentTag``) so the enrichment lands on the active tag's tasks rather than
+    a stale legacy flat ``tasks`` key (BUG2).
     """
     tasks_path = Path(input_path) if input_path else TASKMASTER_TASKS / "tasks.json"
     if not tasks_path.is_file():
@@ -246,7 +320,7 @@ def run_enrich_tasks(input_path: str | None) -> dict:
         raise CommandError(f"Failed to parse {tasks_path}: {e}")
 
     # Support {tasks: [...]}, tagged {"master": {"tasks": [...]}}, and bare list formats.
-    tasks, wrapper = _resolve_tasks_payload(raw)
+    tasks, wrapper = _resolve_tasks_payload(raw, tag=tag)
     if not isinstance(tasks, list):
         raise CommandError(
             "tasks.json must be a list, a flat object with a 'tasks' list, or a tagged TaskMaster object",
@@ -258,8 +332,15 @@ def run_enrich_tasks(input_path: str | None) -> dict:
         if not isinstance(task, dict):
             continue
 
-        # Skip if already enriched (idempotent)
         if "phaseConfig" in task:
+            # Idempotent back-fill: if an older enrich run wrote phaseConfig but
+            # did not include tier (pre-tier-feature), add it now rather than
+            # skipping the whole task.  An explicit non-empty tier already present
+            # is left untouched (honours LLM-set or manually-set values).
+            pc = task["phaseConfig"]
+            if not pc.get("tier"):
+                pc["tier"] = _classify_tier(task)
+                enriched_count += 1
             continue
 
         phase_config = _classify_task(task)
@@ -279,6 +360,7 @@ def run_enrich_tasks(input_path: str | None) -> dict:
     return {
         "ok": True,
         "tasks_path": str(tasks_path),
+        "tag": tag or _current_taskmaster_tag(),
         "total_tasks": len(tasks),
         "enriched": enriched_count,
         "already_enriched": len(tasks) - enriched_count,
@@ -287,6 +369,137 @@ def run_enrich_tasks(input_path: str | None) -> dict:
 
 def cmd_enrich_tasks(args: argparse.Namespace) -> None:
     try:
-        emit(run_enrich_tasks(args.input))
+        emit(run_enrich_tasks(args.input, tag=getattr(args, "tag", None)))
+    except CommandError as e:
+        fail(e.message, **e.extra)
+
+
+# Canonical, domain-neutral checkpoint verbs per lifecycle phase. Used by the
+# structural (zero-AI) expansion fallback so every task still gets verifiable
+# subtasks when no LLM/CLI provider is reachable — giving the GENERATE-phase
+# claim "structural decomposition alone is valuable" real code behind it.
+_PHASE_CHECKPOINT = {
+    "research": "Research and document findings for",
+    "planning": "Plan the approach for",
+    "implementation": "Implement",
+    "testing": "Write and run verification for",
+    "review": "Review and finalize",
+}
+
+_BULLET_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*\S)\s*$")
+
+
+def _structural_subtasks(task: dict, min_subtasks: int = 2) -> list:
+    """Deterministically decompose a task into subtasks with NO AI/network.
+
+    Tries, in order:
+      1. Bullet / numbered lines in the task's ``details`` (the author's own
+         breakdown), trimmed and de-duplicated.
+      2. Canonical lifecycle-phase checkpoints derived from the task's
+         complexity classification.
+
+    Always returns at least ``min_subtasks`` subtasks so the GENERATE gate
+    ("every task has >= 2 subtasks") is satisfiable fully offline.
+    """
+    title = (task.get("title") or task.get("name") or "task").strip()
+
+    # 1. Author-provided breakdown from details bullets/numbered lines.
+    titles: list[str] = []
+    seen = set()
+    for line in (task.get("details") or "").splitlines():
+        m = _BULLET_RE.match(line)
+        if not m:
+            continue
+        text = m.group(1).strip()
+        key = text.lower()
+        if text and key not in seen:
+            seen.add(key)
+            titles.append(text)
+
+    # 2. Fall back to lifecycle checkpoints when there aren't enough bullets.
+    if len(titles) < min_subtasks:
+        complexity = _classify_task(task)["complexity"]
+        phases = _LIFECYCLE_MAP.get(complexity, ["implementation", "testing"])
+        titles = [f"{_PHASE_CHECKPOINT[p]} {title}" for p in phases]
+
+    subtasks = []
+    for idx, st_title in enumerate(titles, start=1):
+        subtasks.append({
+            "id": idx,
+            "title": st_title,
+            "description": f"Structural checkpoint for: {title}",
+            "status": "pending",
+            "dependencies": [idx - 1] if idx > 1 else [],
+        })
+    return subtasks
+
+
+def run_expand_structural(
+    input_path: str | None = None, tag: str | None = None, min_subtasks: int = 2
+) -> dict:
+    """Zero-AI structural expansion: give every under-decomposed task subtasks.
+
+    This is the deterministic fallback for when no LLM/CLI provider is reachable
+    (no API key, headless, offline). Unlike the native/agent expand paths it
+    never calls a model — it splits each task from its own text so the task
+    graph still has verifiable checkpoints. Idempotent: tasks that already have
+    >= ``min_subtasks`` subtasks are left untouched.
+
+    Honors the active TaskMaster tag, mirroring ``run_enrich_tasks``.
+    """
+    tasks_path = Path(input_path) if input_path else TASKMASTER_TASKS / "tasks.json"
+    if not tasks_path.is_file():
+        raise CommandError(f"tasks.json not found: {tasks_path}")
+    try:
+        with open(tasks_path) as f:
+            raw = json.load(f)
+    except json.JSONDecodeError as e:
+        raise CommandError(f"Failed to parse {tasks_path}: {e}")
+
+    tasks, wrapper = _resolve_tasks_payload(raw, tag=tag)
+    if not isinstance(tasks, list):
+        raise CommandError(
+            "tasks.json must be a list, a flat object with a 'tasks' list, "
+            "or a tagged TaskMaster object",
+            {"tasks_path": str(tasks_path)},
+        )
+
+    expanded = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        existing = task.get("subtasks") or []
+        if len(existing) >= min_subtasks:
+            continue
+        task["subtasks"] = _structural_subtasks(task, min_subtasks=min_subtasks)
+        expanded.append(task.get("id"))
+
+    tmp_path = tasks_path.with_suffix(".json.tmp")
+    try:
+        tmp_path.write_text(json.dumps(wrapper, indent=2, default=str))
+        tmp_path.replace(tasks_path)
+    except Exception as e:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise CommandError(f"Failed to write {tasks_path}: {e}")
+
+    return {
+        "ok": True,
+        "tasks_path": str(tasks_path),
+        "tag": tag or _current_taskmaster_tag(),
+        "method": "structural",
+        "total_tasks": len(tasks),
+        "expanded": expanded,
+        "expanded_count": len(expanded),
+    }
+
+
+def cmd_expand_structural(args: argparse.Namespace) -> None:
+    try:
+        emit(run_expand_structural(
+            getattr(args, "input", None),
+            tag=getattr(args, "tag", None),
+            min_subtasks=getattr(args, "min_subtasks", 2),
+        ))
     except CommandError as e:
         fail(e.message, **e.extra)

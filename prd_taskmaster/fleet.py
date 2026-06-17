@@ -45,10 +45,32 @@ DEFAULT_FLEET_CONFIG = {
     "routing": DEFAULT_ROUTING,
     "experimental_backends": False,
     "token_economy": "balanced",
-    "backend": "auto",
+    "backend": "native",
 }
 
-BACKEND_CHOICES = {"auto", "taskmaster", "native"}
+# The native engine is the sole generator; "auto" is still ACCEPTED by
+# get_backend() (it resolves to native), but it is no longer the emitted default
+# and the removed "taskmaster" value is no longer a valid persisted choice.
+BACKEND_CHOICES = {"native"}
+
+# ─── Atlas hybrid provider: engine config block (Chunk 1) ─────────────────────
+PROVIDER_MODE_CHOICES = {"hybrid", "api_only", "cli_only", "plan_only"}
+STRUCTURED_JSON_CHOICES = {"auto", "schema", "prompt"}
+
+DEFAULT_ENGINE_CONFIG = {
+    "provider_mode": "hybrid",        # hybrid | api_only | cli_only | plan_only
+    "keyless_default": None,          # null until wizard asks; True=CLI-first, False=key-first
+    "cli_agent": {
+        "structured_json": "auto",    # auto | schema | prompt
+        "probe_cache_ttl_s": 900,
+        "per_call_timeout_s": 180,
+        "max_inflight": None,         # null -> inherit max_concurrency
+    },
+    "concurrency": {
+        "structured_gen": None,       # null -> inherit max_concurrency
+        "ram_aware": False,           # reserved for sub-project #2
+    },
+}
 
 
 ATLAS_CONFIG_PATH = Path(".atlas-ai") / "config" / "atlas.json"
@@ -72,6 +94,105 @@ def _atlas_config_economy() -> str | None:
     return val if isinstance(val, str) else None
 
 
+def _is_pos_int(value):
+    """True for a real positive int, excluding bool (bool subclasses int)."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def engine_config(cfg=None):
+    """Merged `engine` block with all defaults applied (Chunk 1).
+
+    Accepts a raw fleet.json dict OR the output of `load_fleet_config` (both
+    carry an `engine` key after this change). Returns a fresh dict every call.
+    Malformed values fall back silently, exactly like `load_fleet_config`.
+    """
+    eng = {
+        "provider_mode": DEFAULT_ENGINE_CONFIG["provider_mode"],
+        "keyless_default": DEFAULT_ENGINE_CONFIG["keyless_default"],
+        "cli_agent": dict(DEFAULT_ENGINE_CONFIG["cli_agent"]),
+        "concurrency": dict(DEFAULT_ENGINE_CONFIG["concurrency"]),
+    }
+    if not isinstance(cfg, dict):
+        return eng
+    raw = cfg.get("engine")
+    if not isinstance(raw, dict):
+        return eng
+
+    mode = raw.get("provider_mode")
+    if mode in PROVIDER_MODE_CHOICES:
+        eng["provider_mode"] = mode
+
+    keyless = raw.get("keyless_default")
+    # Only an explicit bool is persisted; None means "wizard hasn't asked".
+    if isinstance(keyless, bool):
+        eng["keyless_default"] = keyless
+
+    cli = raw.get("cli_agent")
+    if isinstance(cli, dict):
+        sj = cli.get("structured_json")
+        if sj in STRUCTURED_JSON_CHOICES:
+            eng["cli_agent"]["structured_json"] = sj
+        ttl = cli.get("probe_cache_ttl_s")
+        if _is_pos_int(ttl):
+            eng["cli_agent"]["probe_cache_ttl_s"] = ttl
+        timeout = cli.get("per_call_timeout_s")
+        if _is_pos_int(timeout):
+            eng["cli_agent"]["per_call_timeout_s"] = timeout
+        inflight = cli.get("max_inflight")
+        if _is_pos_int(inflight):
+            eng["cli_agent"]["max_inflight"] = inflight
+
+    conc = raw.get("concurrency")
+    if isinstance(conc, dict):
+        sg = conc.get("structured_gen")
+        if _is_pos_int(sg):
+            eng["concurrency"]["structured_gen"] = sg
+        if isinstance(conc.get("ram_aware"), bool):
+            eng["concurrency"]["ram_aware"] = conc["ram_aware"]
+
+    return eng
+
+
+def save_engine_config(updates):
+    """Deep-merge `updates` into the `engine` block of .atlas-ai/fleet.json,
+    write atomically, and return the new merged engine block (Chunk 5 contract).
+
+    Only the `engine` sub-tree is touched; every other top-level key in the file
+    is preserved. A missing/unreadable/non-dict file is treated as empty. One
+    level of nested-dict merge (matching the engine block's shape) is applied so
+    a partial `{"cli_agent": {...}}` update does not clobber sibling cli_agent
+    keys.
+
+    The RETURNED block is normalized via `engine_config` (defaults + validation)
+    so callers see exactly what a fresh load would return. The value written to
+    the file is the raw merged dict as supplied by the caller; it is not
+    pre-validated — callers are expected to pass already-valid values, and
+    `engine_config` corrects any malformed entries on the next read.
+    """
+    path = FLEET_CONFIG_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        doc = json.loads(path.read_text()) if path.is_file() else {}
+    except (json.JSONDecodeError, OSError):
+        doc = {}
+    if not isinstance(doc, dict):
+        doc = {}
+    engine = doc.get("engine")
+    if not isinstance(engine, dict):
+        engine = {}
+    if isinstance(updates, dict):
+        for k, v in updates.items():
+            if isinstance(v, dict) and isinstance(engine.get(k), dict):
+                engine[k].update(v)
+            else:
+                engine[k] = v
+    doc["engine"] = engine
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(doc, indent=2))
+    tmp.replace(path)
+    return engine_config(doc)
+
+
 def load_fleet_config(path=None):
     """Load .atlas-ai/fleet.json merged over defaults.
 
@@ -86,6 +207,7 @@ def load_fleet_config(path=None):
         "experimental_backends": DEFAULT_FLEET_CONFIG["experimental_backends"],
         "token_economy": _atlas_config_economy() or DEFAULT_FLEET_CONFIG["token_economy"],
         "backend": DEFAULT_FLEET_CONFIG["backend"],
+        "engine": engine_config(None),
     }
     p = Path(path) if path else FLEET_CONFIG_PATH
     if not p.is_file():
@@ -131,6 +253,8 @@ def load_fleet_config(path=None):
         if resolved:
             resolved.setdefault("enabled", True)
             cfg["escalation"] = resolved
+
+    cfg["engine"] = engine_config(raw)
 
     return cfg
 

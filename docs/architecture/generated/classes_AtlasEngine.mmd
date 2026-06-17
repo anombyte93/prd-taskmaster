@@ -1,0 +1,42 @@
+classDiagram
+  class Backend {
+    name : str
+    detect() dict
+    expand(task_ids, research, tag) dict
+    init_project() dict
+    parse_prd(prd_path, num_tasks, tag) dict
+    rate(tag, research) dict
+  }
+  class CliAgentError {
+    kind
+  }
+  class CommandError {
+    extra : dict
+    message : str
+  }
+  class LLMError {
+    kind
+  }
+  class NativeBackend {
+    name : str
+    detect() dict
+    expand(task_ids, research, tag) dict
+    init_project() dict
+    parse_prd(prd_path, num_tasks, tag) dict
+    rate(tag, research) dict
+  }
+  class ProviderHandle {
+    kind : str
+    model : str | None
+    provider : str
+    reason : str
+    role : str
+  }
+  class _CASMiss {
+    actual
+  }
+  class _IllegalTransition {
+    source
+    target
+  }
+  NativeBackend --|> Backend

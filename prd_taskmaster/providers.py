@@ -4,6 +4,7 @@ import argparse
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from prd_taskmaster.economy import TIER_MODEL_IDS, economy_profile
@@ -78,12 +79,14 @@ def _provider_usable(
     has_anthropic_key: bool,
     has_openai_key: bool,
     has_perplexity_key: bool,
+    has_google_key: bool = False,
 ) -> bool:
     """Can this provider actually run a request in the current environment?
 
-    Presence of a *credential* or *CLI* — not merely a config string. Unknown
-    providers (openrouter, ollama, google, …) are assumed usable: they are
-    deliberate user choices the engine must not clobber.
+    Presence of a *credential* or *CLI* — not merely a config string. google/gemini
+    are raw-API providers gated on a Google key. Genuinely unknown providers
+    (openrouter, ollama, …) are assumed usable: deliberate user choices the engine
+    must not clobber.
     """
     p = str(provider or "").lower()
     if p == "anthropic":
@@ -96,6 +99,8 @@ def _provider_usable(
         return has_claude
     if p == "codex-cli":
         return has_codex
+    if p in ("google", "gemini"):
+        return has_google_key
     return True
 
 
@@ -144,6 +149,33 @@ def _probe_spawn(provider: object) -> bool:
         return result.returncode == 0
     except (subprocess.TimeoutExpired, OSError):
         return False
+
+
+# Per-process spawn-probe cache. Keyed by provider -> (monotonic_ts, result).
+# Dedupes the 60s probe across the in-process ThreadPoolExecutor fan-out (the
+# acceptance-criteria case). Cross-process dedup is out of scope (#1). A False
+# result is NEVER stored: a transient nested-spawn refusal must not pin the
+# provider off the free path for the whole TTL.
+_PROBE_CACHE: dict[str, tuple[float, bool]] = {}
+
+
+def _probe_spawn_cached(provider: object, ttl_s: int) -> bool:
+    """Cached _probe_spawn: at most one real probe per provider per ttl_s.
+    True results are cached for ttl_s; False results invalidate the entry so
+    the next call re-probes (empirical demote, not a sticky failure)."""
+    key = str(provider or "").lower()
+    now = time.monotonic()
+    entry = _PROBE_CACHE.get(key)
+    if entry is not None:
+        ts, result = entry
+        if now - ts < ttl_s:
+            return result
+    result = _probe_spawn(provider)
+    if result:
+        _PROBE_CACHE[key] = (now, result)
+    else:
+        _PROBE_CACHE.pop(key, None)
+    return result
 
 
 def _resolve_configure_profile(economy: str | None) -> dict:

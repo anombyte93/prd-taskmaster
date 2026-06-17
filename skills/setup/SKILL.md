@@ -48,20 +48,16 @@ Run backend detection:
 python3 script.py backend-detect
 ```
 
-If TaskMaster is unavailable, report one compact info line:
-
-```
-TaskMaster is optional. Installing task-master-ai unlocks the TaskMaster backend:
-  npm install -g task-master-ai
-Proceeding with the resolved backend.
-```
-
-Do NOT auto-install and do NOT stop for installation. Continue with the resolved
-backend.
+The native engine is the sole generator and needs no external binary — a
+keyless host CLI (`claude` / `codex` / `gemini`) on PATH, or a provider API key,
+is sufficient (see Chunk 7's `atlas setup` wizard). The `task-master` binary is
+no longer required or supported; `backend-detect` reports its presence purely as
+informational. Continue with the resolved (native) backend.
 
 ### Step 2: Project init
 
-Check whether the current project has a `.taskmaster/` directory.
+Check whether the current project has a `.taskmaster/` directory (the engine
+still reads/writes the `.taskmaster/` file format for tasks and config).
 
 If missing, run backend op `init`:
 
@@ -69,8 +65,7 @@ If missing, run backend op `init`:
 python3 script.py init-project
 ```
 
-If explicitly operating the TaskMaster backend, this may wrap
-`task-master init --yes` with the engine's `.mcp.json` protection. If
+This initialises the native project state and the `.taskmaster/` file format. If
 `.taskmaster/` is present, continue.
 
 ### Step 2.5: Customisation bootstrap (REQUIRED — closes execute-task deadlock)

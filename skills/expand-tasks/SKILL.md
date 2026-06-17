@@ -42,14 +42,14 @@ Do NOT activate for: single task research (use /research-before-coding), PRD gen
 
 ## Native-parallel first (token economy)
 
-Before launching agent waves, check the cheaper path: when task-master ≥ 0.43 AND the
-configured research role is a REAL structured API (not the free local proxy), prefer
-`python3 script.py tm-parallel` (or the `tm_parallel_expand` MCP tool) — it runs NATIVE
-`expand --research` in N isolated workdirs on economy-tier models and merges atomically.
-For native backend operation, use `python3 script.py expand`, or backend op expand (native api).
-Use THIS skill's agent waves when: the research role is the free local proxy, no API key
-exists, tm-parallel reports failures for specific tasks (rerun just those here), or the
-research must be repo-grounded (agents can read the codebase; native expand cannot).
+Before launching agent waves, check the cheaper path: the native engine expands tasks
+in parallel for free. Prefer `python3 script.py expand` — backend op expand (native api) —
+or the `expand_tasks` MCP tool: it runs structured `expand` across pending tasks
+concurrently (inheriting the engine's ThreadPoolExecutor) on economy-tier models /
+keyless host CLIs and merges atomically.
+Use THIS skill's agent waves when: no provider/CLI is available, native expand reports
+failures for specific tasks (rerun just those here), or the research must be repo-grounded
+(agents can read the codebase; native expand cannot).
 
 ## Prerequisites
 

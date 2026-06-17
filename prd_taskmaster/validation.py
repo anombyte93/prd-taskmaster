@@ -17,7 +17,21 @@ from prd_taskmaster.lib import (
     has_section,
     word_count,
     _resolve_tasks_payload,
+    _current_taskmaster_tag,
 )
+
+# Angle-bracket placeholder sub-pattern: matches only TRUE placeholders like
+# <PLACEHOLDER>, <API_KEY>, <YOUR_VALUE> — NOT lowercase/technical tokens like
+# <code>, <id>, <lines>, <bytes>, <filename>.
+#
+# Rules:
+#   • First char MUST be uppercase ASCII letter [A-Z] (no re.IGNORECASE)
+#   • Remaining chars MUST be uppercase letters, digits, or underscores
+#   • Minimum total length inside brackets: 3 chars  (e.g. <KEY> matches, <AB> doesn't)
+#
+# This intentionally excludes common HTTP/CLI/doc tokens (`<code>`, `<file>`,
+# etc.) which are legitimate in task descriptions and PRD body text.
+_ANGLE_BRACKET_PLACEHOLDER = r'<[A-Z][A-Z0-9_]{2,}>'
 
 
 def run_validate_prd(input_path: str) -> dict:
@@ -145,7 +159,14 @@ def run_validate_prd(input_path: str) -> dict:
     })
 
     # Check 9: Technical considerations address architecture
-    tech_section = get_section_content(text, "Technical")
+    # Prefer the canonical "Technical Considerations" section. A bare substring
+    # match on "Technical" wrongly latches onto an earlier heading that merely
+    # *contains* the word (e.g. "### Goal 1: Enable non-technical editing"),
+    # capturing that subsection's prose instead of the real architecture text.
+    # Fall back to a bare "Technical" heading for PRDs that use that shorter name.
+    tech_section = get_section_content(text, "Technical Considerations")
+    if not tech_section:
+        tech_section = get_section_content(text, "Technical")
     has_arch = bool(re.search(
         r'(architecture|system\s+design|component|integration|diagram)',
         tech_section, re.IGNORECASE
@@ -222,7 +243,7 @@ def run_validate_prd(input_path: str) -> dict:
         (r'\[TBD\]', 'tbd'),                       # [TBD]
         (r'\[TODO\]', 'todo'),                      # [TODO]
         (r'\[INSERT .+?\]', 'insert'),              # [INSERT something]
-        (r'<[A-Z][A-Z_ ]+>', 'angle_bracket'),      # <PLACEHOLDER>
+        (_ANGLE_BRACKET_PLACEHOLDER, 'angle_bracket'),  # <PLACEHOLDER>, <API_KEY>
         (r'\[(?:Name|Date|Feature|Product|YYYY)\]', 'bracket'),  # [Name], [Date], etc.
         (r'\bTBD\b', 'bare_tbd'),                   # bare TBD (case-sensitive)
         (r'\bTODO\b', 'bare_todo'),                 # bare TODO (case-sensitive)
@@ -338,8 +359,143 @@ def cmd_validate_prd(args: argparse.Namespace) -> None:
         fail(e.message, **e.extra)
 
 
-def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, require_phase_config: bool) -> dict:
-    """Validate a manually-authored TaskMaster-compatible tasks.json file."""
+# ─── Reachability / promise-evidence helpers ─────────────────────────────────
+
+# Precise claim terms that unambiguously imply live/integration-level evidence.
+# A fixture-only testStrategy paired with one of these is a HARD-BLOCK on
+# wired/live tasks (and a warning on spike/domain-model), same as before.
+# Word-boundary anchored; more-specific patterns come first.
+_HARD_CLAIM_TERMS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'\b(prisma|database|persist|migration|orm)\b', re.IGNORECASE), "db"),
+    (re.compile(r'\bcli\b', re.IGNORECASE), "cli"),
+    (re.compile(r'\b(connector|adapter|webhook|integration|endpoint)\b', re.IGNORECASE), "integration"),
+]
+
+# Ambiguous claim terms — common in legitimate UI/state work (Redux store,
+# React Router route, client-side hydration, API types/config, sync props).
+# These NEVER produce a hard-block; they add an advisory warning at every tier.
+_SOFT_CLAIM_TERMS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'\bclient\b', re.IGNORECASE), "client"),
+    (re.compile(r'\bapi\b', re.IGNORECASE), "api"),
+    (re.compile(r'\b(route|sync|store)\b', re.IGNORECASE), "integration"),
+]
+
+# Signal that satisfies the live/integration claim requirement
+_LIVE_SIGNAL_RE = re.compile(
+    r'http|request|server|e2e|integration|curl|port|subprocess|invoke|entrypoint|endpoint',
+    re.IGNORECASE,
+)
+
+# Signal that satisfies the DB claim requirement (real connection, not just fixture)
+_DB_SIGNAL_RE = re.compile(
+    r'database|db|connection|driver|postgres|mysql|sqlite|mongo|redis|supabase|prisma\s+client',
+    re.IGNORECASE,
+)
+
+# "Fixture-only" pattern: mentions mocks/stubs without live signals
+_FIXTURE_ONLY_RE = re.compile(
+    r'fixture|mock|stub|sample|parses|\bunit\s+tests?\b',
+    re.IGNORECASE,
+)
+
+# Down-rank map: claim term → suggested replacement title fragment
+_DOWNRANK: dict[str, str] = {
+    "connector": "parser",
+    "client": "parser",
+    "prisma": "file adapter",
+    "database": "file adapter",
+    "integration": "handler",
+    "sync": "reader",
+}
+
+
+def _classify_test_strategy(test_strategy: str) -> str:
+    """Return 'fixture-only' if testStrategy has no live signal, else 'live'."""
+    ts = test_strategy.strip()
+    if not ts:
+        return "fixture-only"
+    has_live = bool(_LIVE_SIGNAL_RE.search(ts) or _DB_SIGNAL_RE.search(ts))
+    has_fixture = bool(_FIXTURE_ONLY_RE.search(ts))
+    if has_fixture and not has_live:
+        return "fixture-only"
+    return "live"
+
+
+def _suggested_title(claim_term: str, original_title: str) -> str:
+    """Produce a down-ranked title suggestion."""
+    term_lower = claim_term.lower()
+    # Find the most specific key in _DOWNRANK that is a substring of the claim term
+    replacement = _DOWNRANK.get(term_lower)
+    if replacement is None:
+        # Default: strip the claim term from the title
+        stripped = re.sub(r'\b' + re.escape(claim_term) + r'\b', '', original_title, flags=re.IGNORECASE).strip()
+        return stripped or original_title
+    # Replace first occurrence of the claim term in title
+    suggested = re.sub(r'\b' + re.escape(claim_term) + r'\b', replacement, original_title, count=1, flags=re.IGNORECASE)
+    return suggested.strip()
+
+
+def _promise_evidence_mismatch(task: dict) -> dict | None:
+    """Detect high-altitude claim in title/description vs fixture-only testStrategy.
+
+    Returns a mismatch dict {task_id, claim_term, evidence_altitude, suggested_title, soft}
+    or None if no mismatch detected.
+
+    ``soft=True`` means the matched term is ambiguous (store/route/sync/client/api) —
+    the caller must treat this as an advisory warning at every tier, never a hard-block.
+    ``soft=False`` means the matched term is a precise integration promise — the caller
+    hard-blocks wired/live tasks and warns on spike/domain-model.
+    """
+    title = str(task.get("title") or "")
+    description = str(task.get("description") or "")
+    test_strategy = str(task.get("testStrategy") or "")
+    combined_text = f"{title} {description}"
+
+    altitude = _classify_test_strategy(test_strategy)
+    if altitude != "fixture-only":
+        return None
+
+    # Check precise (hard) terms first
+    for pattern, claim_key in _HARD_CLAIM_TERMS:
+        mo = pattern.search(combined_text)
+        if mo:
+            matched_term = mo.group(0)
+            return {
+                "task_id": task.get("id"),
+                "claim_term": matched_term,
+                "evidence_altitude": "fixture-only",
+                "suggested_title": _suggested_title(matched_term, title),
+                "soft": False,
+            }
+
+    # Check ambiguous (soft) terms — warn-only regardless of tier
+    for pattern, claim_key in _SOFT_CLAIM_TERMS:
+        mo = pattern.search(combined_text)
+        if mo:
+            matched_term = mo.group(0)
+            return {
+                "task_id": task.get("id"),
+                "claim_term": matched_term,
+                "evidence_altitude": "fixture-only",
+                "suggested_title": _suggested_title(matched_term, title),
+                "soft": True,
+            }
+
+    return None
+
+
+def run_validate_tasks(
+    input_path: str | None,
+    allow_empty_subtasks: bool,
+    require_phase_config: bool,
+    tag: str | None = None,
+) -> dict:
+    """Validate a manually-authored TaskMaster-compatible tasks.json file.
+
+    Honors the active TaskMaster tag: an explicit ``tag`` argument wins, else
+    ``state.json``'s ``currentTag``; the validated task list is resolved from
+    the tagged block so manual/native mode does not silently validate a stale
+    legacy flat ``tasks`` key (BUG2)."""
     tasks_path = Path(input_path) if input_path else TASKMASTER_TASKS / "tasks.json"
     if not tasks_path.is_file():
         raise CommandError(f"tasks.json not found: {tasks_path}")
@@ -350,7 +506,7 @@ def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, requi
     except json.JSONDecodeError as e:
         raise CommandError(f"Failed to parse {tasks_path}: {e}")
 
-    tasks, _ = _resolve_tasks_payload(raw)
+    tasks, _ = _resolve_tasks_payload(raw, tag=tag)
     if not isinstance(tasks, list):
         raise CommandError(
             "tasks.json must be a list, a flat object with a 'tasks' list, or a tagged TaskMaster object",
@@ -360,11 +516,11 @@ def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, requi
     allowed_statuses = {"pending", "in-progress", "review", "done", "deferred", "cancelled"}
     allowed_priorities = {"high", "medium", "low"}
     problems = []
+    warnings = []
     ids = []
 
     placeholder_re = re.compile(
-        r'(\{\{[^}]+\}\}|\[TBD\]|\[TODO\]|\[INSERT .+?\]|<[A-Z][A-Z_ ]+>|\[(?:Name|Date|Feature|Product|YYYY)\])',
-        re.IGNORECASE,
+        r'(\{\{[^}]+\}\}|\[TBD\]|\[TODO\]|\[INSERT .+?\]|' + _ANGLE_BRACKET_PLACEHOLDER + r'|\[(?:Name|Date|Feature|Product|YYYY)\])',
     )
     generic_re = re.compile(
         r'^\s*(implement|build|create|add|fix)\s+(feature|functionality|task|thing|stuff)\s*$',
@@ -455,6 +611,53 @@ def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, requi
                 if dep not in sub_ids:
                     problems.append(f"{label} subtask {sub_id}: dependency {dep!r} does not exist in sibling subtasks")
 
+        # ── Reachability checks (per-task) ─────────────────────────────────────
+        tier = (
+            task.get("phaseConfig", {}).get("tier")
+            or task.get("tier")
+            or "domain-model"
+        )
+        tier = str(tier).strip().lower()
+        hard_tiers = {"wired", "live"}
+
+        # 1. reachableVia presence check
+        reachable_via = str(task.get("reachableVia") or "").strip()
+        if not reachable_via:
+            if tier in hard_tiers:
+                problems.append(
+                    f"{label}: tier={tier} requires reachableVia "
+                    f"(name the route/component/CLI/API this wires into)"
+                )
+            else:
+                warnings.append(
+                    f"{label}: tier={tier} — reachableVia is empty "
+                    f"(advisory: name the route/component/CLI/API this connects to)"
+                )
+        else:
+            # reachableVia is present — check it looks scoped (has : / . or -)
+            if not re.search(r'[:/.\-]', reachable_via):
+                warnings.append(
+                    f"{label}: reachableVia={reachable_via!r} looks unscoped "
+                    f"(no ':' '/' '.' or '-'; prefer e.g. 'route:/x', 'cli:cmd', 'component.Name')"
+                )
+
+        # 2. Promise-evidence mismatch check
+        mismatch = _promise_evidence_mismatch(task)
+        if mismatch:
+            msg = (
+                f"{label}: title/description claims '{mismatch['claim_term']}' "
+                f"but testStrategy is fixture-only — "
+                f"suggested title: {mismatch['suggested_title']!r}"
+            )
+            if mismatch.get("soft"):
+                # Ambiguous term (store/route/sync/client/api): advisory warning at every tier,
+                # never a hard-block even for wired/live tasks.
+                warnings.append(msg)
+            elif tier in hard_tiers:
+                problems.append(msg)
+            else:
+                warnings.append(msg)
+
     real_ids = [task_id for task_id in ids if task_id is not None]
     duplicate_ids = sorted({task_id for task_id in real_ids if real_ids.count(task_id) > 1}, key=str)
     for task_id in duplicate_ids:
@@ -479,20 +682,34 @@ def run_validate_tasks(input_path: str | None, allow_empty_subtasks: bool, requi
                 "tasks_path": str(tasks_path),
                 "task_count": len(tasks),
                 "problems": problems,
+                "warnings": warnings,
             },
         )
 
     return {
         "ok": True,
         "tasks_path": str(tasks_path),
+        "tag": tag or _current_taskmaster_tag(),
         "task_count": len(tasks),
         "subtask_count": sum(len(t.get("subtasks", []) or []) for t in tasks if isinstance(t, dict)),
+        "warnings": warnings,
         "message": "Task file is valid for manual prd-taskmaster mode",
     }
 
 
 def cmd_validate_tasks(args: argparse.Namespace) -> None:
     try:
-        emit(run_validate_tasks(args.input, args.allow_empty_subtasks, args.require_phase_config))
+        result = run_validate_tasks(
+            args.input,
+            args.allow_empty_subtasks,
+            args.require_phase_config,
+            tag=getattr(args, "tag", None),
+        )
+        # Surface warnings non-fatally before emitting JSON
+        if result.get("warnings"):
+            import sys as _sys
+            for w in result["warnings"]:
+                print(f"WARNING: {w}", file=_sys.stderr)
+        emit(result)
     except CommandError as e:
         fail(e.message, **e.extra)

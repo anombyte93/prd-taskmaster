@@ -1,4 +1,4 @@
-"""MCP tool contract tests — the merged server.py registers 30 tools.
+"""MCP tool contract tests — the merged server.py registers 31 tools.
 
 Retargeted from the plugin: server.py now imports from prd_taskmaster.* and
 lives at mcp-server/server.py. We add the repo root (so `prd_taskmaster` is
@@ -32,15 +32,45 @@ def test_load_template_minimal():
     assert len(r["content"]) > 10
 
 
-def test_load_template_unknown_type_raises():
-    """LIVE contract: the package's run_load_template raises CommandError on an
-    unknown type (the plugin returned an ok=False dict). The server wrapper
-    does not catch it, so the call propagates the raise."""
+def test_load_template_unknown_type_fails_closed():
+    """LIVE contract (BUG3 hardening): the package's run_load_template raises
+    CommandError on an unknown type, but the MCP server's _HardenedMCP wrapper
+    catches EVERY tool exception and returns a structured {"ok": False, ...}
+    payload instead of letting it propagate and tear down the stdio transport.
+    A single failing tool must never close the connection / drop all tools."""
     import server as S
-    from prd_taskmaster.lib import CommandError
-    with pytest.raises(CommandError) as exc:
-        S.load_template("bogus")
-    assert "not found" in str(exc.value).lower()
+    r = S.load_template("bogus")
+    assert isinstance(r, dict)
+    assert r["ok"] is False
+    assert "not found" in str(r.get("error", "")).lower()
+
+
+def test_backup_prd_directory_input_fails_closed(tmp_path):
+    """BUG3 regression: backup_prd on a directory used to raise IsADirectoryError
+    out of the tool body and close the MCP transport. It must now return a
+    structured error instead."""
+    import server as S
+    r = S.backup_prd(str(tmp_path))
+    assert isinstance(r, dict)
+    assert r["ok"] is False
+    assert "not a file" in str(r.get("error", "")).lower()
+
+
+def test_hardened_wrapper_catches_arbitrary_tool_exception():
+    """BUG3: any tool whose body raises an unexpected exception is caught by the
+    global _HardenedMCP wrapper and surfaced as a structured error — proving the
+    host process cannot be crashed by a single tool."""
+    import server as S
+
+    @S.mcp.tool()
+    def _boom_for_test():
+        raise RuntimeError("kaboom")
+
+    r = _boom_for_test()
+    assert isinstance(r, dict)
+    assert r["ok"] is False
+    assert "kaboom" in str(r.get("error", ""))
+    assert r.get("tool") == "_boom_for_test"
 
 
 def test_compute_fleet_waves_tool(tmp_path, monkeypatch):
@@ -215,21 +245,25 @@ def test_context_pack_tool_returns_core_pack(tmp_path):
 
 
 def test_server_registers_32_tools():
-    """Verify server.py declares all 32 expected tool functions at module scope."""
+    """Verify server.py declares all 32 expected tool functions at module scope.
+
+    The task-master backend was removed (spec §9.4): the init_taskmaster,
+    tm_parallel_expand, and backend_detect MCP tools were deleted (32 -> 29).
+    The suggestion + suggestion_report tools were then added (29 -> 31).
+    render_status was added (31 -> 32).
+    """
     import server as S
     expected = {
         "preflight", "current_phase", "advance_phase", "check_gate",
-        "detect_taskmaster", "init_taskmaster", "validate_setup",
+        "detect_taskmaster", "validate_setup",
         "detect_capabilities", "load_template", "validate_prd",
         "calc_tasks", "gen_test_tasks", "backup_prd", "append_workflow",
         "debrief", "log_progress", "read_state", "gen_scripts",
         "compute_fleet_waves",
         "engine_preflight",
-        "tm_parallel_expand",
         "next_task",
         "claim_task",
         "set_task_status",
-        "backend_detect",
         "init_project",
         "parse_prd",
         "expand_tasks",
@@ -237,6 +271,9 @@ def test_server_registers_32_tools():
         "context_pack",
         "feedback_submit",
         "feedback_report",
+        "suggestion",
+        "suggestion_report",
+        "render_status",
     }
     assert len(expected) == 32
     public_attrs = {name for name in dir(S) if not name.startswith("_")}
@@ -247,7 +284,7 @@ def test_server_registers_32_tools():
 def test_backend_ai_tools_document_agent_action_required():
     import server as S
 
-    for name in ("backend_detect", "parse_prd", "expand_tasks", "rate_tasks"):
+    for name in ("parse_prd", "expand_tasks", "rate_tasks"):
         doc = getattr(S, name).__doc__ or ""
         assert "agent_action_required" in doc
         assert "ai_ops" in doc

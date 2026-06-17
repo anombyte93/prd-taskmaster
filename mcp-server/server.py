@@ -5,14 +5,16 @@ Registers 32 tools wrapping the sibling modules (pipeline, capabilities,
 taskmaster, backend, validation, templates) plus server-native helpers
 (calc_tasks, backup_prd, append_workflow, debrief, log_progress,
 gen_test_tasks, read_state, gen_scripts, compute_fleet_waves, context_pack,
-feedback).
+feedback, suggestion).
 
 No explicit process termination — mcp.run() is the event loop and
 returns naturally when the transport closes.
 """
 from __future__ import annotations
 
+import functools
 import sys
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -24,21 +26,76 @@ from mcp.server.fastmcp import FastMCP
 from prd_taskmaster import pipeline as P
 from prd_taskmaster import validation as V
 from prd_taskmaster import mode_recommend as C
-from prd_taskmaster import taskmaster as TM
 from prd_taskmaster import templates as TPL
 from prd_taskmaster import lib as LIB
 from prd_taskmaster import fleet as F
 from prd_taskmaster import batch as B
 from prd_taskmaster import task_state as TS
-from prd_taskmaster import tm_parallel as TMP
 from prd_taskmaster import cli as CLI
 from prd_taskmaster import feedback as FB
+from prd_taskmaster import suggestions as SG
 from prd_taskmaster.context_pack import build_context_pack
 
-mcp = FastMCP("prd-taskmaster")
+_mcp = FastMCP("prd-taskmaster")
 
 
-# ─── Delegation tools (20) ────────────────────────────────────────────────────
+class _HardenedMCP:
+    """Wraps FastMCP so a single tool can never crash the stdio transport.
+
+    BUG3: an unhandled exception inside a tool body (e.g. ``backup_prd`` doing
+    raw ``Path.read_text()`` on a directory / unreadable file / full disk)
+    propagated out of the tool function and tore down the whole MCP process —
+    the operator saw "MCP error -32000: Connection closed" and ALL tools
+    vanished from the session at once. Tools must fail *closed* with a
+    structured ``{"ok": False, "error": ...}`` payload, never by terminating
+    the host. This wrapper installs that contract on every ``@mcp.tool()``
+    uniformly, regardless of whether the individual body remembered to catch.
+    """
+
+    def __init__(self, inner: FastMCP) -> None:
+        self._inner = inner
+
+    def tool(self, *t_args, **t_kwargs):
+        inner_decorator = self._inner.tool(*t_args, **t_kwargs)
+
+        def decorator(fn):
+            @functools.wraps(fn)
+            def guarded(*args, **kwargs):
+                try:
+                    return fn(*args, **kwargs)
+                except LIB.CommandError as exc:
+                    return {"ok": False, "error": exc.message, **getattr(exc, "extra", {})}
+                except SystemExit as exc:
+                    # A backend op called sys.exit(); surface it, don't let it
+                    # bubble up and stop mcp.run().
+                    return {"ok": False, "error": "tool exited", "exit": exc.code}
+                except BaseException as exc:  # noqa: BLE001 — fail closed, never crash the host
+                    # Diagnostics go to stderr (captured by the MCP host log),
+                    # never to stdout (which carries the JSON-RPC stream).
+                    print(
+                        f"[prd-taskmaster] tool {fn.__name__!r} raised "
+                        f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    return {
+                        "ok": False,
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "tool": fn.__name__,
+                    }
+
+            return inner_decorator(guarded)
+
+        return decorator
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+mcp = _HardenedMCP(_mcp)
+
+
+# ─── Delegation tools (17) ────────────────────────────────────────────────────
 
 @mcp.tool()
 def preflight(cwd: str | None = None) -> dict:
@@ -91,12 +148,6 @@ def validate_setup() -> dict:
 
 
 @mcp.tool()
-def init_taskmaster(method: str = "cli") -> dict:
-    """Initialise TaskMaster in the current project via the CLI."""
-    return TM.init_taskmaster(method)
-
-
-@mcp.tool()
 def validate_prd(input_path: str, ai: bool = False) -> dict:
     """Run the deterministic PRD quality checks and return a graded report."""
     return V.run_validate_prd(input_path)
@@ -112,15 +163,6 @@ def load_template(type: str = "comprehensive") -> dict:
 def compute_fleet_waves(concurrency: int = 3, tag: str = "") -> dict:
     """Compute Atlas Fleet dependency waves for the selected TaskMaster tag."""
     return F.run_fleet_waves(concurrency, tag)
-
-
-@mcp.tool()
-def tm_parallel_expand(tag: str = "", dry_run: bool = False) -> dict:
-    """Run native TaskMaster expansion in isolated parallel workdirs."""
-    try:
-        return TMP.run_tm_parallel(tag=tag or None, dry_run=dry_run)
-    except LIB.CommandError as exc:
-        return {"ok": False, "error": exc.message, **exc.extra}
 
 
 @mcp.tool()
@@ -142,10 +184,29 @@ def claim_task(tag: str = "") -> dict:
 
 
 @mcp.tool()
-def set_task_status(id: str, status: str, tag: str = "") -> dict:
-    """Set a task or subtask status without terminating the MCP host."""
+def set_task_status(
+    id: str,
+    status: str,
+    tag: str = "",
+    evidence_ref: str | None = None,
+    reachability: dict | None = None,
+) -> dict:
+    """Set a task or subtask status without terminating the MCP host.
+
+    For status != "done": evidence_ref and reachability are ignored.
+    For status == "done" on a wired/live task: reachability must be provided
+    with verdict in {WIRED, EXEMPT}.  Pass the dict returned by the
+    reachability sweep (mcp__atlas-engine__check_gate / sweep_task).
+    Evidence is persisted on the task when provided (any tier).
+    """
     try:
-        return TS.run_set_status(id_str=id, status=status, tag=tag or None)
+        return TS.run_set_status(
+            id_str=id,
+            status=status,
+            tag=tag or None,
+            evidence_ref=evidence_ref,
+            reachability=reachability,
+        )
     except LIB.CommandError as exc:
         return {"ok": False, "error": exc.message, **exc.extra}
 
@@ -162,17 +223,6 @@ def _backend_tool_call(fn, *args, **kwargs) -> dict:
 
 
 @mcp.tool()
-def backend_detect() -> dict:
-    """Detect resolved backend, both backend detect() results, and ai_ops.
-
-    If ai_ops is "agent", parse_prd, expand_tasks, and rate_tasks may return
-    ok=false with agent_action_required; headless orchestrators should pre-check
-    this tool's ai_ops before starting AI operations.
-    """
-    return _backend_tool_call(CLI.run_backend_detect)
-
-
-@mcp.tool()
 def init_project() -> dict:
     """Initialise the resolved backend project state."""
     return _backend_tool_call(CLI.run_init_project)
@@ -182,7 +232,7 @@ def init_project() -> dict:
 def parse_prd(prd_path: str, num_tasks: int, tag: str = "") -> dict:
     """Parse a PRD through the resolved backend.
 
-    When backend_detect reports ai_ops="agent", this can return ok=false with
+    When the resolved native backend's ai_ops is "agent", this can return ok=false with
     agent_action_required instead of doing headless AI work.
     """
     return _backend_tool_call(CLI.run_parse_prd, prd_path, num_tasks, tag=tag or None)
@@ -196,7 +246,7 @@ def expand_tasks(
 ) -> dict:
     """Expand selected or all pending tasks through the resolved backend.
 
-    When backend_detect reports ai_ops="agent", this can return ok=false with
+    When the resolved native backend's ai_ops is "agent", this can return ok=false with
     agent_action_required instead of doing headless AI work.
     """
     return _backend_tool_call(
@@ -211,7 +261,7 @@ def expand_tasks(
 def rate_tasks(tag: str = "", research: bool = True) -> dict:
     """Rate task complexity through the resolved backend.
 
-    When backend_detect reports ai_ops="agent", this can return ok=false with
+    When the resolved native backend's ai_ops is "agent", this can return ok=false with
     agent_action_required instead of doing headless AI work.
     """
     return _backend_tool_call(CLI.run_rate, tag=tag or None, research=research)
@@ -255,13 +305,25 @@ def gen_test_tasks(total: int) -> dict:
 
 @mcp.tool()
 def backup_prd(input_path: str) -> dict:
-    """Copy a PRD to a timestamped prd-backup-YYYYMMDD-HHMMSS.md sibling."""
+    """Copy a PRD to a timestamped prd-backup-YYYYMMDD-HHMMSS.md sibling.
+
+    Hardened (BUG3): the source may be a directory, unreadable, non-UTF-8, or
+    the destination may be unwritable / on a full disk. Every such case returns
+    a structured error instead of raising — a failed backup must not close the
+    MCP transport.
+    """
     src = Path(input_path)
     if not src.exists():
         return {"ok": False, "error": f"source missing: {input_path}"}
+    if not src.is_file():
+        return {"ok": False, "error": f"source is not a file: {input_path}"}
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     dst = src.parent / f"prd-backup-{ts}.md"
-    dst.write_text(src.read_text())
+    try:
+        # Binary copy: tolerates non-UTF-8 PRDs that read_text() would choke on.
+        dst.write_bytes(src.read_bytes())
+    except OSError as exc:
+        return {"ok": False, "error": f"backup failed: {exc}", "source": str(src)}
     return {"ok": True, "backup_path": str(dst)}
 
 
@@ -363,6 +425,37 @@ def feedback_submit(
 def feedback_report() -> dict:
     """Summarize .atlas-ai/feedback.jsonl."""
     return FB.summarize_feedback()
+
+
+@mcp.tool()
+def suggestion(
+    text: str,
+    context: str = "",
+    source_repo: str = "",
+    session: str = "",
+    agent: str = "",
+) -> dict:
+    """Capture a free-text improvement suggestion about using the Atlas engine.
+
+    Appends a row to the suggestions log (``.atlas-ai/suggestions.jsonl`` by
+    default, or ``ATLAS_SUGGESTIONS_PATH`` if set — point it at a shared file to
+    unify with the launcher's suggestion log). For dogfooding pain points,
+    missing tools, and rough edges so they are durably recorded, not lost in a
+    transcript. Use ``feedback_submit`` instead for structured 1-5 ratings.
+    """
+    return SG.append_suggestion({
+        "text": text,
+        "context": context,
+        "source_repo": source_repo,
+        "session": session,
+        "agent": agent,
+    })
+
+
+@mcp.tool()
+def suggestion_report() -> dict:
+    """Summarize the suggestions log (counts, by-repo, last 5)."""
+    return SG.summarize_suggestions()
 
 
 @mcp.tool()

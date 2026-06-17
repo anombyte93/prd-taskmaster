@@ -1,0 +1,31 @@
+flowchart LR
+    classDef llm  fill:#E69F00,stroke:#8a6100,color:#111111;
+    classDef code fill:#56B4E9,stroke:#1f6f9c,color:#111111;
+    classDef ext  fill:#009E73,stroke:#00674c,color:#ffffff;
+    classDef gate fill:#F0E442,stroke:#9a8f00,color:#111111;
+    subgraph LANE_LLM["LLM / agent — non-deterministic"]
+      direction TB
+      L1{{"1 · skills/execute-task solo CDD loop<br/>OR skills/execute-fleet parallel workers"}}:::llm
+      L2{{"4 · implement task code<br/>CDD RED → GREEN → BLUE"}}:::llm
+      L3{{"5 · judge GREEN/RED/BLUE evidence<br/>write CDD card + evidence files"}}:::llm
+    end
+    subgraph LANE_CODE["deterministic engine — Python"]
+      direction TB
+      C1["2 · fleet.ready_set / fleet.compute_waves<br/>order work into ready set / waves"]:::code
+      C2["3 · task_state.run_claim_task · _select_next_task<br/>claim next under lib.locked_update flock → in-progress"]:::code
+      C3["6 · task_state.run_set_status<br/>mark task/subtask done"]:::code
+      C4["7 · shipcheck.gate_pipeline / gate_tasks / gate_cdd / gate_plan"]:::code
+      C5["8 · shipcheck.gate_exit_codes<br/>EXIT_STATUS_RE over .atlas-ai/evidence/** · anti-fake"]:::code
+      G1{"9 · shipcheck.run_all_gates<br/>all gates pass?"}:::gate
+      C6["10 · render.execute_panel / shipcheck_panel<br/>feedback.append_feedback · suggestions.append_suggestion"]:::code
+    end
+    L1 --> C1 --> C2
+    C2 -. "claimed task JSON" .-> L2
+    L2 --> L3
+    L3 -. "claim/set-status calls" .-> C3
+    C3 --> C4 --> C5 --> G1
+    G1 -. "fail → bounce back, fix task" .-> L2
+    G1 == "pass → print SHIP_CHECK_OK" ==> C6
+    C6 == "loop while tasks remain" ==> C1
+    C6 == "all done → SHIP_CHECK_OK + final PR" ==> DONE(["COMPLETE ▶"]):::code
+

@@ -148,10 +148,12 @@ def _tag_task_lists(tasks: dict) -> dict[str, list[dict]]:
 def _count_tasks(items: list[dict]) -> dict[str, int]:
     total = len(items)
     done = sum(1 for item in items if item.get("status") == "done")
+    scaffold = sum(1 for item in items if item.get("status") == "scaffold")
     return {
         "total": total,
         "pending": total - done,
         "done": done,
+        "scaffold": scaffold,
     }
 
 

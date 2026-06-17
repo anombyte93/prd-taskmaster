@@ -63,6 +63,18 @@ orchestrator's job.
 Each pass through this cycle moves exactly one TaskMaster task from `pending`
 to `done`. Do the 13 steps in order. Do not skip.
 
+> **Task-start SHA** — at the very beginning of each iteration (before step 2),
+> capture the current git HEAD:
+>
+> ```bash
+> task_start_sha=$(git rev-parse HEAD)
+> ```
+>
+> Record `$task_start_sha` in the execute-log row for this iteration.  It is the
+> oracle of truth for every reachability sweep in step 9b below: "what modules
+> did THIS task add?" is `diff $task_start_sha..HEAD`.  The oracle flow already
+> issues per-task start commits; this surfaces the same value in the loop prose.
+
 1. **Heartbeat check**: verify the execute-task heartbeat timer is running.
    If missing, register one via `CronCreate("execute-task-heartbeat", "* * * * *", "echo heartbeat")`.
    Abort the iteration if the timer cannot be created — a missing heartbeat
@@ -174,13 +186,42 @@ to `done`. Do the 13 steps in order. Do not skip.
    FAILS regardless of how the agent narratives read. SHIP_CHECK_FAIL is
    NOT a warning. Narrative claiming the exit code is "expected" or
    "infrastructure noise" does NOT override this gate — write a separate
-   `task-fix-N` to address the underlying failure instead. Override only
-   via `--override SHIP_CHECK_OVERRIDE_ADMIN`, which is logged to
-   `execute-log.jsonl` as an audit event. (Codified 2026-06-04 after T12
+   `task-fix-N` to address the underlying failure instead. There is NO
+   override path; Gate 5 is unfakable. (Codified 2026-06-04 after T12
    in ai-human-tasker was marked DONE while `pnpm test` exited 1 with 11
    failing tests.)
 
-   The three checks (run only if the hard gate passes):
+   **9b. Reachability sweep (MANDATORY for wired/live tasks).** After the
+   hard exit-code gate passes, run the reachability sweep for this task:
+
+   ```bash
+   python3 script.py reachability-sweep \
+       --task <task_id> \
+       --start-commit <task_start_sha>
+   ```
+
+   This command:
+   - Inspects every source module added between `$task_start_sha` and `HEAD`.
+   - Computes a per-task verdict: `WIRED`, `EXEMPT`, `ORPHAN`, or `ERROR`.
+   - **Writes the verdict dict** into the task's CDD card
+     `.atlas-ai/cdd/task-<id>.json` under the `"reachability"` key (atomic,
+     additive — existing card keys are preserved).
+
+   The sweep exit code encodes the verdict:
+   - `exit 0` → WIRED or EXEMPT (pass; proceed to the three checkers).
+   - `exit 1` → ORPHAN or ERROR (see step 10 for the auto-downgrade path).
+
+   For spike/domain-model tasks the sweep returns EXEMPT automatically (no
+   importer search is performed for those tiers).
+
+   > **Why sweep before the triple check?**  A green test on a module
+   > imported by nothing is not "done" — it is scaffolded.  The triple check
+   > can pass for an ORPHAN module (all tests pass; doubt and validate agree).
+   > The reachability gate closes that gap: `done` means the module is
+   > reachable from real production callsites, not just reachable from tests.
+   > Wire it or it ships as scaffold.
+
+   The three checks (run only if the hard gate AND the reachability sweep both pass):
 
    - Plugin-native check: evidence file count vs declared subtask count
      (from the CDD card in step 5). Missing evidence = fail.
@@ -193,9 +234,21 @@ to `done`. Do the 13 steps in order. Do not skip.
    3+ agree pass -> task passes. Disagreement -> halt this iteration,
    surface to inbox.
 
-10. **Mark done + propagate state**:
-    a. Run backend op `set-status` for the parent task:
-       `python3 script.py set-status --id <N> --status done`.
+10. **Mark done + propagate state** — branch on the sweep verdict from step 9b:
+
+    **WIRED or EXEMPT** (sweep exit 0) → proceed normally:
+
+    a. Run backend op `set-status` for the parent task.  Because the sweep
+       already wrote the `reachability` block into the CDD card, the
+       `set-status` CLI auto-reads it — no `--reachability` flag needed:
+
+       ```bash
+       python3 script.py set-status --id <N> --status done
+       ```
+
+       If you want to be explicit (e.g. for logging), you may pass:
+       `--reachability WIRED` or `--reachability EXEMPT`.
+
     b. **Subtask writeback**: for each subtask `S` in `task.subtasks` whose
        evidence file (per the CDD card from step 5) exists, run
        `python3 script.py set-status --id <N>.<S> --status done`. Subtasks left
@@ -203,6 +256,7 @@ to `done`. Do the 13 steps in order. Do not skip.
        that breaks any tool computing progress from subtask state.
        (Codified 2026-06-04 — yesterday's run left all 39 subtasks
        `pending` despite 13/13 parent tasks `done`.)
+
     c. Update `.atlas-ai/state/pipeline.json` per-task: call
        `mcp__plugin_prd_go__update_pipeline_task_status(task_id=<N>,
        status="done")` if the MCP tool is available. If not, fall back to
@@ -213,6 +267,36 @@ to `done`. Do the 13 steps in order. Do not skip.
        (Codified 2026-06-04 — yesterday's run promised this write in
        SKILL.md but never executed it. pipeline.json froze at HANDOFF
        transition through all 85 minutes of execution.)
+
+    **ORPHAN or ERROR** (sweep exit 1) → **auto-downgrade to scaffold**:
+
+    Do NOT mark the task `done`.  Instead:
+
+    ```bash
+    python3 script.py set-status --id <N> --status scaffold
+    ```
+
+    Then:
+    - Log to `execute-log.jsonl`: `"reachability_verdict": "ORPHAN"` (or
+      `"ERROR"`), `"auto_downgraded": true`, and a plain-English note of
+      which modules are unwired (from the sweep's `modules` list in the
+      CDD card).
+    - **Do NOT halt the loop** — continue to the next task (step 1).
+      An ORPHAN module is scaffolded work, not blocked work.  The ship
+      gate (Gate 6, RA3) will report it honestly as `scaffold`, not `done`.
+    - If you need to wire the module, create a follow-up task
+      (`title: "Wire <module> into <entrypoint>"`) and append it via
+      `python3 script.py expand --id <N>` or the MCP equivalent.
+
+    > **Throughline:** a green test on a module imported by nothing is not
+    > done — wire it or it ships as scaffold.  The auto-downgrade ensures
+    > the task graph stays honest: Gate 6 will block the ship until every
+    > wired/live task's reachability block reads WIRED or EXEMPT.  If all
+    > wired/live tasks auto-downgraded to scaffold, the ship check will
+    > block at Gate 2 ("not every task is done") and the developer must
+    > choose: wire the modules, re-tier them (spike/domain-model), or mark
+    > them explicitly exempt (`reachableVia: cli:...`).  There is no silent
+    > path to SHIP_CHECK_OK with an unwired module at a wired/live tier.
 
 11. **Check stepback triggers**: if 15 minutes have passed with no task
     moving to done, OR 5 consecutive iterations have failed on the same
@@ -269,8 +353,8 @@ top of `${CLAUDE_PLUGIN_ROOT}/skel/ship-check.py` (copied to `.atlas-ai/ship-che
 
 Gate 5 is the convergent must-do from the 2026-06-04 audit — a "PASS"
 label on a non-zero-exit test is structurally impossible after this
-script runs (modulo the explicit `--override SHIP_CHECK_OVERRIDE_ADMIN`
-audit-logged bypass).
+script runs. There is no override path for Gate 5; it is the unfakable
+oracle.
 
 Do not emit SHIP_CHECK_OK on a mere "DONE" keyword in a subagent reply.
 Do not emit on "all tasks marked done" without the explicit ship-check.
@@ -293,7 +377,7 @@ Every iteration appends a structured row to
 `.atlas-ai/state/execute-log.jsonl`. Field types are strict — text
 narrative in a typed field is a logging bug, not compliance. The schema:
 
-- `iteration` (integer, or `"FINAL"` / `"OVERRIDE"` for terminal markers)
+- `iteration` (integer, or `"FINAL"` for the terminal marker)
 - `timestamp` (ISO 8601 string)
 - `task_id` (string)
 - `complexity` (integer or human label)

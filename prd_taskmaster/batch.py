@@ -9,9 +9,9 @@ whole phase and return a human-presentable summary.
 import json
 
 from prd_taskmaster import fleet
-from prd_taskmaster.backend import get_backend
+from prd_taskmaster.backend import NativeBackend, get_backend
 from prd_taskmaster.capabilities import run_detect_capabilities
-from prd_taskmaster.lib import CommandError, emit, fail
+from prd_taskmaster.lib import CommandError, _detect_taskmaster_method, emit, fail
 from prd_taskmaster.preflight import run_detect_taskmaster, run_preflight
 from prd_taskmaster.providers import run_configure_providers, run_detect_providers
 
@@ -29,43 +29,46 @@ def _backend_source() -> str:
     return "auto"
 
 
-def _backend_ai_ops(selected: str, taskmaster_detect: dict, native_detect: dict) -> str:
-    if selected == "taskmaster":
-        return "taskmaster-api" if taskmaster_detect.get("available") else "agent"
+def _backend_ai_ops(native_detect: dict) -> str:
     if native_detect.get("ai_ops") == "api":
         return "native-api"
     return "agent"
 
 
 def _backend_block() -> dict:
-    cfg = fleet.load_fleet_config()
-    selected = get_backend(cfg).name
-    taskmaster_detect = get_backend({"backend": "taskmaster"}).detect()
-    native_detect = get_backend({"backend": "native"}).detect()
+    selected = get_backend(fleet.load_fleet_config()).name
+    # The task-master backend was removed (spec §9.4): native is the sole
+    # generator. The `taskmaster` entry is now an informational file-format/binary
+    # presence probe (via the surviving _detect_taskmaster_method), never a
+    # selectable backend — so engine-preflight stays honest about the optional
+    # binary without depending on the deleted TaskMasterBackend class.
+    tm_detected = _detect_taskmaster_method()
+    tm_available = tm_detected.get("method") in ("cli", "mcp")
+    native_detect = NativeBackend().detect()
     return {
         "selected": selected,
         "source": _backend_source(),
         "taskmaster": {
-            "available": bool(taskmaster_detect.get("available")),
-            "version": taskmaster_detect.get("version"),
-            "min_ok": bool(taskmaster_detect.get("available")),
+            "available": tm_available,
+            "version": tm_detected.get("version"),
+            "min_ok": tm_available,
         },
         "native": {
             "api_provider": native_detect.get("api_provider"),
             "agent_fallback": True,
         },
-        "ai_ops": _backend_ai_ops(selected, taskmaster_detect, native_detect),
+        "ai_ops": _backend_ai_ops(native_detect),
     }
 
 
 def _backend_summary(block: dict) -> str:
-    if block.get("selected") == "taskmaster":
-        version = block.get("taskmaster", {}).get("version")
-        version_text = f" v{version}" if version else ""
-        return f"Backend: taskmaster{version_text} ({block.get('source', 'auto')})"
     provider = block.get("native", {}).get("api_provider")
     if provider:
-        return f"Backend: native (api: {provider})"
+        # Be explicit that this is the structured-generation (parse/expand) path,
+        # which is independent of the execution provider reported on the
+        # "Provider:" line. Showing only "api: openai" next to "Provider:
+        # claude-code" read as a contradiction in dogfooding (friction #4).
+        return f"Backend: native (structured-gen via {provider} API)"
     return "Backend: native (agent-driven)"
 
 
@@ -81,12 +84,28 @@ def run_engine_preflight(configure: bool = True) -> dict:
     taskmaster = run_detect_taskmaster()
     backend = _backend_block()
 
+    # When the caller asks to configure (the default), always return a structured
+    # result — never a silent null. On a fresh project there is no .taskmaster
+    # config to write yet, so report the step as explicitly deferred rather than
+    # leaving providers_configured == None, which read as a no-op in dogfooding
+    # (friction #5: "configure step that's a no-op").
     providers_configured = None
-    if configure and preflight.get("has_taskmaster"):
-        try:
-            providers_configured = run_configure_providers()
-        except CommandError as e:
-            providers_configured = {"ok": False, "error": e.message, **e.extra}
+    if configure:
+        if preflight.get("has_taskmaster"):
+            try:
+                providers_configured = run_configure_providers()
+            except CommandError as e:
+                providers_configured = {"ok": False, "error": e.message, **e.extra}
+        else:
+            providers_configured = {
+                "ok": True,
+                "status": "deferred",
+                "changed": [],
+                "reason": (
+                    "no .taskmaster project yet; provider configuration runs "
+                    "automatically after init-project"
+                ),
+            }
 
     providers = run_detect_providers()
     capabilities = run_detect_capabilities()
@@ -113,6 +132,17 @@ def run_engine_preflight(configure: bool = True) -> dict:
         )
     else:
         summary.append("Project: fresh (no .taskmaster yet)")
+
+    # Make the configure step's outcome visible so it never reads as a no-op.
+    if isinstance(providers_configured, dict):
+        if providers_configured.get("status") == "deferred":
+            summary.append("Providers: configuration deferred (runs after init-project)")
+        elif providers_configured.get("changed"):
+            summary.append(
+                "Providers: configured (" + ", ".join(providers_configured["changed"]) + ")"
+            )
+        elif providers_configured.get("ok"):
+            summary.append("Providers: already configured (no changes needed)")
 
     return {
         "ok": True,

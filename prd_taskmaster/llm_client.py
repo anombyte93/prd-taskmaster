@@ -64,6 +64,10 @@ def discover_key():
             return None  # free proxy: agent path only
         return {"provider": "openai-compatible", "key": key, "base_url": base}
 
+    key = _env_or_dotenv("GOOGLE_API_KEY") or _env_or_dotenv("GEMINI_API_KEY")
+    if key:
+        return {"provider": "google", "key": key, "base_url": "https://generativelanguage.googleapis.com/v1beta"}
+
     return None
 
 
@@ -73,6 +77,8 @@ def _resolve_model(model, tier, provider):
     if provider == "anthropic":
         short = {"fast": "haiku", "standard": "sonnet", "capable": "opus", "frontier": "fable"}.get(tier or "standard", "sonnet")
         return TIER_MODEL_IDS.get(short, TIER_MODEL_IDS["sonnet"])
+    if provider == "google":
+        return "gemini-2.5-flash"
     return DEFAULT_OPENAI_MODEL
 
 
@@ -131,12 +137,18 @@ def _usage_int(value):
 
 
 def _usage_fields(provider, data):
-    usage = data.get("usage") if isinstance(data, dict) else None
+    if provider == "google":
+        usage = data
+    else:
+        usage = data.get("usage") if isinstance(data, dict) else None
     if not isinstance(usage, dict):
         return {}
     if provider == "anthropic":
         tokens_in = _usage_int(usage.get("input_tokens"))
         tokens_out = _usage_int(usage.get("output_tokens"))
+    elif provider == "google":
+        tokens_in = _usage_int(usage.get("promptTokenCount"))
+        tokens_out = _usage_int(usage.get("candidatesTokenCount"))
     else:
         tokens_in = _usage_int(usage.get("prompt_tokens"))
         tokens_out = _usage_int(usage.get("completion_tokens"))
@@ -160,6 +172,17 @@ def _http_call(creds, model, system, prompt, max_tokens, timeout):
         }
         if system:
             body["system"] = system
+    elif creds["provider"] == "google":
+        base = creds["base_url"].rstrip("/")
+        url = f"{base}/models/{model}:generateContent"
+        headers = {
+            "x-goog-api-key": creds["key"],
+            "Content-Type": "application/json",
+        }
+        contents = [{"role": "user", "parts": [{"text": prompt}]}]
+        body = {"contents": contents, "generationConfig": {"maxOutputTokens": max_tokens}}
+        if system:
+            body["system_instruction"] = {"parts": [{"text": system}]}
     else:
         base = creds["base_url"].rstrip("/")
         url = base + "/chat/completions"
@@ -178,10 +201,13 @@ def _http_call(creds, model, system, prompt, max_tokens, timeout):
     req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read().decode())
-    usage = _usage_fields(creds["provider"], data)
+    usage_for_telemetry = _usage_fields(creds["provider"], data.get("usageMetadata", {})) if creds["provider"] == "google" else _usage_fields(creds["provider"], data)
+
     if creds["provider"] == "anthropic":
-        return data["content"][0]["text"], usage
-    return data["choices"][0]["message"]["content"], usage
+        return data["content"][0]["text"], usage_for_telemetry
+    elif creds["provider"] == "google":
+        return data["candidates"][0]["content"]["parts"][0]["text"], usage_for_telemetry
+    return data["choices"][0]["message"]["content"], usage_for_telemetry
 
 
 def generate_json(prompt, *, system="", schema_hint="", model=None, tier=None,

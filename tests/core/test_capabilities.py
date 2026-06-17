@@ -189,11 +189,15 @@ class TestValidateSetup:
             assert "fix" in check
 
     def test_validate_setup_fails_without_binary(self, monkeypatch, tmp_path):
-        """binary check fails when task-master is not in PATH."""
+        """binary check fails (hard) when task-master is not in PATH — but only in
+        plan_only mode. The hybrid engine no longer requires the binary, so the
+        binary check + its npm-install fix is only a HARD gate under plan_only
+        (Chunk 5: task-master checks went advisory off plan_only). Pinned to
+        plan_only to assert the hard-gate behavior this test was written for."""
         monkeypatch.setenv("PATH", str(tmp_path))  # empty dir — no binary
         monkeypatch.chdir(tmp_path)
 
-        result = validate_setup()
+        result = validate_setup(provider_mode="plan_only")
 
         binary_check = next(c for c in result["checks"] if c["id"] == "binary")
         assert binary_check["passed"] is False
@@ -234,14 +238,18 @@ class TestValidateSetup:
         assert result["critical_failures"] == 0
 
     def test_validate_setup_critical_failures_count(self, monkeypatch, tmp_path):
-        """critical_failures counts non-warning failed checks only."""
+        """critical_failures counts failed checks that are neither 'warning' nor
+        'advisory'. (Chunk 5 added the 'advisory' severity for the task-master
+        binary/version checks off plan_only — the in-test filter mirrors the
+        impl's definition of 'critical'.)"""
         monkeypatch.setenv("PATH", str(tmp_path))
         monkeypatch.chdir(tmp_path)
 
         result = validate_setup()
 
+        _non_critical = {"warning", "advisory"}
         critical_ids = [
             c["id"] for c in result["checks"]
-            if not c["passed"] and c.get("severity") != "warning"
+            if not c["passed"] and c.get("severity") not in _non_critical
         ]
         assert result["critical_failures"] == len(critical_ids)

@@ -1,0 +1,128 @@
+direction: right
+classes: {
+  llm:   { style.fill: "#E69F00"; style.stroke: "#8a6100"; style.font-color: "#111111"; shape: hexagon }
+  code:  { style.fill: "#56B4E9"; style.stroke: "#1f6f9c"; style.font-color: "#111111" }
+  ext:   { style.fill: "#009E73"; style.stroke: "#00674c"; style.font-color: "#ffffff"; shape: oval }
+  iface: { style.fill: "#0072B2"; style.stroke: "#013a5e"; style.font-color: "#ffffff" }
+  gate:  { style.fill: "#F0E442"; style.stroke: "#9a8f00"; style.font-color: "#111111"; shape: diamond }
+  human: { style.fill: "#CC79A7"; style.font-color: "#111111"; shape: person }
+}
+
+title: "prd-taskmaster · deterministic core — phase state-machine, gates, task graph" { near: top-center; shape: text; style.font-size: 22 }
+
+sm: "Phase State Machine · Gates" {
+  pipeline: "pipeline.py" {
+    advance: "advance_phase() · CAS on expected_current" { class: code }
+    legal: "LEGAL_TRANSITIONS · SETUP DISCOVER GENERATE HANDOFF EXECUTE" { class: code }
+    gate: "check_gate(phase, evidence)" { class: gate }
+    pre: "preflight() · recommended_action ladder" { class: code }
+  }
+  ship: "shipcheck.py" {
+    g1: "Gate1 · pipeline.json current_phase == EXECUTE" { class: gate }
+    g2: "Gate2 · every task status == done" { class: gate }
+    g3: "Gate3 · CDD card per task id" { class: gate }
+    g4: "Gate4 · plan.md exists" { class: gate }
+    g5: "Gate5 HARD · no non-zero Exit status N" { class: gate }
+    run: "run_ship_check() · run_all_gates()" { class: code }
+    token: "SHIP_CHECK_OK" { class: iface }
+  }
+}
+
+grade: "Spec Grader" {
+  valid: "validation.py" {
+    vprd: "run_validate_prd() · 13 checks · score to grade" { class: code }
+    ph: "placeholder detect · HARD FAIL floors NEEDS_WORK" { class: gate }
+    vtasks: "run_validate_tasks() · structural task lint" { class: code }
+  }
+}
+
+graph: "Task Graph Ops" {
+  tasks: "tasks.py" {
+    calc: "run_calc_tasks() · ceil(req x 1.5) clamped to scale band" { class: code }
+    enrich: "run_enrich_tasks() · write phaseConfig" { class: code }
+    classify: "_classify_task() · SIMPLE MEDIUM COMPLEX RESEARCH VALIDATION" { class: code }
+  }
+  tstate: "task_state.py" {
+    next: "run_next_task() · in-progress then ready select" { class: code }
+    claim: "run_claim_task() · select plus mark in-progress" { class: code }
+    setst: "run_set_status() · update under flock" { class: code }
+  }
+}
+
+sched: "Scheduler · Parallel Merge" {
+  fleet: "fleet.py" {
+    waves: "compute_waves() · dependency-ordered frontier chunks" { class: code }
+    ready: "ready_set() · pending with deps done" { class: code }
+    route: "route_task() · tier to backend:model" { class: code }
+    runwaves: "run_fleet_waves() · waves plus routing" { class: code }
+  }
+  par: "parallel.py · agent-parallel research; hybrid SINGLE-WRITER merge" {
+    packets: "build_packets() · one research packet per task" { class: code }
+    apply: "apply_results() · merge subtasks plus complexity in ONE atomic write" { class: code }
+    flat: "extract · inject · tag bridge to flat tasks.json" { class: code }
+  }
+}
+
+substrate: "Substrate Floor (leaf)" {
+  lib: "lib.py" {
+    locked: "locked_update() · flock LOCK_EX read-modify-write" { class: code }
+    atomic: "atomic_write() · tmp plus os.replace" { class: code }
+    resolve: "_resolve_tasks_payload() · tagged-over-flat" { class: code }
+    helpers: "read_json · write_json · CommandError · VAGUE_PATTERN" { class: code }
+  }
+}
+
+tasksjson: "tasks.json · pipeline.json · validation.json" { class: ext }
+
+# ── phase machine internal flow ──
+sm.pipeline.advance -> sm.pipeline.legal: "validates transition"
+sm.pipeline.gate -> sm.pipeline.advance: "must pass before advance"
+sm.pipeline.pre -> tasksjson: "reads state"
+
+# ── ship-check gate chain ──
+sm.ship.run -> sm.ship.g1: "runs"
+sm.ship.run -> sm.ship.g2: "runs"
+sm.ship.run -> sm.ship.g3: "runs"
+sm.ship.run -> sm.ship.g4: "runs"
+sm.ship.run -> sm.ship.g5: "runs"
+sm.ship.g5 -> sm.ship.token: "all pass emits"
+sm.ship.g1 -> tasksjson: "reads current_phase"
+sm.ship.g2 -> tasksjson: "reads task status"
+
+# ── GENERATE gate consumes grader + calc + enrich ──
+grade.valid.vprd -> grade.valid.ph: "placeholder hard-fail"
+grade.valid.vprd -> sm.pipeline.gate: "validation_grade evidence"
+graph.tasks.calc -> sm.pipeline.gate: "task_count evidence"
+graph.tasks.enrich -> graph.tasks.classify: "uses"
+
+# ── parallel expand feeds enrich + classify ──
+sched.par.packets -> sched.par.apply: "results back"
+sched.par.apply -> graph.tasks.enrich: "expanded tasks then enrich"
+
+# ── selection / scheduling consume the graph ──
+graph.tstate.next -> sched.fleet.ready: "uses ready_set"
+graph.tstate.claim -> graph.tstate.next: "select then claim"
+sched.fleet.runwaves -> sched.fleet.waves: "computes"
+sched.fleet.runwaves -> sched.fleet.route: "per-task routing"
+sched.fleet.route -> sched.fleet.ready: "tier of pending"
+
+# ── task_state depends on fleet + parallel ──
+graph.tstate.next -> sched.fleet.waves: "imports fleet"
+graph.tstate.claim -> sched.par.apply: "imports parallel · get_tasks · TASKS"
+sched.fleet.route -> sched.par.apply: "fleet imports parallel"
+
+# ── EVERYTHING points to the lib.py substrate floor ──
+sm.pipeline.advance -> substrate.lib.locked: "locked_update CAS"
+sm.pipeline.pre -> substrate.lib.helpers: "read_json"
+graph.tasks.enrich -> substrate.lib.resolve: "_resolve_tasks_payload"
+grade.valid.vtasks -> substrate.lib.resolve: "tagged-over-flat"
+grade.valid.vprd -> substrate.lib.helpers: "VAGUE_PATTERN · sections"
+graph.tstate.claim -> substrate.lib.locked: "claim under flock"
+graph.tstate.setst -> substrate.lib.locked: "set-status under flock"
+sched.fleet.waves -> substrate.lib.helpers: "CommandError · emit"
+sched.par.apply -> substrate.lib.atomic: "own atomic write · single-writer"
+
+# ── persisted state lives behind the locked/atomic substrate ──
+substrate.lib.locked -> tasksjson: "atomic CAS writes"
+substrate.lib.atomic -> tasksjson: "atomic writes"
+

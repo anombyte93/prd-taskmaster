@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import tempfile
 import time
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
 import prd_taskmaster
-from prd_taskmaster import fleet, llm_client, parallel, taskmaster, tm_parallel
+from prd_taskmaster import cli_agent, fleet, llm_client, parallel
 from prd_taskmaster.economy import append_telemetry, economy_profile, shift_tier
-from prd_taskmaster.lib import CommandError, _detect_taskmaster_method, now_iso
+from prd_taskmaster.provider_resolver import resolve_provider
+from prd_taskmaster.lib import CommandError, now_iso
 from prd_taskmaster.validation import run_validate_tasks
 
 
@@ -28,9 +29,6 @@ class Backend(Protocol):
     def rate(self, tag=None, research=True) -> dict: ...
 
 
-_FACTORY_TOKEN = object()
-
-
 TASKS_SCHEMA_HINT = """{
   "tasks": [
     {
@@ -42,6 +40,8 @@ TASKS_SCHEMA_HINT = """{
       "status": "pending",
       "dependencies": [],
       "priority": "high",
+      "tier": "domain-model",
+      "reachableVia": "",
       "subtasks": [
         {
           "id": 1,
@@ -66,7 +66,12 @@ Rules: generate exactly the requested task count unless the PRD is smaller; ever
 task must include id, title, description, details, testStrategy, status,
 dependencies, priority, and at least 2 subtasks; dependencies must reference
 existing task or sibling subtask IDs; use only priority high, medium, or low;
-do not include placeholders, generic tasks, or empty testStrategy fields."""
+do not include placeholders, generic tasks, or empty testStrategy fields;
+tier ∈ {spike|domain-model|wired|live}: the altitude of the claim — spike=research,
+domain-model=pure logic, wired=integration, live=user-visible; wired/live require
+reachability evidence (the deterministic enrich step will set this if omitted);
+reachableVia names the existing route/component/CLI/tool/API the new code wires into;
+required for wired/live tasks (a task naming no consumer is an orphan by design)."""
 
 
 PARALLEL_RESULT_SCHEMA_HINT = """{
@@ -146,13 +151,6 @@ def _pending_tasks(tag: str | None, task_ids: Any = None) -> tuple[str, list[dic
         if str(task.get("status", "pending")) == "pending":
             pending.append(task)
     return resolved, pending
-
-
-def _binary_or_raise() -> str:
-    binary = taskmaster._find_binary()
-    if not binary:
-        raise CommandError("task-master binary not found in PATH")
-    return binary
 
 
 def _read_json(path: Path) -> dict | None:
@@ -237,6 +235,7 @@ def _task_summaries(tasks: list[dict]) -> list[dict]:
             "dependencies": task.get("dependencies") or [],
             "status": task.get("status", "pending"),
             "subtask_count": len(task.get("subtasks") or []),
+            "reachableVia": task.get("reachableVia", ""),
         })
     return summaries
 
@@ -301,6 +300,14 @@ def _report_candidates(tag: str | None) -> list[Path]:
     return paths
 
 
+def _cli_timeout(config: dict | None = None) -> int:
+    return int(fleet.engine_config(config)["cli_agent"]["per_call_timeout_s"])
+
+
+def _cli_structured_mode(config: dict | None = None) -> str:
+    return str(fleet.engine_config(config)["cli_agent"]["structured_json"])
+
+
 class NativeBackend(Backend):
     name = "native"
 
@@ -342,7 +349,8 @@ class NativeBackend(Backend):
         }
 
     def parse_prd(self, prd_path, num_tasks, tag=None) -> dict:
-        if not llm_client.discover_key():
+        handle = resolve_provider("main")
+        if handle.kind == "plan":
             return {
                 "ok": False,
                 "agent_action_required": _agent_parse_action(prd_path, num_tasks, tag),
@@ -360,7 +368,10 @@ class NativeBackend(Backend):
         prompt = (
             f"Parse this PRD into exactly {num_tasks} TaskMaster-compatible tasks.\n"
             f"Target tag: {tag or parallel.current_tag(None)}.\n"
-            "Return only the tasks JSON object.\n\n"
+            "Return only the tasks JSON object.\n"
+            "For wired/live tier tasks, set reachableVia to the existing route, component, CLI, "
+            "tool, or API that this task's code wires into (e.g. 'route:/api/v1/orders', "
+            "'cli:prd-taskmaster', 'component:OrdersTable').\n\n"
             f"PRD PATH: {path}\n"
             f"PRD:\n{prd_text}"
         )
@@ -369,28 +380,47 @@ class NativeBackend(Backend):
             "the Native Mode tasks.json path."
         )
 
-        try:
-            generated = llm_client.generate_json(
-                prompt,
-                system=system,
-                schema_hint=TASKS_SCHEMA_HINT,
-                tier=tier,
-                op_class="structured_gen",
-                return_telemetry_ref=True,
-            )
-        except llm_client.LLMError as exc:
-            if exc.kind == "no_key":
+        telemetry_ref = None
+        if handle.kind == "cli":
+            try:
+                candidate = cli_agent.generate_json_via_cli(
+                    handle.provider,
+                    prompt,
+                    system=system,
+                    schema_hint=TASKS_SCHEMA_HINT,
+                    model=handle.model,
+                    op_class="structured_gen",
+                    timeout=_cli_timeout(config),
+                    structured_json=_cli_structured_mode(config),
+                )
+            except cli_agent.CliAgentError:
                 return {
                     "ok": False,
                     "agent_action_required": _agent_parse_action(prd_path, num_tasks, tag),
                 }
-            return {"ok": False, "error": str(exc), "kind": exc.kind, "backend": "native"}
-
-        telemetry_ref = None
-        if isinstance(generated, tuple) and len(generated) == 2:
-            candidate, telemetry_ref = generated
+            ai_label = "cli"
         else:
-            candidate = generated
+            try:
+                generated = llm_client.generate_json(
+                    prompt,
+                    system=system,
+                    schema_hint=TASKS_SCHEMA_HINT,
+                    tier=tier,
+                    op_class="structured_gen",
+                    return_telemetry_ref=True,
+                )
+            except llm_client.LLMError as exc:
+                if exc.kind == "no_key":
+                    return {
+                        "ok": False,
+                        "agent_action_required": _agent_parse_action(prd_path, num_tasks, tag),
+                    }
+                return {"ok": False, "error": str(exc), "kind": exc.kind, "backend": "native"}
+            if isinstance(generated, tuple) and len(generated) == 2:
+                candidate, telemetry_ref = generated
+            else:
+                candidate = generated
+            ai_label = "api"
 
         try:
             tasks, validation = _validate_task_candidate(candidate)
@@ -411,7 +441,7 @@ class NativeBackend(Backend):
             "task_count": len(tasks),
             "tag": resolved,
             "backend": "native",
-            "ai": "api",
+            "ai": ai_label,
             "validation": validation,
         }
         if telemetry_ref is not None:
@@ -427,7 +457,8 @@ class NativeBackend(Backend):
         except Exception as exc:
             return {"ok": False, "error": str(exc), "backend": "native"}
 
-        if not llm_client.discover_key():
+        handle = resolve_provider("main")
+        if handle.kind == "plan":
             return {
                 "ok": False,
                 "tag": resolved,
@@ -443,7 +474,7 @@ class NativeBackend(Backend):
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = [
-                executor.submit(self._expand_packet, packet, profile, research)
+                executor.submit(self._expand_packet, packet, profile, research, handle, config)
                 for packet in packets
             ]
             for future in as_completed(futures):
@@ -475,10 +506,12 @@ class NativeBackend(Backend):
             "failed": failed,
             "results": outcomes,
             "backend": "native",
-            "ai": "api",
+            "ai": handle.kind,
         }
 
-    def _expand_packet(self, packet: dict, profile: dict, research: bool) -> dict:
+    def _expand_packet(
+        self, packet: dict, profile: dict, research: bool, handle: Any, config: dict | None = None
+    ) -> dict:
         task_id = packet.get("id")
         start_tier = profile.get("structured_gen_start", "standard")
         prompt = packet.get("prompt", "")
@@ -488,6 +521,29 @@ class NativeBackend(Backend):
             "You are the prd-taskmaster native backend expansion engine. Return "
             "one strict JSON result object for parallel.apply_results."
         )
+
+        if handle.kind == "cli":
+            try:
+                result = cli_agent.generate_json_via_cli(
+                    handle.provider,
+                    prompt,
+                    system=system,
+                    schema_hint=PARALLEL_RESULT_SCHEMA_HINT,
+                    model=handle.model,
+                    op_class="structured_gen",
+                    task_id=task_id,
+                    timeout=_cli_timeout(config),
+                    structured_json=_cli_structured_mode(config),
+                )
+            except cli_agent.CliAgentError as exc:
+                return {
+                    "ok": False,
+                    "task_id": task_id,
+                    "error": str(exc),
+                    "kind": exc.kind,
+                    "escalated": False,
+                }
+            return self._packet_success(packet, result, escalated=False)
 
         try:
             result = llm_client.generate_json(
@@ -586,7 +642,8 @@ class NativeBackend(Backend):
             return {"ok": False, "error": str(exc), "backend": "native"}
 
         summaries = _task_summaries(tasks)
-        if not llm_client.discover_key():
+        handle = resolve_provider("main")
+        if handle.kind == "plan":
             return {
                 "ok": False,
                 "tag": resolved,
@@ -607,22 +664,43 @@ class NativeBackend(Backend):
             "You are the prd-taskmaster native backend complexity engine. Return "
             "strict JSON in TaskMaster complexity report format."
         )
-        try:
-            candidate = llm_client.generate_json(
-                prompt,
-                system=system,
-                schema_hint=COMPLEXITY_REPORT_SCHEMA_HINT,
-                tier=tier,
-                op_class="structured_gen",
-            )
-        except llm_client.LLMError as exc:
-            if exc.kind == "no_key":
+        if handle.kind == "cli":
+            try:
+                candidate = cli_agent.generate_json_via_cli(
+                    handle.provider,
+                    prompt,
+                    system=system,
+                    schema_hint=COMPLEXITY_REPORT_SCHEMA_HINT,
+                    model=handle.model,
+                    op_class="structured_gen",
+                    timeout=_cli_timeout(config),
+                    structured_json=_cli_structured_mode(config),
+                )
+            except cli_agent.CliAgentError:
                 return {
                     "ok": False,
                     "tag": resolved,
                     "agent_action_required": _agent_rate_action(resolved, summaries),
                 }
-            return {"ok": False, "error": str(exc), "kind": exc.kind, "backend": "native"}
+            ai_label = "cli"
+        else:
+            try:
+                candidate = llm_client.generate_json(
+                    prompt,
+                    system=system,
+                    schema_hint=COMPLEXITY_REPORT_SCHEMA_HINT,
+                    tier=tier,
+                    op_class="structured_gen",
+                )
+            except llm_client.LLMError as exc:
+                if exc.kind == "no_key":
+                    return {
+                        "ok": False,
+                        "tag": resolved,
+                        "agent_action_required": _agent_rate_action(resolved, summaries),
+                    }
+                return {"ok": False, "error": str(exc), "kind": exc.kind, "backend": "native"}
+            ai_label = "api"
 
         if isinstance(candidate, dict):
             analysis = candidate.get("complexityAnalysis")
@@ -661,195 +739,8 @@ class NativeBackend(Backend):
             "complexityAnalysis": analysis,
             "raw": report,
             "backend": "native",
-            "ai": "api",
+            "ai": ai_label,
         }
-
-
-class TaskMasterBackend(Backend):
-    name = "taskmaster"
-
-    def __init__(self, _factory_token: object | None = None) -> None:
-        if _factory_token is not _FACTORY_TOKEN:
-            raise CommandError("TaskMasterBackend must be constructed through get_backend")
-
-    def detect(self) -> dict:
-        detected = _detect_taskmaster_method()
-        gate = tm_parallel._version_gate()
-        missing: list[str] = []
-
-        def add_missing(message: object) -> None:
-            if message and str(message) not in missing:
-                missing.append(str(message))
-
-        if detected.get("method") == "none":
-            add_missing("task-master binary not found in PATH")
-        if not gate.get("ok"):
-            add_missing(gate.get("error"))
-
-        available = bool(gate.get("ok"))
-        return {
-            "name": "taskmaster",
-            "available": available,
-            "version": gate.get("detected_version") or detected.get("version"),
-            "ai_ops": available,
-            "missing": missing,
-        }
-
-    def init_project(self) -> dict:
-        return taskmaster.init_taskmaster()
-
-    def parse_prd(self, prd_path, num_tasks, tag=None) -> dict:
-        binary = _binary_or_raise()
-        result = subprocess.run(
-            [binary, "parse-prd", "--input", str(prd_path), "--num-tasks", str(num_tasks)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            d = {
-                "ok": False,
-                "task_count": 0,
-                "exit": result.returncode,
-                "stderr": result.stderr,
-            }
-            d.setdefault("backend", "taskmaster")
-            d.setdefault("ai", "taskmaster-cli")
-            return d
-        _resolved, tasks = _load_tasks(tag)
-        if not tasks:
-            # P1-1: a 0-exit parse that produced no tasks is NOT success — it is the
-            # silent failure that lets the pipeline treat an empty graph as "done".
-            d = {
-                "ok": False,
-                "task_count": 0,
-                "exit": result.returncode,
-                "error": (
-                    "parse-prd exited 0 but produced 0 tasks — the model returned no "
-                    "tasks. Check provider credentials (run: python3 script.py "
-                    "configure-providers) and the PRD content."
-                ),
-            }
-            d.setdefault("backend", "taskmaster")
-            d.setdefault("ai", "taskmaster-cli")
-            return d
-        d = {"ok": True, "task_count": len(tasks)}
-        d.setdefault("backend", "taskmaster")
-        d.setdefault("ai", "taskmaster-cli")
-        return d
-
-    def expand(self, task_ids=None, research=True, tag=None) -> dict:
-        resolved, pending = _pending_tasks(tag, task_ids)
-        if len(pending) > 3:
-            res = tm_parallel.run_tm_parallel(tag=tag)
-            d = dict(res)
-            d.setdefault("backend", "taskmaster")
-            d.setdefault("ai", "taskmaster-cli")
-            return d
-        if not pending:
-            d = {"ok": True, "tag": resolved, "expanded": [], "failed": [], "results": []}
-            d.setdefault("backend", "taskmaster")
-            d.setdefault("ai", "taskmaster-cli")
-            return d
-
-        binary = _binary_or_raise()
-        results = []
-        expanded = []
-        failed = []
-        any_degraded = False
-        for task in pending:
-            task_id = task.get("id")
-            cmd = [binary, "expand", "--id", str(task_id)]
-            if research:
-                cmd.append("--research")
-            start = time.monotonic()
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            wall_ms = int((time.monotonic() - start) * 1000)
-            degraded = False
-            if result.returncode != 0 and research:
-                # P0-3: research provider down (quota/auth). Degrade to a structural
-                # expand (no --research) — always available, still verifiable —
-                # rather than hard-failing this task to 0 subtasks.
-                s_start = time.monotonic()
-                result = subprocess.run(
-                    [binary, "expand", "--id", str(task_id)],
-                    capture_output=True,
-                    text=True,
-                )
-                wall_ms += int((time.monotonic() - s_start) * 1000)
-                degraded = True
-                any_degraded = True
-            append_telemetry({
-                "ts": now_iso(),
-                "op_class": "structured_gen",
-                "task_id": task_id,
-                "model": "",
-                "backend": "taskmaster-api",
-                "exit": result.returncode,
-                "wall_ms": wall_ms,
-                "escalated": False,
-                "degraded": degraded,
-            })
-            item = {
-                "task_id": task_id,
-                "exit": result.returncode,
-                "wall_ms": wall_ms,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "degraded": degraded,
-            }
-            results.append(item)
-            if result.returncode == 0:
-                expanded.append(task_id)
-            else:
-                failed.append(task_id)
-        d = {
-            "ok": not failed,
-            "tag": resolved,
-            "expanded": expanded,
-            "failed": failed,
-            "results": results,
-        }
-        if any_degraded:
-            d["degraded"] = True
-        d.setdefault("backend", "taskmaster")
-        d.setdefault("ai", "taskmaster-cli")
-        return d
-
-    def rate(self, tag=None, research=True) -> dict:
-        binary = _binary_or_raise()
-        cmd = [binary, "analyze-complexity"]
-        if research:
-            cmd.append("--research")
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            d = {"ok": False, "exit": result.returncode, "stderr": result.stderr}
-            d.setdefault("backend", "taskmaster")
-            d.setdefault("ai", "taskmaster-cli")
-            return d
-
-        resolved = parallel.current_tag(tag)
-        for path in _report_candidates(resolved):
-            raw = _read_json(path)
-            if raw is not None:
-                d = {
-                    "ok": True,
-                    "tag": resolved,
-                    "report": str(path),
-                    "complexityAnalysis": raw.get("complexityAnalysis", []),
-                    "raw": raw,
-                }
-                d.setdefault("backend", "taskmaster")
-                d.setdefault("ai", "taskmaster-cli")
-                return d
-        d = {
-            "ok": False,
-            "tag": resolved,
-            "report": None,
-            "error": "task complexity report not found",
-        }
-        d.setdefault("backend", "taskmaster")
-        d.setdefault("ai", "taskmaster-cli")
-        return d
 
 
 def get_backend(cfg=None) -> Backend:
@@ -857,11 +748,18 @@ def get_backend(cfg=None) -> Backend:
     backend = config.get("backend", "auto") if isinstance(config, dict) else "auto"
 
     if backend == "taskmaster":
-        return TaskMasterBackend(_FACTORY_TOKEN)
-    if backend == "native":
-        return NativeBackend()
+        # The taskmaster backend was removed (spec §9.4): a legacy fleet.json
+        # still pinned to it resolves to native (the sole generator) rather than
+        # crashing, with a deprecation warning pointing at the config key.
+        warnings.warn(
+            "backend='taskmaster' has been removed; using the native engine. "
+            "Remove the 'backend' key from .atlas-ai/fleet.json (or set it to "
+            "'native') to silence this warning.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
-    taskmaster_backend = TaskMasterBackend(_FACTORY_TOKEN)
-    if taskmaster_backend.detect().get("available"):
-        return taskmaster_backend
+    # backend == "native" OR "auto" (the default) OR a removed "taskmaster":
+    # the native engine is the sole generator. 'auto' no longer probes for the
+    # task-master binary — it resolves to NativeBackend unconditionally (spec §9.2).
     return NativeBackend()

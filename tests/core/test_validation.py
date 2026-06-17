@@ -12,10 +12,12 @@ Contract differences from the plugin's 14-check validate_prd:
 - missing file raises CommandError instead of returning {"ok": False}
 """
 
+import json
+
 import pytest
 
 from prd_taskmaster.lib import CommandError
-from prd_taskmaster.validation import run_validate_prd
+from prd_taskmaster.validation import run_validate_prd, run_validate_tasks
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -505,3 +507,391 @@ class TestWarningsAreLocated:
         assert out["placeholder_details"], "expected a placeholder finding"
         for pd in out["placeholder_details"]:
             assert "match" in pd and isinstance(pd.get("line"), int) and pd["line"] >= 1
+
+
+# ─── Helpers for run_validate_tasks tests ─────────────────────────────────────
+
+def _make_tasks_file(tmp_path, tasks: list) -> str:
+    """Write a tasks.json and return the path string."""
+    p = tmp_path / "tasks.json"
+    p.write_text(json.dumps({"tasks": tasks}))
+    return str(p)
+
+
+def _good_task(**overrides) -> dict:
+    """Return a minimal valid task, optionally overriding fields."""
+    base = {
+        "id": 1,
+        "title": "Implement user authentication flow",
+        "description": "Add JWT-based authentication to the REST API endpoints.",
+        "details": "Use PyJWT library, store tokens in Redis with 24h TTL.",
+        "testStrategy": "Write unit tests for token creation and expiry.",
+        "status": "pending",
+        "priority": "high",
+        "dependencies": [],
+    }
+    base.update(overrides)
+    return base
+
+
+# ─── Regression tests for angle-bracket false-positive (Bug: IGNORECASE) ─────
+
+def _validate_tasks_problems(path: str) -> list[str]:
+    """Run run_validate_tasks and return the list of problem strings.
+
+    run_validate_tasks raises CommandError when problems are found; that error
+    carries the list in e.extra["problems"].  When the file is valid it returns
+    {"ok": True, ...} with no problems key.
+    """
+    from prd_taskmaster.lib import CommandError as _CE
+    try:
+        run_validate_tasks(path, allow_empty_subtasks=True, require_phase_config=False)
+        return []
+    except _CE as exc:
+        return exc.extra.get("problems", [])
+
+
+class TestAngleBracketPlaceholderRegex:
+    """Regression suite for the IGNORECASE false-positive in the angle-bracket
+    placeholder sub-pattern (<[A-Z][A-Z_ ]+> compiled with re.IGNORECASE).
+
+    Technical tokens like <code>, <lines>, <bytes>, <filename> are LEGITIMATE
+    in task titles / descriptions (URL path params, wc output format) and must
+    NOT be treated as placeholders.
+
+    True template placeholders like <PLACEHOLDER>, <API_KEY>, <YOUR_VALUE>
+    MUST still be caught.
+    """
+
+    # ── MUST NOT flag (legitimate technical tokens) ────────────────────────
+
+    def test_url_path_param_code_in_title_not_flagged(self, tmp_path):
+        """GET /<code> in a task title must not trigger placeholder detection."""
+        task = _good_task(title="Implement GET /<code> Redirect Endpoint")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"<code> in title was falsely flagged as placeholder: {placeholder_probs}"
+        )
+
+    def test_wc_format_tokens_in_details_not_flagged(self, tmp_path):
+        """<lines> <words> <bytes> <filename> in details must not be flagged."""
+        task = _good_task(
+            details="The wc command output format is: <lines> <words> <bytes> <filename>"
+        )
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"wc format tokens were falsely flagged: {placeholder_probs}"
+        )
+
+    def test_lowercase_angle_token_code_not_flagged(self, tmp_path):
+        """Standalone <code> token must not be flagged."""
+        task = _good_task(description="Returns HTTP <code> on success.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"<code> in description was falsely flagged: {placeholder_probs}"
+        )
+
+    def test_lowercase_angle_token_id_not_flagged(self, tmp_path):
+        """<id> in a task field must not be flagged."""
+        task = _good_task(description="Fetch resource by <id> from the store.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"<id> in description was falsely flagged: {placeholder_probs}"
+        )
+
+    def test_lowercase_angle_token_file_not_flagged(self, tmp_path):
+        """<file> in a task field must not be flagged."""
+        task = _good_task(testStrategy="Run: process <file> and assert exit code is 0.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"<file> in testStrategy was falsely flagged: {placeholder_probs}"
+        )
+
+    def test_html_jsx_tags_in_details_not_flagged(self, tmp_path):
+        """<script>, <Render>, <div> HTML/JSX tags in details must not be flagged."""
+        task = _good_task(
+            details="Inject a <script> tag, mount the <Render> component, wrap it in a <div>."
+        )
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"HTML/JSX tags were falsely flagged: {placeholder_probs}"
+        )
+
+    def test_generic_type_tokens_not_flagged(self, tmp_path):
+        """Generic-type tokens like Config<Props> and Array<string> must not be flagged."""
+        task = _good_task(
+            details="Type the component as Config<Props> and the list as Array<string>."
+        )
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"generic-type tokens were falsely flagged: {placeholder_probs}"
+        )
+
+    def test_capitalized_jsx_component_in_subtask_not_flagged(self, tmp_path):
+        """A capitalized JSX component tag <Render> in a subtask description is legit."""
+        task = _good_task(subtasks=[
+            {"id": 1, "title": "render", "description": "Mount the <Render> component.",
+             "status": "pending", "dependencies": []},
+            {"id": 2, "title": "wire", "description": "Pass props of type Config<Props>.",
+             "status": "pending", "dependencies": [1]},
+        ])
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"JSX component / generic token in subtask was falsely flagged: {placeholder_probs}"
+        )
+
+    def test_next_route_segment_bracket_not_flagged(self, tmp_path):
+        """Next.js route segment [slug] must not be flagged as a placeholder."""
+        task = _good_task(details="Create the dynamic route app/blog/[slug]/page.tsx.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs == [], (
+            f"Next.js [slug] route segment was falsely flagged: {placeholder_probs}"
+        )
+
+    # ── MUST still flag (real template placeholders) ───────────────────────
+
+    def test_uppercase_placeholder_flagged(self, tmp_path):
+        """<PLACEHOLDER> must be caught as a placeholder."""
+        task = _good_task(title="Set up <PLACEHOLDER> integration")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "<PLACEHOLDER> was not caught as a placeholder"
+
+    def test_uppercase_api_key_flagged(self, tmp_path):
+        """<API_KEY> must be caught as a placeholder."""
+        task = _good_task(details="Set the env var to <API_KEY> before deploying.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "<API_KEY> was not caught as a placeholder"
+
+    def test_uppercase_your_value_flagged(self, tmp_path):
+        """<YOUR_VALUE> must be caught as a placeholder."""
+        task = _good_task(testStrategy="Replace <YOUR_VALUE> with the real token.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "<YOUR_VALUE> was not caught as a placeholder"
+
+    def test_uppercase_project_name_flagged(self, tmp_path):
+        """<PROJECT_NAME> must be caught as a placeholder."""
+        task = _good_task(details="Deploy under the <PROJECT_NAME> namespace.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "<PROJECT_NAME> was not caught as a placeholder"
+
+    def test_mustache_placeholder_flagged(self, tmp_path):
+        """{{variable}} mustache tokens must still be caught."""
+        task = _good_task(description="Connect to {{database_url}} endpoint.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "{{variable}} was not caught as a placeholder"
+
+    def test_bracketed_todo_placeholder_flagged(self, tmp_path):
+        """[TODO] token in a task field must still be caught."""
+        task = _good_task(description="[TODO] fill in the implementation details.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "[TODO] was not caught as a placeholder"
+
+    def test_bracketed_tbd_placeholder_flagged(self, tmp_path):
+        """[TBD] token in a task field must still be caught."""
+        task = _good_task(title="Integrate auth [TBD]")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "[TBD] was not caught as a placeholder"
+
+    def test_insert_placeholder_flagged(self, tmp_path):
+        """[INSERT something] token in a task field must still be caught."""
+        task = _good_task(details="Contact [INSERT team name] for review.")
+        problems = _validate_tasks_problems(_make_tasks_file(tmp_path, [task]))
+        placeholder_probs = [p for p in problems if "placeholder" in p.lower()]
+        assert placeholder_probs, "[INSERT ...] was not caught as a placeholder"
+
+    # ── PRD-level: validate_prd must also not false-flag lowercase tokens ──
+
+    def test_prd_lowercase_angle_tokens_not_flagged(self, tmp_project):
+        """run_validate_prd must not false-flag <code>, <lines> etc. in PRD text."""
+        prd = tmp_project / ".taskmaster" / "docs" / "prd.md"
+        prd.write_text(
+            "# PRD\n\n## Executive Summary\nA summary.\n\n"
+            "## Functional Requirements\n"
+            "### API Endpoints\n"
+            "- `GET /<code>` — redirect by short code\n"
+            "- wc output: `<lines> <words> <bytes> <filename>`\n"
+        )
+        out = run_validate_prd(str(prd))
+        angle_bracket_details = [d for d in out.get("placeholder_details", [])
+                                  if d.get("type") == "angle_bracket"]
+        assert angle_bracket_details == [], (
+            f"PRD false-flagged angle-bracket tokens: {angle_bracket_details}"
+        )
+
+
+def _task(tid, *, subtasks=2):
+    """Build a minimally-valid manual-mode task."""
+    subs = [
+        {"id": i, "title": f"sub {i}", "description": "d", "status": "pending",
+         "dependencies": ([i - 1] if i > 1 else [])}
+        for i in range(1, subtasks + 1)
+    ]
+    return {
+        "id": tid, "title": f"task {tid}", "description": "d", "details": "dd",
+        "testStrategy": "verify X", "status": "pending", "priority": "high",
+        "dependencies": [], "subtasks": subs,
+    }
+
+
+class TestValidateTasksTagResolution:
+    """BUG2: validate-tasks must honor the active tag (explicit --tag, else
+    state.json currentTag) and NOT silently validate a coexisting stale flat
+    'tasks' key."""
+
+    def _project(self, tmp_path, current_tag, *, flat=None, tagged=None):
+        tm = tmp_path / ".taskmaster"
+        (tm / "tasks").mkdir(parents=True)
+        if current_tag is not None:
+            (tm / "state.json").write_text(json.dumps({"currentTag": current_tag}))
+        data = {}
+        if flat is not None:
+            data["tasks"] = flat
+        for tag, tasks in (tagged or {}).items():
+            data[tag] = {"tasks": tasks}
+        (tm / "tasks" / "tasks.json").write_text(json.dumps(data, indent=2))
+        return tm / "tasks" / "tasks.json"
+
+    def test_currenttag_wins_over_coexisting_flat_key(self, tmp_path, monkeypatch):
+        # flat key has 1 INVALID task (no subtasks); productization has 3 valid.
+        flat = [{"id": 9, "title": "legacy", "description": "d", "details": "dd",
+                 "testStrategy": "t", "status": "pending", "priority": "high",
+                 "dependencies": [], "subtasks": []}]
+        tagged = {"productization": [_task(i) for i in range(1, 4)]}
+        path = self._project(tmp_path, "productization", flat=flat, tagged=tagged)
+        monkeypatch.chdir(tmp_path)
+
+        out = run_validate_tasks(str(path), allow_empty_subtasks=False,
+                                 require_phase_config=False)
+        assert out["ok"] is True
+        assert out["tag"] == "productization"
+        assert out["task_count"] == 3  # the tagged block, NOT the 1 flat task
+
+    def test_explicit_tag_overrides_currenttag(self, tmp_path, monkeypatch):
+        tagged = {
+            "master": [_task(i) for i in range(1, 3)],
+            "productization": [_task(i) for i in range(1, 6)],
+        }
+        path = self._project(tmp_path, "master", tagged=tagged)
+        monkeypatch.chdir(tmp_path)
+
+        out = run_validate_tasks(str(path), allow_empty_subtasks=False,
+                                 require_phase_config=False, tag="productization")
+        assert out["ok"] is True
+        assert out["tag"] == "productization"
+        assert out["task_count"] == 5
+
+    def test_explicit_missing_tag_errors_not_silent_flat_fallback(self, tmp_path, monkeypatch):
+        flat = [_task(1)]
+        tagged = {"productization": [_task(i) for i in range(1, 3)]}
+        path = self._project(tmp_path, "productization", flat=flat, tagged=tagged)
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(CommandError) as exc:
+            run_validate_tasks(str(path), allow_empty_subtasks=False,
+                               require_phase_config=False, tag="nope")
+        assert "not found" in str(exc.value).lower()
+        assert "productization" in exc.value.extra.get("available_tags", [])
+
+    def test_flat_only_backward_compat(self, tmp_path, monkeypatch):
+        flat = [_task(i) for i in range(1, 4)]
+        path = self._project(tmp_path, None, flat=flat)
+        monkeypatch.chdir(tmp_path)
+
+        out = run_validate_tasks(str(path), allow_empty_subtasks=False,
+                                 require_phase_config=False)
+        assert out["ok"] is True
+        assert out["task_count"] == 3
+
+
+class TestCheck9TechnicalArchitecture:
+    """Regression suite for check 9 (Technical considerations address
+    architecture). The section extractor does a *substring* match on the
+    heading, so a bare 'Technical' query wrongly latches onto an earlier
+    heading containing the word (e.g. '### Goal 1: ... non-technical ...'),
+    capturing that subsection instead of the real '## Technical Considerations'
+    body — yielding a false 'No architectural detail found'."""
+
+    def _check9(self, tmp_project, body: str):
+        prd = tmp_project / ".taskmaster" / "docs" / "prd.md"
+        prd.write_text("# PRD\n\n## Executive Summary\nA summary.\n\n" + body)
+        out = run_validate_prd(str(prd))
+        return next(c for c in out["checks"] if c["id"] == 9)
+
+    def test_arch_passes_despite_earlier_non_technical_heading(self, tmp_project):
+        """An earlier '### ... non-technical ...' heading must not shadow the
+        real '## Technical Considerations' section."""
+        body = (
+            "## Goals\n"
+            "### Goal 1: Enable non-technical visual editing without code\n"
+            "Let collaborators edit pages with no developer involvement.\n\n"
+            "## Technical Considerations\n"
+            "### System Architecture\n"
+            "The system follows a microservice architecture with clear integration "
+            "points, an event-driven component model, and a data-flow diagram.\n"
+        )
+        check9 = self._check9(tmp_project, body)
+        assert check9["passed"] is True, check9
+
+    def test_arch_passes_with_bare_technical_heading(self, tmp_project):
+        """A PRD using the shorter '## Technical' heading with architecture
+        content still passes (fallback path)."""
+        body = (
+            "## Technical\n"
+            "We use a microservice architecture with clear integration points.\n"
+        )
+        check9 = self._check9(tmp_project, body)
+        assert check9["passed"] is True, check9
+
+    def test_arch_fails_when_no_architecture_content(self, tmp_project):
+        """A Technical Considerations section with no architecture keywords
+        must still FAIL check 9 (the fix must not trivially always-pass)."""
+        body = (
+            "## Goals\n"
+            "### Goal 1: Enable non-technical editing\n"
+            "Collaborators edit pages.\n\n"
+            "## Technical Considerations\n"
+            "Use CSS variables and a colour palette for theming the UI.\n"
+        )
+        check9 = self._check9(tmp_project, body)
+        assert check9["passed"] is False, check9
+
+    def test_arch_fails_when_no_technical_section_at_all(self, tmp_project):
+        """No Technical section + only a 'non-technical' mention elsewhere must
+        FAIL check 9 (no architecture content anywhere)."""
+        body = (
+            "## Goals\n"
+            "### Goal 1: Enable non-technical editing\n"
+            "Collaborators edit pages without developers.\n"
+        )
+        check9 = self._check9(tmp_project, body)
+        assert check9["passed"] is False, check9
+
+    def test_real_puck_editor_prd_passes_check9(self, tmp_project):
+        """The real prd-puck-editor.md (## Technical Considerations with a
+        ### System Architecture subsection) must pass check 9."""
+        import os
+        real = (
+            "/home/anombyte/Shade_Gen/Projects/morgan-project"
+            "/.taskmaster/docs/prd-puck-editor.md"
+        )
+        if not os.path.isfile(real):
+            pytest.skip("real puck-editor PRD not present in this checkout")
+        out = run_validate_prd(real)
+        check9 = next(c for c in out["checks"] if c["id"] == 9)
+        assert check9["passed"] is True, check9

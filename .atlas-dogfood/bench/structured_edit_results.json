@@ -1,0 +1,26 @@
+[
+  {
+    "model": "google:gemini-2.5-flash (control)",
+    "verdict": "FAIL-GATE",
+    "gate_rc": 1,
+    "wall_s": 16.6
+  },
+  {
+    "model": "ollama:qwen3:8b (/no_think)",
+    "verdict": "FAIL-GATE",
+    "gate_rc": 1,
+    "wall_s": 99.9
+  },
+  {
+    "model": "ollama:llama3.2:3b",
+    "verdict": "NO-EDIT",
+    "note": "no valid {find,replace} JSON",
+    "wall_s": 6.9
+  },
+  {
+    "model": "ollama:qwen2.5:1.5b",
+    "verdict": "NO-EDIT",
+    "note": "no valid {find,replace} JSON",
+    "wall_s": 2.0
+  }
+]

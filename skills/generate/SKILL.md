@@ -225,9 +225,8 @@ Use the normative backend operation instead of home-rolled classification:
 - **MCP fallback**: `mcp__plugin_prd_go__tm_analyze_complexity` (wraps the CLI)
 - **CLI**: `task-master analyze-complexity`
 
-**Important — output location**: the TaskMasterBackend internal
-`analyze-complexity` step does NOT emit JSON to stdout. It writes structured
-analysis to
+**Important — output location**: the `analyze-complexity` step does NOT emit
+JSON to stdout. It writes structured analysis to
 `.taskmaster/reports/task-complexity-report.json` and prints a human-readable
 table to stdout. To read the structured result, read the report file:
 
@@ -261,27 +260,11 @@ Detected in the v4 Shade dogfood 2026-04-13.
 python3 script.py expand
 ```
 
-The backend operation chooses the correct implementation. Its
-TaskMasterBackend.expand internals may use serial native expansion,
-`tm-parallel`, or the TaskMaster backend direct methods below. The native/agent
-path uses agent-parallel planning and atomic apply when direct native API
-expansion is unavailable.
-
-**TaskMaster backend direct methods** (only when explicitly operating that backend):
-
-```bash
-# Preferred: research-enriched expansion (when a research provider is configured)
-task-master expand --all --research
-
-# Fallback: structural-only (still valuable; always available)
-task-master expand --all
-```
-
-**MCP note on `expand_task`**: task-master's MCP currently exposes
-`expand_task(id=...)` per-task only. Do NOT call `expand_task` in parallel
-across IDs — same race, same data loss. If you must use the MCP, call
-`expand_task` serially for every task, or shell out to
-`task-master expand --all` via Bash.
+The native engine is the sole generator. `script.py expand` (backend op expand)
+expands pending tasks via the native structured path — a keyless host CLI
+(`claude`/`codex`/`gemini`) or a provider API key — running in parallel and
+applying atomically. When no provider/CLI is available it falls back to
+agent-parallel planning + atomic apply (the native/agent floor).
 
 ### Patience under slow providers
 

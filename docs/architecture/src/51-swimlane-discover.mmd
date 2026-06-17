@@ -1,0 +1,39 @@
+%% DISCOVER phase — script vs LLM swimlane.
+%% Okabe-Ito colorblind-safe palette + shape redundancy:
+%%   hexagon  = LLM / agent step (output varies run-to-run)
+%%   rectangle = deterministic engine code
+%%   stadium   = external model execution
+%%   diamond   = deterministic gate
+%% Solid edge = deterministic control flow.  Dashed edge = LLM-routed / bounce-back.
+%% DISCOVER is LLM-dominant: no external model lane.
+flowchart LR
+    classDef llm  fill:#E69F00,stroke:#8a6100,color:#111111;
+    classDef code fill:#56B4E9,stroke:#1f6f9c,color:#111111;
+    classDef ext  fill:#009E73,stroke:#00674c,color:#ffffff;
+    classDef gate fill:#F0E442,stroke:#9a8f00,color:#111111;
+
+    subgraph LANE_LLM["LLM / agent — non-deterministic"]
+      direction TB
+      L1{{"1 · capture goal from skill args<br/>detect Interactive vs Autonomous mode<br/>phases/DISCOVER.md · skills/discover"}}:::llm
+      L2{{"3 · superpowers:brainstorming<br/>adaptive one-question-at-a-time Q and A"}}:::llm
+      L3{{"4 · INTERCEPT before writing-plans<br/>capture design / requirements / decisions"}}:::llm
+      L4{{"5 · extract constraints (CONSTRAINTS CAPTURED)<br/>calibrate scale: Solo / Team / Enterprise"}}:::llm
+      L5{{"6 · AskUserQuestion approval gate<br/>present discovery summary"}}:::llm
+      L6{{"3a · Autonomous self-brainstorm<br/>write discovery notes · document assumptions"}}:::llm
+    end
+
+    subgraph LANE_CODE["deterministic engine — Python"]
+      direction TB
+      C1["2 · pipeline.check_gate('DISCOVER')<br/>entry diagnostic (exit gate, expect false)"]:::code
+      G1{"7 · pipeline.check_gate('DISCOVER')<br/>user_approved OR auto_classification==CLEAR<br/>+ assumptions_documented"}:::gate
+    end
+
+    L1 --> C1 --> L2
+    L1 -. "Autonomous mode (no user)" .-> L6
+    L2 --> L3 --> L4 --> L5
+    L6 -. "self-approve · assumptions documented" .-> L4
+    L5 -. "refine — re-ask, update summary" .-> L2
+    L5 --> G1
+    G1 -. "fail — gather missing evidence" .-> L4
+    G1 == "pass → advance_phase(GENERATE)" ==> DONE(["GENERATE ▶"]):::code
+

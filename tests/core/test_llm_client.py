@@ -59,7 +59,8 @@ def test_discover_key_excludes_local_free_proxy(monkeypatch, tmp_path):
 
 def test_discover_key_none_when_nothing(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
-    for v in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_COMPATIBLE_API_KEY"):
+    for v in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_COMPATIBLE_API_KEY",
+              "GOOGLE_API_KEY", "GEMINI_API_KEY"):
         monkeypatch.delenv(v, raising=False)
     assert L.discover_key() is None
 

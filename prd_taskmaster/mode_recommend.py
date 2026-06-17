@@ -15,7 +15,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from prd_taskmaster.lib import emit_json_error
+from prd_taskmaster.fleet import engine_config
 from prd_taskmaster.providers import (
     _has_perplexity_api_key,
     _is_nested_claude,
@@ -37,15 +37,18 @@ ATLAS_FLEET_REASON = "Atlas Fleet — atlas-launcher detected (parallel multi-se
 # Private helpers
 # ---------------------------------------------------------------------------
 
-def _parse_version(v: str) -> tuple[int, ...]:
-    """Parse a semver-ish string into a comparable tuple.
+def _parse_version(v: str) -> tuple[int, int, int]:
+    """Parse a semver-ish string into a fixed-length 3-tuple of ints.
 
-    Strips leading 'v' and ignores any pre-release suffix after '-'.
-    Returns (0, 0, 0) on parse failure so comparison is always safe.
+    Strips leading 'v' and ignores any pre-release suffix after '-'. Pads missing
+    components with 0 and truncates extras to 3, so equal versions compare equal
+    ("1.2" == "1.2.0"). Returns (0, 0, 0) on parse failure so comparison is safe.
     """
     try:
         v = v.strip().lstrip("v").split("-")[0]
-        return tuple(int(x) for x in v.split("."))
+        parts = [int(x) for x in v.split(".")]
+        parts = (parts + [0, 0, 0])[:3]
+        return (parts[0], parts[1], parts[2])
     except Exception:
         return (0, 0, 0)
 
@@ -364,8 +367,15 @@ def detect_capabilities() -> dict:
     }
 
 
-def validate_setup() -> dict:
+def validate_setup(provider_mode: str | None = None) -> dict:
     """Run all Phase 0 SETUP checks and return per-check pass/fail + fix hints.
+
+    `provider_mode` controls whether the task-master binary is a hard
+    requirement ("plan_only") or advisory. When None, it defaults to the engine
+    default ("hybrid") via `engine_config()` — which returns compiled-in
+    defaults, NOT the persisted value in fleet.json. Callers that need the
+    persisted mode must read it from `fleet.load_fleet_config()` and pass it
+    explicitly.
 
     Returns EXACTLY 6 checks (spec §5):
       binary          — task-master CLI installed
@@ -381,6 +391,13 @@ def validate_setup() -> dict:
       critical_failures: int
       checks: list[dict]   — exactly 6 entries, each with id, passed, fix
     """
+    if provider_mode is None:
+        provider_mode = engine_config().get("provider_mode", "hybrid")
+    # When the engine is NOT plan_only it no longer depends on the task-master
+    # binary (sub-project #1 removes it), so its presence/version is advisory,
+    # not a critical gate. plan_only keeps the binary as a hard requirement.
+    taskmaster_advisory = provider_mode != "plan_only"
+
     checks = []
 
     # Check 1: task-master binary installed
@@ -407,9 +424,16 @@ def validate_setup() -> dict:
         "passed": bool(cli_path),
         "detail": (
             f"Found at {cli_path} (version {cli_version})" if cli_path
-            else "Not found in PATH"
+            else (
+                "Not found in PATH (advisory: engine no longer requires it)"
+                if taskmaster_advisory else "Not found in PATH"
+            )
         ),
-        "fix": "npm install -g task-master-ai" if not cli_path else None,
+        "fix": (
+            None if cli_path or taskmaster_advisory
+            else "npm install -g task-master-ai"
+        ),
+        **({"severity": "advisory"} if taskmaster_advisory else {}),
     })
 
     # Check 2: version >= minimum
@@ -423,8 +447,11 @@ def validate_setup() -> dict:
             if version_info.get("detected_version")
             else "version not detectable"
         ),
-        "fix": "npm install -g task-master-ai@latest" if not version_info["supported"] else None,
-        "severity": "warning",
+        "fix": (
+            None if version_info["supported"] or taskmaster_advisory
+            else "npm install -g task-master-ai@latest"
+        ),
+        "severity": "advisory" if taskmaster_advisory else "warning",
     })
 
     # Check 3: .taskmaster/ directory exists
@@ -461,6 +488,7 @@ def validate_setup() -> dict:
         "has_anthropic_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
         "has_openai_key": bool(os.environ.get("OPENAI_API_KEY")),
         "has_perplexity_key": _has_perplexity_api_key(),
+        "has_google_key": bool(os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")),
     }
     provider_ok = False
     provider_detail = "Cannot read config"
@@ -560,10 +588,11 @@ def validate_setup() -> dict:
         "severity": "warning",
     })
 
-    # Aggregate — only non-warning failures are "critical"
+    # Aggregate — neither "warning" nor "advisory" failures are "critical"
+    _non_critical = {"warning", "advisory"}
     critical_failures = [
         c for c in checks
-        if not c["passed"] and c.get("severity") != "warning"
+        if not c["passed"] and c.get("severity") not in _non_critical
     ]
     all_passed = len(critical_failures) == 0
 
