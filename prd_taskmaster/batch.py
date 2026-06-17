@@ -64,7 +64,11 @@ def _backend_block() -> dict:
 def _backend_summary(block: dict) -> str:
     provider = block.get("native", {}).get("api_provider")
     if provider:
-        return f"Backend: native (api: {provider})"
+        # Be explicit that this is the structured-generation (parse/expand) path,
+        # which is independent of the execution provider reported on the
+        # "Provider:" line. Showing only "api: openai" next to "Provider:
+        # claude-code" read as a contradiction in dogfooding (friction #4).
+        return f"Backend: native (structured-gen via {provider} API)"
     return "Backend: native (agent-driven)"
 
 
@@ -80,12 +84,28 @@ def run_engine_preflight(configure: bool = True) -> dict:
     taskmaster = run_detect_taskmaster()
     backend = _backend_block()
 
+    # When the caller asks to configure (the default), always return a structured
+    # result — never a silent null. On a fresh project there is no .taskmaster
+    # config to write yet, so report the step as explicitly deferred rather than
+    # leaving providers_configured == None, which read as a no-op in dogfooding
+    # (friction #5: "configure step that's a no-op").
     providers_configured = None
-    if configure and preflight.get("has_taskmaster"):
-        try:
-            providers_configured = run_configure_providers()
-        except CommandError as e:
-            providers_configured = {"ok": False, "error": e.message, **e.extra}
+    if configure:
+        if preflight.get("has_taskmaster"):
+            try:
+                providers_configured = run_configure_providers()
+            except CommandError as e:
+                providers_configured = {"ok": False, "error": e.message, **e.extra}
+        else:
+            providers_configured = {
+                "ok": True,
+                "status": "deferred",
+                "changed": [],
+                "reason": (
+                    "no .taskmaster project yet; provider configuration runs "
+                    "automatically after init-project"
+                ),
+            }
 
     providers = run_detect_providers()
     capabilities = run_detect_capabilities()
@@ -112,6 +132,17 @@ def run_engine_preflight(configure: bool = True) -> dict:
         )
     else:
         summary.append("Project: fresh (no .taskmaster yet)")
+
+    # Make the configure step's outcome visible so it never reads as a no-op.
+    if isinstance(providers_configured, dict):
+        if providers_configured.get("status") == "deferred":
+            summary.append("Providers: configuration deferred (runs after init-project)")
+        elif providers_configured.get("changed"):
+            summary.append(
+                "Providers: configured (" + ", ".join(providers_configured["changed"]) + ")"
+            )
+        elif providers_configured.get("ok"):
+            summary.append("Providers: already configured (no changes needed)")
 
     return {
         "ok": True,

@@ -100,3 +100,43 @@ def test_engine_preflight_reports_config_forced_native(tmp_path, monkeypatch):
     assert result["backend"]["source"] == "config"
     assert result["backend"]["taskmaster"]["available"] is True
     assert result["backend"]["ai_ops"] == "agent"
+
+
+def test_engine_preflight_configure_reports_deferred_on_fresh_project(tmp_path, monkeypatch):
+    # Dogfood friction #5: configure=True on a fresh project returned a silent
+    # providers_configured=None ("no-op"). It must now report an explicit,
+    # structured deferred status WITHOUT mutating the bare directory.
+    _clean_env(monkeypatch, tmp_path)
+
+    result = run_engine_preflight(configure=True)
+
+    pc = result["providers_configured"]
+    assert isinstance(pc, dict), "configure step must never return a silent null"
+    assert pc["ok"] is True
+    assert pc["status"] == "deferred"
+    assert "init-project" in pc["reason"]
+    # the step is now visible in the human summary
+    assert any("deferred" in line for line in result["summary"])
+    # still read-only on a bare dir
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_engine_preflight_no_configure_keeps_null(tmp_path, monkeypatch):
+    # When the caller explicitly opts out, we don't fabricate a result.
+    _clean_env(monkeypatch, tmp_path)
+    result = run_engine_preflight(configure=False)
+    assert result["providers_configured"] is None
+
+
+def test_engine_preflight_summary_names_structured_gen_provider(tmp_path, monkeypatch):
+    # Dogfood friction #4: "Backend: native (api: openai)" next to a
+    # "Provider: claude-code" line read as a contradiction. The backend line
+    # must name the structured-generation path explicitly.
+    _clean_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-dummy")
+
+    result = run_engine_preflight()
+
+    assert result["backend"]["ai_ops"] == "native-api"
+    assert result["backend"]["native"]["api_provider"] == "openai"
+    assert "Backend: native (structured-gen via openai API)" in result["summary"]
