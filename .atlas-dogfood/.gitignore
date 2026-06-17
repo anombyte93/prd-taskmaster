@@ -1,4 +1,0 @@
-# transient worker/gate logs from bench runs
-*.log
-worker_*.log
-gate_*.log
