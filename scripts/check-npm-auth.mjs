@@ -19,7 +19,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 
 const REGISTRY_AUTH_LINE = "//registry.npmjs.org/:_authToken=";
 
@@ -51,9 +51,11 @@ export function resolveNpmAuth({ env = {}, npmrc = "" } = {}) {
         (line) =>
           !line.startsWith("#") &&
           !line.startsWith(";") &&
-          line.includes(REGISTRY_AUTH_LINE) &&
+          // anchor on the line start (already trimmed) so a crafted host segment
+          // like //evil.com//registry.npmjs.org/:_authToken= can't false-pass.
+          line.startsWith(REGISTRY_AUTH_LINE) &&
           // require a non-empty value after the '='
-          line.slice(line.indexOf(REGISTRY_AUTH_LINE) + REGISTRY_AUTH_LINE.length).trim() !== ""
+          line.slice(REGISTRY_AUTH_LINE.length).trim() !== ""
       );
     if (hasAuthToken) {
       return {
@@ -150,6 +152,9 @@ function main() {
 
 // Only run main() when executed directly, so tests can import resolveNpmAuth without
 // triggering the CLI side effects (reading ~/.npmrc, process.exit, network).
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Use pathToFileURL so paths with spaces or symlinked invocations still match —
+// a naive `file://${argv[1]}` compare silently skips main() (and thus the whole
+// auth check) when the install path contains a space or is a symlink.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }
