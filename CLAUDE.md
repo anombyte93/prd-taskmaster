@@ -81,6 +81,29 @@ natively — but doesn't need it."*
 - The normative reference is the **"## Backend operations" table in SKILL.md**. When docs
   and code disagree, fix the docs to match the table.
 
+## Repository layout
+
+The engine is **stdlib-only Python** in `prd_taskmaster/`, surfaced two ways that share the
+same code — keep them in lockstep:
+- `script.py` — thin shim over `prd_taskmaster/cli.py:main` (~40 subcommands; `python3 script.py -h`).
+- `mcp-server/server.py` — FastMCP server exposing the same ops as MCP tools (`next_task`,
+  `set_task_status`, `validate_prd`, …). It needs `pip install -r mcp-server/requirements.txt`;
+  the CLI does not.
+
+Key modules: `cli.py` (dispatch) · `backend.py` (5-op backend protocol) · `validation.py` +
+`tasks.py` (graded PRD + task graph) · `task_state.py` (atomic next/claim/set-status) ·
+`reachability.py` (Gate 6) · `oracle_bridge.py` + `shipcheck.py` (Gate 5 wiring) · `economy.py`
++ `reputation.py` (cost ledger + UCB routing) · `fleet.py` / `parallel.py` (fleet waves) ·
+`tournament/` (the settled marketplace). The binding ship gate is `skel/ship-check.py`; the
+skill/slash commands live in `skills/` (atlas, go, generate, execute-task, execute-fleet, …) and
+ship inside the package. `SKILL.md` is the normative behavior spec. Tests split into
+`tests/core` + `tests/plugin` (stdlib-only), `tests/mcp` (needs the mcp package), and
+`tests/parity` (golden-parity harness, run as a module, not via pytest).
+
+`AGENTS.md` is the harness-neutral twin of this file — the **same operating contract** for any
+agent (Codex, Gemini, the next harness). No test enforces their agreement, so when you change an
+operating rule here, mirror it in `AGENTS.md` (and vice-versa).
+
 ## Task execution workflow
 
 1. `python3 script.py next-task` — get the next dependency-ready task
@@ -92,8 +115,11 @@ natively — but doesn't need it."*
 ## Commands
 
 ```bash
-pytest tests/ -q                                   # full suite (872); the 4 real-podman e2e gates
+pytest tests/ -q                                   # full suite (877); the 4 real-podman e2e gates
                                                    #   auto-skip unless the env below is set
+pytest tests/core tests/plugin -q                  # stdlib-only path (no mcp pkg); tests/mcp needs
+                                                   #   pip install -r mcp-server/requirements.txt first
+pytest tests/core/test_validation.py::test_name -q # run a single test (file::test or -k expr)
 ATLAS_ORACLE_CMD="<spine>/node_modules/.bin/tsx <spine>/apps/cli/src/index.ts" \
   pytest tests/core -q -k "e2e or dogfood"         # un-skip the 4 real-podman gates (need the spine CLI + podman)
 python3 script.py engine-preflight                 # one-call environment + backend probe
@@ -106,7 +132,11 @@ python3 script.py economy-report                   # cost ledger from .atlas-ai/
 ## Conventions (engine code)
 
 - **Stdlib only** in `prd_taskmaster/` and `mcp-server/server.py` — no new dependencies.
-  CI enforces stdlib-only imports on a bare runner.
+  CI (`.github/workflows/ci.yml`) AST-scans the package for non-stdlib imports on a bare runner.
+- CI also enforces, and these break easily: **all version strings must agree** —
+  `prd_taskmaster/__init__.py`, `package.json`, `.claude-plugin/plugin.json`, `install.sh`, plus a
+  matching `CHANGELOG.md` entry (bump them together); and the **native-no-keys** path must still
+  resolve `backend=native, ai_ops=agent` with no TaskMaster binary and no API keys.
 - Errors return FR-28-safe dicts; library code never `sys.exit`s.
 - All `.atlas-ai/*.jsonl` writes go through the shared flock-guarded append
   (`economy.append_telemetry` pattern).
