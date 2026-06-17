@@ -202,6 +202,7 @@ def run_tournament(
         task_prompt=task_prompt,
         card_ref=card_ref,
         base_ref=base_ref,
+        report_to=orchestrator_session,
         operators_path=operators_path,
         now=now,
     )

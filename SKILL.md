@@ -236,7 +236,6 @@ the MCP tool (substitute the Phase-0 prefix); in CLI-mode use the script.py comm
 | `parse-prd` | `parse_prd` | `parse-prd --input <path> --num-tasks N [--tag]` |
 | `rate` | `rate_tasks` | `rate [--tag] [--no-research]` |
 | `expand` | `expand_tasks` | `expand [--id N ...] [--no-research] [--tag]` |
-| `tm-parallel` | `tm_parallel_expand` | `tm-parallel` |
 | `next` | `next_task` | `next-task [--tag]` |
 | `set-status` | `set_task_status` | `set-status --id <id> --status <status> [--tag]` |
 | `fleet-waves` | `compute_fleet_waves` | `fleet-waves` |
@@ -248,7 +247,7 @@ Render the progress panel at each phase boundary (and on demand) via `status` / 
 — the boxed phase tracker, validation scorecard, ship-check gates, and execute progress.
 
 Backend behavior is identical through either interface: the `taskmaster` backend wraps native
-TaskMaster operations safely (init/parse/rate/expand, including `tm-parallel`); the `native`
+TaskMaster operations safely (init/parse/rate/expand); the `native`
 backend uses direct API calls or returns `agent_action_required`; `next`/`set-status` are
 engine-native under every backend.
 
@@ -275,7 +274,6 @@ pending tasks ≤ 3                  → TaskMasterBackend.expand internal: seri
                                      rate --research, then expand per task (main dir)
 task-master ≥ 0.43 AND research
   role is a REAL structured API    → TaskMasterBackend.expand internal: NATIVE-PARALLEL
-                                     (DEFAULT): script.py tm-parallel
   (sonar/anthropic/openai… key)      one serial analyze-complexity, then N isolated workdirs each running
                                      native `expand --id N --research` with an economy-tier model; ONE
                                      atomic harvest merge. Failed packets → agent-parallel rerun.

@@ -28,7 +28,6 @@ Fail-closed everywhere:
 """
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import subprocess
@@ -144,25 +143,25 @@ def _default_compute_hash(
     base_ref: str,
     commit_sha: str,
 ) -> str:
-    """Default diff-hash computer — sha256 of ``git diff base_ref..commit_sha``.
+    """Default diff-hash computer — delegates to collect._compute_diff_hash.
 
-    Mirrors the reproducible-diff-hash approach embedded in the racer prompt
-    (spawn.py): ``git diff {base_ref}..{commit_sha} | sha256sum``.
+    Delegates to :func:`prd_taskmaster.tournament.collect._compute_diff_hash`
+    so both the goose racer and the collector/adjudicator use EXACTLY the same
+    hashing algorithm — raw-bytes git output, no text-decode, sha256 in-process.
+    This is the single source of truth: if the collector algorithm changes, goose
+    automatically tracks it, and the two can never diverge.
 
-    Fail-closed: any error (bad refs, git failure) returns "" rather than
-    raising — the caller must never invent a hash.
+    The import is done at function scope (not module scope) to avoid a circular
+    import — collect imports nothing from goose_backend.
+
+    Fail-closed: any error (bad refs, git failure, import failure) returns ""
+    rather than raising — the caller must never invent a hash.
     """
     try:
-        proc = subprocess.run(
-            ["git", "diff", f"{base_ref}..{commit_sha}"],
-            cwd=str(worktree_path),
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except (OSError, subprocess.SubprocessError):
+        from prd_taskmaster.tournament.collect import _compute_diff_hash  # noqa: PLC0415
+        return _compute_diff_hash(str(worktree_path), base_ref, commit_sha)
+    except Exception:  # noqa: BLE001
         return ""
-    return hashlib.sha256(proc.stdout.encode("utf-8")).hexdigest()
 
 
 def _default_inbox_send(

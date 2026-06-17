@@ -186,9 +186,8 @@ to `done`. Do the 13 steps in order. Do not skip.
    FAILS regardless of how the agent narratives read. SHIP_CHECK_FAIL is
    NOT a warning. Narrative claiming the exit code is "expected" or
    "infrastructure noise" does NOT override this gate — write a separate
-   `task-fix-N` to address the underlying failure instead. Override only
-   via `--override SHIP_CHECK_OVERRIDE_ADMIN`, which is logged to
-   `execute-log.jsonl` as an audit event. (Codified 2026-06-04 after T12
+   `task-fix-N` to address the underlying failure instead. There is NO
+   override path; Gate 5 is unfakable. (Codified 2026-06-04 after T12
    in ai-human-tasker was marked DONE while `pnpm test` exited 1 with 11
    failing tests.)
 
@@ -354,8 +353,8 @@ top of `${CLAUDE_PLUGIN_ROOT}/skel/ship-check.py` (copied to `.atlas-ai/ship-che
 
 Gate 5 is the convergent must-do from the 2026-06-04 audit — a "PASS"
 label on a non-zero-exit test is structurally impossible after this
-script runs (modulo the explicit `--override SHIP_CHECK_OVERRIDE_ADMIN`
-audit-logged bypass).
+script runs. There is no override path for Gate 5; it is the unfakable
+oracle.
 
 Do not emit SHIP_CHECK_OK on a mere "DONE" keyword in a subagent reply.
 Do not emit on "all tasks marked done" without the explicit ship-check.
@@ -378,7 +377,7 @@ Every iteration appends a structured row to
 `.atlas-ai/state/execute-log.jsonl`. Field types are strict — text
 narrative in a typed field is a logging bug, not compliance. The schema:
 
-- `iteration` (integer, or `"FINAL"` / `"OVERRIDE"` for terminal markers)
+- `iteration` (integer, or `"FINAL"` for the terminal marker)
 - `timestamp` (ISO 8601 string)
 - `task_id` (string)
 - `complexity` (integer or human label)

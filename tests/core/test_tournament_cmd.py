@@ -581,3 +581,76 @@ def test_fix9_settle_envelope_stage_uses_real_stage_when_present(tmp_path):
 
     assert summary["settled_ok"] is False
     assert summary["settle_envelope_stage"] == "apply_settlement"
+
+
+# ─── B2: report_to is wired in build_roster from orchestrator_session ─────────
+
+def test_b2_report_to_wired_in_racer_prompts(tmp_path):
+    """B2: run_tournament passes orchestrator_session as report_to to build_roster.
+
+    Without the fix, build_roster was called without report_to, so every racer
+    prompt said 'Report to orchestrator inbox ()' (empty). After the fix the
+    prompt must contain the orchestrator_session string so racers know where
+    to send their commit-reveal report.
+    """
+    from prd_taskmaster.tournament.spawn import build_roster, RacerSpec
+
+    captured_specs: list[RacerSpec] = []
+
+    # Intercept spawn calls to capture the RacerSpec that was built.
+    def _capturing_spawn(spec: RacerSpec) -> dict:
+        captured_specs.append(spec)
+        return {
+            "claimant_id": spec.claimant_id,
+            "session_id": spec.claimant_id,
+            "worktree_path": f"/tmp/worktrees/{spec.claimant_id}",
+            "spawned": True,
+        }
+
+    orch_session = "orch-session-B2-test"
+    models_b2 = ["claude:sonnet", "claude:haiku"]
+    all_cids = _build_roster_claimant_ids(JOB_ID, models_b2)
+    fake_hash = "aabbcc112233" * 5
+
+    kwargs = dict(
+        card_path=_make_card(tmp_path),
+        task_id="7",
+        base_ref=BASE_REF,
+        models=models_b2,
+        job_id=JOB_ID,
+        card_id=CARD_ID,
+        bounty_amount=100,
+        job_poster="molle.atlas@gmail.com",
+        job_dir=tmp_path / "jobs" / JOB_ID,
+        held_root=tmp_path / "held",
+        operators_path=tmp_path / "operators.json",
+        reputation_path=tmp_path / "reputation.jsonl",
+        orchestrator_session=orch_session,
+        task_class="coding",
+        task_prompt="Build something",
+        card_ref=CARD_ID,
+        now=NOW,
+        window_s=0.01,
+        enforce_slash=False,
+        _spawn_fn=_capturing_spawn,
+        _inbox_read=_make_inbox_read(all_cids, job_id=JOB_ID, fake_hash=fake_hash),
+        _dispatch_reveal=_make_dispatch_reveal(fake_hash=fake_hash),
+        _compute_hash=_make_compute_hash(fake_hash),
+        _settle=_make_settle_ok(),
+        clock=FakeClock(start=0.0),
+    )
+
+    run_tournament(**kwargs)
+
+    assert len(captured_specs) == 2, f"Expected 2 spawned specs; got {len(captured_specs)}"
+
+    for spec in captured_specs:
+        assert spec.report_to == orch_session, (
+            f"racer {spec.claimant_id!r}: report_to={spec.report_to!r}, "
+            f"expected {orch_session!r}"
+        )
+        # The prompt must contain the orchestrator_session so the racer can report back.
+        assert orch_session in spec.prompt, (
+            f"racer {spec.claimant_id!r} prompt does not contain {orch_session!r}:\n"
+            f"{spec.prompt[:300]}"
+        )

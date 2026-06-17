@@ -244,12 +244,13 @@ def test_context_pack_tool_returns_core_pack(tmp_path):
     }
 
 
-def test_server_registers_31_tools():
-    """Verify server.py declares all 31 expected tool functions at module scope.
+def test_server_registers_32_tools():
+    """Verify server.py declares all 32 expected tool functions at module scope.
 
     The task-master backend was removed (spec §9.4): the init_taskmaster,
     tm_parallel_expand, and backend_detect MCP tools were deleted (32 -> 29).
     The suggestion + suggestion_report tools were then added (29 -> 31).
+    render_status was added (31 -> 32).
     """
     import server as S
     expected = {
@@ -272,8 +273,9 @@ def test_server_registers_31_tools():
         "feedback_report",
         "suggestion",
         "suggestion_report",
+        "render_status",
     }
-    assert len(expected) == 31
+    assert len(expected) == 32
     public_attrs = {name for name in dir(S) if not name.startswith("_")}
     missing = expected - public_attrs
     assert not missing, f"missing tools: {sorted(missing)}"
