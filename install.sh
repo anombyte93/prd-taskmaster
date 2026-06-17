@@ -20,7 +20,7 @@ set -euo pipefail
 REPO_OWNER="anombyte93"
 REPO_NAME="prd-taskmaster"
 SKILL_NAME="prd-taskmaster"
-VERSION="5.2.2"
+VERSION="5.3.0"
 SKILL_DIR="${SKILL_DIR:-${HOME}/.claude/skills/${SKILL_NAME}}"
 ALIAS_NAME="atlas"
 ALIAS_DIR="${HOME}/.claude/skills/${ALIAS_NAME}"
