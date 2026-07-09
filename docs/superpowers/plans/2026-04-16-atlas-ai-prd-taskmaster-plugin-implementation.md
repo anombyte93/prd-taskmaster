@@ -2110,13 +2110,19 @@ def check() -> tuple[bool, list[str]]:
     atlas = Path(".atlas-ai")
 
     # Gate 1: pipeline.json says EXECUTE + complete
+    # Reconciled 2026-04-16 (Atticus gen3) to match gen5's shipped tightening at f7ce866.
+    # Gen5 Jobs-Lens diagnosis (msg 2765): plan comment says "EXECUTE + complete" but code
+    # only checked current_phase. Spec §D lines 876-877 prove pipeline.json has BOTH fields;
+    # without the state check, a pipeline stuck IN EXECUTE with unfinished work passes falsely.
     pf = atlas / "state" / "pipeline.json"
     if not pf.exists():
         failures.append("pipeline.json missing")
     else:
         state = json.loads(pf.read_text())
         if state.get("current_phase") != "EXECUTE":
-            failures.append(f"current_phase != EXECUTE (got {state.get('current_phase')})")
+            failures.append(f"current_phase != EXECUTE (got {state.get('current_phase')!r})")
+        if state.get("state") != "complete":
+            failures.append(f"pipeline state != complete (got {state.get('state')!r})")
 
     # Gate 2: tasks.json all done with evidence
     tf = atlas / "taskmaster" / "tasks" / "tasks.json"
