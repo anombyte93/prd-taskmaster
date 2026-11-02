@@ -34,6 +34,8 @@ from prd_taskmaster import task_state as TS
 from prd_taskmaster import cli as CLI
 from prd_taskmaster import feedback as FB
 from prd_taskmaster import suggestions as SG
+from prd_taskmaster import task_provider as TP
+from prd_taskmaster import plan_output as PO
 from prd_taskmaster.context_pack import build_context_pack
 
 _mcp = FastMCP("prd-taskmaster")
@@ -93,6 +95,47 @@ class _HardenedMCP:
 
 
 mcp = _HardenedMCP(_mcp)
+
+
+# ─── Explicit-root workflow providers ─────────────────────────────────────────
+
+@mcp.tool()
+def provider_configure(project_root: str, task_provider: str | None = None,
+                       owner_host: str | None = None, board: str | None = None) -> dict:
+    """Persist project task storage selection, with no task or session creation."""
+    return TP.run_configure(project_root, task_provider, owner_host, board)
+
+
+@mcp.tool()
+def plan(project_root: str, project: str, input_path: str | None = None,
+         output_path: str = ".atlas-ai/plan.json", previous_plan: str | None = None,
+         prior_mapping: str | None = None, prd_path: str | None = None) -> dict:
+    """Request/generate a hashed plan artifact, never tasks or verification evidence."""
+    return PO.run_plan(project_root, project, input_path, output_path, previous_plan, prior_mapping, prd_path)
+
+
+@mcp.tool()
+def materialize(project_root: str, plan_path: str) -> dict:
+    """Map a plan to owner canonical external-session cards or explicit native files."""
+    return TP.run_materialize(project_root, plan_path)
+
+
+@mcp.tool()
+def doctor(project_root: str) -> dict:
+    """Read-only package, config and advertised provider-contract diagnostic."""
+    return TP.run_doctor(project_root)
+
+
+@mcp.tool()
+def import_preview(project_root: str, project: str) -> dict:
+    """Preview legacy foreign IDs and proposed cards without writing or verifying them."""
+    return TP.run_import_preview(project_root, project)
+
+
+@mcp.tool()
+def workflow_status(project_root: str, task_id: str) -> dict:
+    """Read the exact canonical external-session card from the configured owner."""
+    return TP.run_status(project_root, task_id)
 
 
 # ─── Delegation tools (17) ────────────────────────────────────────────────────
