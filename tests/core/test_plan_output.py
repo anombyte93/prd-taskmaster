@@ -178,3 +178,18 @@ def test_plan_core_matches_cli_exclusive_source_arguments(tmp_path):
     result = run_plan(str(tmp_path), "demo", input_path="candidate.json", prd_path="prd.md")
     assert result["ok"] is False
     assert not (tmp_path / ".atlas-ai").exists()
+
+
+@pytest.mark.parametrize('field,value,canonical', [
+    ('title', '  padded title  ', 'padded title'),
+    ('title', 'one\r\ntwo', 'one\ntwo'),
+    ('description', 'line one\r\nline two\rline three', 'line one\nline two\nline three'),
+    ('acceptance', ['one\r\ntwo'], ['one\ntwo']),
+])
+def test_plan_hashes_owner_canonical_text(field, value, canonical):
+    from prd_taskmaster.plan_output import build_plan, validate_plan
+    original = build_plan('demo', [{**candidate(), field: value}])
+    expected = build_plan('demo', [{**candidate(), field: canonical}])
+    assert original == expected
+    assert original['tasks'][0][field] == canonical
+    assert validate_plan(original) == original

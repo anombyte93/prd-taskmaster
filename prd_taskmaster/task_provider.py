@@ -178,17 +178,21 @@ def _check_plan(root: Path, config: dict, plan: dict) -> None:
     let later checks validate dependencies without creating revision references.
     """
     checked = {}
+    prior_rows = []
     for task in ordered_tasks(plan["tasks"]):
         payload = _materialize_card(root, config, plan, task, check=True,
-                                    pending_parents={dep: checked[dep] for dep in task["dependencies"]})
+                                    pending_parents={dep: checked[dep] for dep in task["dependencies"]},
+                                    prior_rows=prior_rows)
         checked[task["proposed_task_id"]] = payload["task_id"]
+        prior_rows.append(_task_request(plan, task))
 
 
 def _materialize_card(root: Path, config: dict, plan: dict, task: dict, *,
-                      check: bool = False, pending_parents: dict | None = None) -> dict:
+                      check: bool = False, pending_parents: dict | None = None,
+                      prior_rows: list[dict] | None = None) -> dict:
     request = _task_request(plan, task)
     # Body is an ephemeral request, not a second task store.
-    with tempfile.TemporaryDirectory(prefix="atlas-plan-body-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="atlas-plan-body-", dir="/tmp") as tmp:
         body_path = Path(tmp) / "body.md"
         body_path.write_text(request["body"], encoding="utf-8")
         args = ["materialize-check" if check else "materialize",
@@ -201,6 +205,9 @@ def _materialize_card(root: Path, config: dict, plan: dict, task: dict, *,
             if successor == task["proposed_task_id"]:
                 args.extend(["--maps-from", plan["prior_plan_revision"] + ":" + prior_id])
         if check:
+            prior_path = Path(tmp) / "prior-rows.json"
+            prior_path.write_text(json.dumps(prior_rows or []), encoding="utf-8")
+            args.extend(["--prior-rows-file", str(prior_path)])
             for proposed, task_id in (pending_parents or {}).items():
                 args.append("--pending-parent-proposed=" + proposed +
                             ("=" + task_id if task_id is not None else ""))
@@ -412,7 +419,7 @@ def run_doctor(project_root: str) -> dict:
         # Help advertises syntax only. It never proves board/card reachability.
         checks = [(["materialize-check", "--help"],
                    ["--project", "--plan-revision", "--proposed-id", "--fingerprint", "--title",
-                    "--body-file", "--parent-proposed", "--pending-parent-proposed", "--maps-from", "--execution-kind", "--json"]),
+                    "--body-file", "--parent-proposed", "--pending-parent-proposed", "--maps-from", "--prior-rows-file", "--execution-kind", "--json"]),
                   (["materialize", "--help"],
                    ["--project", "--plan-revision", "--proposed-id", "--fingerprint", "--title",
                     "--body-file", "--parent-proposed", "--maps-from", "--execution-kind", "--json"]),

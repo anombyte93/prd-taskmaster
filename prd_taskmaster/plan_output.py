@@ -125,9 +125,12 @@ def _plan_body(project, tasks) -> dict:
             _identifier(dep, "dependency")
         if len(set(dependencies)) != len(dependencies):
             raise CommandError("duplicate dependencies")
-        intent = {"title": _text(task.get("title"), "title"),
-                  "description": _text(task.get("description"), "description"),
-                  "acceptance": list(acceptance), "dependencies": sorted(dependencies)}
+        # Match the owner's title stripping and universal-newline body reader
+        # before hashing, so an accepted plan has one exact read-back form.
+        intent = {"title": _text(task.get("title"), "title").replace("\r\n", "\n").replace("\r", "\n").strip(),
+                  "description": _text(task.get("description"), "description").replace("\r\n", "\n").replace("\r", "\n"),
+                  "acceptance": [check.replace("\r\n", "\n").replace("\r", "\n") for check in acceptance],
+                  "dependencies": sorted(dependencies)}
         normalised.append({"proposed_task_id": key, **intent,
                            "intent_fingerprint": content_hash(intent)})
     ordered_tasks(normalised)

@@ -32,7 +32,7 @@ p.add_argument("kanban")
 p.add_argument("--board", required=True)
 p.add_argument("operation", choices=["materialize", "materialize-check", "external"])
 p.add_argument("verb", nargs="?")
-for flag in ["project", "plan-revision", "proposed-id", "fingerprint", "title", "body-file", "execution-kind", "task", "maps-from"]:
+for flag in ["project", "plan-revision", "proposed-id", "fingerprint", "title", "body-file", "prior-rows-file", "execution-kind", "task", "maps-from"]:
     p.add_argument("--" + flag)
 p.add_argument("--pending-parent-proposed", action="append", default=[])
 p.add_argument("--parent-proposed", action="append", default=[])

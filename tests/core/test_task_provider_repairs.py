@@ -90,7 +90,7 @@ def test_first_row_write_failure_is_partial_even_without_created_ids(project, mo
     assert not (project / 'owner.sqlite').exists()
 
 
-@pytest.mark.parametrize('missing', ['--fingerprint', '--pending-parent-proposed'])
+@pytest.mark.parametrize('missing', ['--fingerprint', '--pending-parent-proposed', '--prior-rows-file'])
 def test_doctor_rejects_each_missing_option_after_real_reference(project, monkeypatch, missing):
     from prd_taskmaster import task_provider as tp
     save_plan(project)
@@ -335,6 +335,35 @@ def test_successful_write_with_bad_readback_still_names_possible_orphan(project,
     assert result['task_ids'] == {}
     assert not (project / '.atlas-ai/materializations.json').exists()
     assert len(cards(project)) == 1
+
+
+def test_nested_empty_taskmaster_directory_stays_new(tmp_path):
+    from prd_taskmaster import task_provider as tp
+    (tmp_path / '.taskmaster/tasks').mkdir(parents=True)
+    before = tree_hash(tmp_path)
+    assert tp.load_config(str(tmp_path))['task_provider'] == 'atlas-kanban'
+    assert tree_hash(tmp_path) == before
+
+
+def test_check_sends_prior_rows_in_writer_order(project, monkeypatch):
+    from prd_taskmaster import task_provider as tp
+    from prd_taskmaster.plan_output import ordered_tasks
+    plan = save_plan(project, [candidate('a', ['z']), candidate('m'), candidate('z')])
+    ordered = ordered_tasks(plan['tasks'])
+    seen = []
+    real = tp._owner_run
+    def capture(root, config, args):
+        assert '--prior-rows-file' in args, args
+        path = Path(args[args.index('--prior-rows-file') + 1])
+        assert path.is_relative_to('/tmp')
+        seen.append((path, json.loads(path.read_text())))
+        return real(root, config, args)
+    monkeypatch.setattr(tp, '_owner_run', capture)
+    tp._check_plan(project, tp.load_config(str(project)), plan)
+    assert len(seen) == 3
+    assert [rows for _, rows in seen] == [[tp._task_request(plan, t) for t in ordered[:i]] for i in range(3)]
+    assert all(not path.exists() for path, _ in seen)
+    assert not (project / 'owner.sqlite').exists()
 
 
 @pytest.mark.parametrize('reason,code,state', [

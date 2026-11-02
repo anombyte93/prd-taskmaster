@@ -12,7 +12,7 @@ import pytest
 from tests.core.test_plan_output import candidate
 from tests.core.test_task_provider import save_plan
 
-OWNER_COMMIT = 'cf75dce1b4197e9dc2fe046f6751091510c99e32'
+OWNER_COMMIT = 'eb7f03b7fb5ba389557defea0d89afd06672d5a0'
 SOURCE = os.environ.get('ATLAS_TEST_HERMES_SOURCE')
 
 
@@ -53,7 +53,8 @@ main()
     entry.chmod(0o700)
     env = {'HOME': str(home), 'HERMES_HOME': str(home / '.hermes'),
            'PATH': str(tmp_path), 'XDG_CONFIG_HOME': str(home / '.config'),
-           'XDG_CACHE_HOME': str(home / '.cache'), 'LANG': 'C.UTF-8'}
+           'XDG_CACHE_HOME': str(home / '.cache'), 'LANG': 'C.UTF-8',
+           'PYTHONDONTWRITEBYTECODE': '1', 'TMPDIR': str(tmp_path)}
     # No inherited profile, board, task, DB, dotenv or authentication route.
     def cli(*args, code=0):
         try:
@@ -223,35 +224,75 @@ def test_real_owner_reverting_old_fingerprint_is_not_false_success(owner):
     result = tp.run_materialize(str(root), 'plan.json')
     card = tp.run_status(str(root), first['task_ids']['build'])['task']
     print('D4', result, 'actual title', card['title'])
-    # Pinned historical owner still returns existing and keeps B. Plugin must
-    # refuse its stale readback; fixing the owner is a separate lane.
-    assert not result['ok'] and result['state'] == 'partial'
-    assert 'planned title/body' in result['error']
-    assert card['title'] == 'Version B' and count_cards(home) == 1
-    assert result['created_task_ids'] == result['task_ids'] == {}
+    # The current owner applies the mapped A intent instead of replaying stale B.
+    assert result['ok'] and result['task_ids'] == first['task_ids'], result
+    assert card['title'] == 'Version A' and card['body'].startswith('A body\n')
+    assert count_cards(home) == 1
+
+    # Dependency-only A -> B -> A must restore readiness too, not just text.
+    dep_a = save_plan(root, [candidate('child'), candidate('parent')])
+    dep_first = tp.run_materialize(str(root), 'plan.json')
+    assert dep_first['ok'], dep_first
+    dep_b = save_plan(root, [candidate('child', ['parent']), candidate('parent')],
+                      previous_plan=dep_a, prior_mapping={'child': 'child', 'parent': 'parent'})
+    assert tp.run_materialize(str(root), 'plan.json')['ok']
+    child = dep_first['task_ids']['child']
+    assert tp.run_status(str(root), child)['task']['status'] == 'todo'
+    save_plan(root, dep_a['tasks'], previous_plan=dep_b,
+              prior_mapping={'child': 'child', 'parent': 'parent'})
+    assert tp.run_materialize(str(root), 'plan.json')['ok']
+    assert tp.run_status(str(root), child)['task']['status'] == 'ready'
+    assert count_cards(home) == 3
 
 
-def test_real_owner_dependency_reversal_literal_refusal_and_writer_disagreement(owner):
+def test_real_owner_dependency_reversal_agrees_with_writer(owner, monkeypatch):
     from prd_taskmaster import task_provider as tp
     root, home, env, cli = owner
     assert tp.run_configure(str(root), board='fixture-board')['ok']
     old = save_plan(root, [candidate('m'), candidate('p', ['m'])])
-    assert tp.run_materialize(str(root), 'plan.json')['ok']
+    first = tp.run_materialize(str(root), 'plan.json')
+    assert first['ok'], first
     revised = save_plan(root, [candidate('m', ['p']), candidate('p')],
                         previous_plan=old, prior_mapping={'m': 'm', 'p': 'p'})
     (root / '.atlas-ai/materializations.json').unlink()
     before = count_cards(home)
-    result = tp.run_materialize(str(root), 'plan.json')
-    print('D5 preflight', result, 'cards added', count_cards(home) - before)
-    assert result['state'] == 'refused' and result['reason'] == 'mapping_dependency_cycle'
+    config = tp.load_config(str(root))
+    by_id = {t['proposed_task_id']: t for t in revised['tasks']}
+    # Negative control: the additive input is necessary. The same check with
+    # only pending IDs still sees the old p -> m edge and refuses m -> p.
+    run = tp._owner_run
+    def without_prior(root, config, args):
+        if '--prior-rows-file' in args:
+            index = args.index('--prior-rows-file')
+            args = args[:index] + args[index + 2:]
+        return run(root, config, args)
+    with monkeypatch.context() as control:
+        control.setattr(tp, '_owner_run', without_prior)
+        preview = tp._materialize_card(root, config, revised, by_id['p'], check=True)
+        with pytest.raises(tp.CommandError) as refusal:
+            tp._materialize_card(root, config, revised, by_id['m'], check=True,
+                                 pending_parents={'p': preview['task_id']})
+    assert refusal.value.extra == {'state': 'refused', 'reason': 'mapping_dependency_cycle'}
     assert count_cards(home) == before
     assert not (root / '.atlas-ai/materializations.json').exists()
-    config = tp.load_config(str(root))
-    # Reproduce the owner disagreement, on the very same rows in writer order.
-    by_id = {t['proposed_task_id']: t for t in revised['tasks']}
-    writes = [tp._materialize_card(root, config, revised, by_id[key]) for key in ['p', 'm']]
-    assert [row['owner_state'] for row in writes] == ['mapped', 'mapped']
-    print('D5 writer', writes)
+    replies = []
+    run = tp._owner_run
+    def record(root, config, args):
+        reply = run(root, config, args)
+        if args[0] in {'materialize-check', 'materialize'}:
+            replies.append((args[0], json.loads(reply.stdout)))
+        return reply
+    monkeypatch.setattr(tp, '_owner_run', record)
+    result = tp.run_materialize(str(root), 'plan.json')
+    print('REVERSAL', result, replies)
+    assert result['ok'] and result['task_ids'] == first['task_ids'], result
+    assert [reply['state'] for op, reply in replies if op == 'materialize-check'] == ['mapped', 'mapped']
+    assert [reply['state'] for op, reply in replies if op == 'materialize'] == ['mapped', 'mapped']
+    assert all('reason' not in reply for _, reply in replies)
+    assert count_cards(home) == before
+    with sqlite3.connect(database(home).as_uri() + '?mode=ro', uri=True) as db:
+        assert db.execute('SELECT parent_id,child_id FROM task_links').fetchall() == [
+            (first['task_ids']['p'], first['task_ids']['m'])]
 
 
 def test_real_owner_shipped_skill_literal_commands(owner):
@@ -323,3 +364,35 @@ def test_mcp_stdio_end_to_end_against_real_owner(owner):
                 assert (await call('doctor', project_root=str(root)))['ok']
     asyncio.run(walk())
     assert count_cards(home) == 1 and not (root / '.taskmaster').exists()
+
+
+@pytest.mark.parametrize('key,changes', [('padded', {'title': '  padded title  '}),
+                                        ('crlf', {'description': 'line one\r\nline two'})])
+def test_real_owner_padded_title_and_crlf_converge(owner, key, changes):
+    from prd_taskmaster import task_provider as tp
+    root, home, env, cli = owner
+    assert tp.run_configure(str(root), board='fixture-board')['ok']
+    save_plan(root, [{**candidate(key), **changes}])
+    first = tp.run_materialize(str(root), 'plan.json')
+    replay = tp.run_materialize(str(root), 'plan.json')
+    print('CANONICAL', key, first, replay)
+    assert first['ok'] and replay['ok'], (first, replay)
+    assert first['task_ids'] == replay['task_ids']
+    assert count_cards(home) == 1
+
+
+def test_real_owner_clean_text_is_preserved(owner):
+    from prd_taskmaster import task_provider as tp
+    root, home, env, cli = owner
+    assert tp.run_configure(str(root), board='fixture-board')['ok']
+    text = 'Unicode 雪\nembedded newline\twith tab and trailing whitespace  \n'
+    plan = save_plan(root, [{**candidate(), 'title': '雪\nTitle\twith tab',
+                             'description': text, 'acceptance': [text]}])
+    first = tp.run_materialize(str(root), 'plan.json')
+    replay = tp.run_materialize(str(root), 'plan.json')
+    assert first['ok'] and replay['ok'], (first, replay)
+    assert replay['task_ids'] == first['task_ids'] and count_cards(home) == 1
+    card = tp.run_status(str(root), first['task_ids']['build'])['task']
+    request = tp._task_request(plan, plan['tasks'][0])
+    assert card['title'] == request['title'] and card['body'] == request['body']
+    assert text in card['body']
