@@ -75,6 +75,38 @@ jobs:
       - name: Full test suite
         run: python -m pytest tests/ -q
 
+  # Real parser/kernel seam: never opt-in/skip in this lane. Historical owner
+  # commit is intentionally pinned while its separate repair lane evolves.
+  owner-cli-seam:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Fetch public Hermes owner at the named commit
+        run: |
+          git init "$RUNNER_TEMP/hermes-source"
+          git -C "$RUNNER_TEMP/hermes-source" fetch --depth=1 https://github.com/anombyte93/hermes-agent.git cf75dce1b4197e9dc2fe046f6751091510c99e32
+          test "$(git -C "$RUNNER_TEMP/hermes-source" rev-parse FETCH_HEAD)" = cf75dce1b4197e9dc2fe046f6751091510c99e32
+      - name: Install bounded seam dependencies
+        run: pip install pytest==9.2.0 PyYAML==6.0.3 rich==15.0.0 mcp==1.30.0
+      - name: Real owner through run_materialize, skill CLI and MCP
+        env:
+          ATLAS_TEST_HERMES_SOURCE: ${{ runner.temp }}/hermes-source
+          ATLAS_REQUIRE_OWNER_SEAM: "1"
+        run: python -m pytest tests/core/test_owner_cli_seam.py -q -s --junitxml=owner-seam.xml
+      - name: Refuse a skipped or empty seam
+        if: always()
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          cases = ET.parse("owner-seam.xml").findall(".//testcase")
+          assert cases, "real-owner seam ran no tests"
+          assert not any(c.find(tag) is not None for c in cases for tag in ("skipped", "failure", "error")), "real-owner seam skipped or failed"
+          print(f"REAL OWNER CI: {len(cases)} passed, zero skips; owner cf75dce1b4197e9dc2fe046f6751091510c99e32")
+          PY
+
   # The engine must resolve a backend and stay usable with NO TaskMaster binary
   # and NO API keys — the Native Mode promise (FR-33).
   no-taskmaster-no-keys:

@@ -53,7 +53,12 @@ def load_config(project_root: str) -> dict:
     path = _config_path(root)
     if path.exists():
         return _validate_config(root, read_object(path))
-    legacy = rooted_path(root, ".taskmaster/tasks/tasks.json").is_file()
+    # Split metadata is outside .taskmaster: .atlas-workflow.json,
+    # .atlas-ai/plan.json and .atlas-ai/materializations.json (and their locks).
+    # File mode writes .taskmaster/tasks/tasks.json, a real legacy task store,
+    # not provider metadata. Any Taskmaster file counts; empty folders do not.
+    taskmaster = rooted_path(root, ".taskmaster")
+    legacy = any(path.is_file() for path in taskmaster.rglob("*"))
     return {"task_provider": "taskmaster-file" if legacy else "atlas-kanban",
             "owner_host": socket.gethostname(), "board": None, "project_root": str(root),
             "notice": "Legacy .taskmaster project: staying taskmaster-file; no silent migration."
@@ -112,7 +117,8 @@ def _owner_run(root: Path, config: dict, args: list[str]):
     executable = _owner_executable()
     try:
         return subprocess.run([executable, "kanban", "--board", config["board"], *args],
-                              cwd=root, capture_output=True, text=True, timeout=30)
+                              cwd=root, capture_output=True, text=True, timeout=30,
+                              env={key: value for key, value in os.environ.items() if key != "HERMES_KANBAN_DB"})
     except FileNotFoundError as exc:
         raise CommandError("owner CLI is unavailable; install Hermes on owner_host") from exc
     except subprocess.TimeoutExpired as exc:
@@ -210,7 +216,7 @@ def _materialize_card(root: Path, config: dict, plan: dict, task: dict, *,
     if check:
         return payload
     try:
-        _read_card(root, config, payload["task_id"])
+        _read_card(root, config, payload["task_id"], request)
     except (CommandError, OSError, ValueError, TypeError, KeyError) as exc:
         raise CommandError(str(exc), {"created_task_ids":
             {task["proposed_task_id"]: payload["task_id"]} if payload["state"] == "created" else {},
@@ -219,7 +225,7 @@ def _materialize_card(root: Path, config: dict, plan: dict, task: dict, *,
             "owner_state": payload["state"]}
 
 
-def _read_card(root: Path, config: dict, task_id: str) -> dict:
+def _read_card(root: Path, config: dict, task_id: str, expected: dict | None = None) -> dict:
     result = _owner_run(root, config, ["external", "status", "--task", task_id, "--json"])
     if result.returncode != 0:
         raise CommandError("owner status failed; materialization outcome must be reconciled")
@@ -231,6 +237,8 @@ def _read_card(root: Path, config: dict, task_id: str) -> dict:
         raise CommandError("owner status did not identify the requested card")
     if card.get("execution_kind") != "external_session":
         raise CommandError("owner status did not confirm execution_kind=external_session")
+    if expected is not None and any(card.get(field) != expected[field] for field in ("title", "body")):
+        raise CommandError("owner status did not confirm planned title/body; reconcile materialization")
     return payload
 
 
@@ -258,7 +266,7 @@ def _native_card(root: Path, plan: dict, task: dict) -> dict:
             if existing.get("plan_project") == plan["project"] and existing.get("proposed_task_id") == task["proposed_task_id"]:
                 if existing.get("intent_fingerprint") != task["intent_fingerprint"]:
                     raise CommandError("materialization_conflict: native task intent changed")
-                selected.update(task_id=str(existing["id"]), intent_fingerprint=task["intent_fingerprint"])
+                selected.update(task_id=str(existing["id"]), intent_fingerprint=task["intent_fingerprint"], created=False)
                 return current
         numeric = [int(str(t["id"])) for t in tasks if str(t.get("id", "")).isdigit()]
         task_id = max(numeric, default=0) + 1
@@ -273,7 +281,7 @@ def _native_card(root: Path, plan: dict, task: dict) -> dict:
                       "status": "pending", "priority": "medium", "dependencies": parent_ids,
                       "subtasks": [], "plan_project": plan["project"],
                       "proposed_task_id": task["proposed_task_id"], "intent_fingerprint": task["intent_fingerprint"]})
-        selected.update(task_id=str(task_id), intent_fingerprint=task["intent_fingerprint"])
+        selected.update(task_id=str(task_id), intent_fingerprint=task["intent_fingerprint"], created=True)
         return json.dumps(raw, indent=2) + "\n"
 
     locked_update(path, update)
@@ -341,6 +349,8 @@ def run_materialize(project_root: str, plan_path: str) -> dict:
                         created[task["proposed_task_id"]] = entry["task_id"]
                 else:
                     entry = _native_card(root, plan, task)
+                    if entry.pop("created"):
+                        created[task["proposed_task_id"]] = entry["task_id"]
                 verified[task["proposed_task_id"]] = entry["task_id"]
                 old = entries.get(task["proposed_task_id"])
                 if old is not None and old["task_id"] != entry["task_id"]:

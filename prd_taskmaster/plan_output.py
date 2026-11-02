@@ -94,6 +94,9 @@ def validate_mapping(mapping, previous_ids, current_ids) -> dict:
         raise CommandError("prior mapping names an unknown successor")
     if len(set(targets)) != len(targets):
         raise CommandError("prior mapping must be one-to-one (or null to retire)")
+    if any(successor is not None and successor != prior and prior in current_ids
+           for prior, successor in mapping.items()):
+        raise CommandError("prior logical id remains in the plan after mapping to a different successor")
     return mapping
 
 

@@ -12,15 +12,132 @@ from tests.core.test_plan_output import candidate
 from tests.core.test_task_provider import project, save_plan, cards, tree_hash, REPO
 
 
-def test_only_an_existing_taskmaster_file_selects_legacy(tmp_path):
+@pytest.mark.parametrize('file,expected', [
+    ('.taskmaster/config.json', 'taskmaster-file'),
+    ('.taskmaster/state.json', 'taskmaster-file'),
+    ('.taskmaster/tasks/task_001.txt', 'taskmaster-file'),
+    ('.taskmaster/docs/prd.md', 'taskmaster-file'),
+    (None, 'atlas-kanban'), ('docs/prd.md', 'atlas-kanban'),
+])
+def test_only_an_existing_taskmaster_file_selects_legacy(tmp_path, file, expected):
     from prd_taskmaster import task_provider as tp
-    (tmp_path / '.taskmaster/docs').mkdir(parents=True)
-    (tmp_path / '.taskmaster/docs/prd.md').write_text('Spec, not a task store')
+    (tmp_path / '.taskmaster').mkdir()
+    if file:
+        path = tmp_path / file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{}')
+    before = tree_hash(tmp_path)
+    result = tp.load_config(str(tmp_path))
+    assert result['task_provider'] == expected
+    assert ('Legacy' in result['notice']) == (expected == 'taskmaster-file')
+    assert tree_hash(tmp_path) == before
+    # A persisted choice wins even if legacy files are present.
+    assert tp.run_configure(str(tmp_path), task_provider='atlas-kanban', board='fixture-board')['ok']
     assert tp.load_config(str(tmp_path))['task_provider'] == 'atlas-kanban'
-    store = tmp_path / '.taskmaster/tasks/tasks.json'
-    store.parent.mkdir()
-    store.write_text('{"tasks": []}')
+    assert tp.run_configure(str(tmp_path), task_provider='taskmaster-file')['ok']
     assert tp.load_config(str(tmp_path))['task_provider'] == 'taskmaster-file'
+
+
+@pytest.mark.parametrize('already_exists', [False, True])
+def test_file_partial_names_only_newly_created_tasks(project, monkeypatch, already_exists):
+    from prd_taskmaster import task_provider as tp
+    assert tp.run_configure(str(project), task_provider='taskmaster-file')['ok']
+    first = save_plan(project, [candidate('a'), candidate('b')] if already_exists else [candidate('b')])
+    assert tp.run_materialize(str(project), 'plan.json')['ok']
+    (project / '.atlas-ai/materializations.json').unlink()
+    save_plan(project, [candidate('a'), {**candidate('b'), 'title': 'Changed'}])
+    monkeypatch.setattr(tp, '_owner_run', lambda *args: pytest.fail('file mode called owner'))
+    result = tp.run_materialize(str(project), 'plan.json')
+    assert not result['ok'] and result['state'] == 'partial'
+    assert result['created_task_ids'] == ({} if already_exists else {'a': '2'})
+    assert result['task_ids'] == {'a': '1' if already_exists else '2'}
+
+
+@pytest.mark.parametrize('field', ['title', 'body'])
+def test_readback_compares_planned_intent(project, monkeypatch, field):
+    from prd_taskmaster import task_provider as tp
+    plan = save_plan(project)
+    request = tp._task_request(plan, plan['tasks'][0])
+    real = tp._owner_run
+    def stale(root, config, args):
+        if args[0] == 'external':
+            card = {'task_id': 't_1', 'execution_kind': 'external_session',
+                    'title': request['title'], 'body': request['body']}
+            card[field] = 'Stale intent'
+            return subprocess.CompletedProcess([], 0, json.dumps({'task': card}), '')
+        return real(root, config, args)
+    monkeypatch.setattr(tp, '_owner_run', stale)
+    result = tp.run_materialize(str(project), 'plan.json')
+    assert not result['ok'] and result['state'] == 'partial'
+    assert 'planned title/body' in result['error']
+    assert result['created_task_ids'] == {'build': 't_1'}
+    assert result['task_ids'] == {}
+    assert not (project / '.atlas-ai/materializations.json').exists()
+
+
+def test_first_row_write_failure_is_partial_even_without_created_ids(project, monkeypatch):
+    from prd_taskmaster import task_provider as tp
+    save_plan(project)
+    real = tp._owner_run
+    def fail(root, config, args):
+        if args[0] == 'materialize':
+            return subprocess.CompletedProcess([], 3, '{"state":"conflict","reason":"mapping_card_started"}', '')
+        return real(root, config, args)
+    monkeypatch.setattr(tp, '_owner_run', fail)
+    result = tp.run_materialize(str(project), 'plan.json')
+    assert result['state'] == 'partial' and result['reason'] == 'mapping_card_started'
+    assert result['created_task_ids'] == result['task_ids'] == {}
+    assert not (project / 'owner.sqlite').exists()
+
+
+@pytest.mark.parametrize('missing', ['--fingerprint', '--pending-parent-proposed'])
+def test_doctor_rejects_each_missing_option_after_real_reference(project, monkeypatch, missing):
+    from prd_taskmaster import task_provider as tp
+    save_plan(project)
+    assert tp.run_materialize(str(project), 'plan.json')['ok']
+    real = tp._owner_run
+    def incomplete(root, config, args):
+        result = real(root, config, args)
+        if args == ['materialize-check', '--help']:
+            result.stdout = ' '.join(word for word in result.stdout.split() if word != missing)
+        return result
+    monkeypatch.setattr(tp, '_owner_run', incomplete)
+    report = tp.run_doctor(str(project))
+    assert report['provider']['reachable'] is True
+    assert report['provider']['advertised_contract'] is False
+    assert report['provider']['contract'] == 'UNKNOWN' and not report['ok']
+
+
+def test_wrong_host_without_references_refuses(project, monkeypatch):
+    from prd_taskmaster import task_provider as tp
+    save_plan(project)
+    assert tp.run_configure(str(project), owner_host='different-owner.invalid')['ok']
+    monkeypatch.setattr(tp.subprocess, 'run', lambda *a, **k: pytest.fail('wrong host owner called'))
+    assert 'owner_host is not this host' in tp.run_materialize(str(project), 'plan.json')['error']
+
+
+def test_explicit_config_required_even_with_resolved_defaults(project, monkeypatch):
+    from prd_taskmaster import task_provider as tp
+    save_plan(project)
+    config = tp.load_config(str(project))
+    (project / '.atlas-workflow.json').unlink()
+    monkeypatch.setattr(tp, 'load_config', lambda *args: config)
+    monkeypatch.setattr(tp, '_owner_run', lambda *a: pytest.fail('unpersisted owner called'))
+    assert 'persist an explicit provider config' in tp.run_materialize(str(project), 'plan.json')['error']
+
+
+def test_check_created_reply_must_have_null_id(project, monkeypatch):
+    from prd_taskmaster import task_provider as tp
+    save_plan(project)
+    calls = []
+    def wrote(root, config, args):
+        calls.append(args[0])
+        return subprocess.CompletedProcess([], 0, '{"state":"created","task_id":"t_written"}', '')
+    monkeypatch.setattr(tp, '_owner_run', wrote)
+    result = tp.run_materialize(str(project), 'plan.json')
+    assert not result['ok'] and calls == ['materialize-check']
+    assert 'incompatible' in result['error']
+    assert not (project / '.atlas-ai/materializations.json').exists()
 
 
 def test_shipped_skill_fresh_project_reaches_owner_without_optional_engine(project):
@@ -57,9 +174,45 @@ def test_shipped_skill_fresh_project_reaches_owner_without_optional_engine(proje
     assert tp.run_doctor(str(project))['ok']
     assert len(cards(project)) == 1
     assert not (project / '.taskmaster').exists()
-    for path in ['phases/HANDOFF.md', 'skills/go/SKILL.md', 'skills/setup/SKILL.md',
-                 'skills/discover/SKILL.md', 'skills/generate/SKILL.md', 'skills/handoff/SKILL.md']:
-        assert 'atlas-kanban' in (REPO / path).read_text(), path
+
+
+BRANCH_CONTRACTS = {
+    'phases/HANDOFF.md': ('atlas-kanban handoff (default)',
+                          ['workflow-status', 'doctor', 'reservation/external-session', 'partial']),
+    'skills/go/SKILL.md': ('Provider-aware routing before file-mode pipeline state',
+                           ['/prd:setup', '/prd:discover', '/prd:generate', '/prd:handoff', 'canonical IDs']),
+    'skills/setup/SKILL.md': ('Task provider routing comes first',
+                              ['provider-configure', 'doctor', 'Do not initialise', 'taskmaster-file']),
+    'skills/discover/SKILL.md': ('Task provider routing comes first',
+                                 ['approval', 'constraint', 'phases/GENERATE.md', 'do not call']),
+    'skills/generate/SKILL.md': ('Task provider routing comes first',
+                                 ['phases/GENERATE.md', '`plan`', '`materialize`', 'canonical readback']),
+    'skills/handoff/SKILL.md': ('Task provider routing comes first',
+                                ['phases/HANDOFF.md', 'workflow-status', 'doctor', 'reservation']),
+}
+
+
+@pytest.mark.parametrize('path', BRANCH_CONTRACTS)
+def test_provider_branch_has_actionable_route_not_just_name(path):
+    heading, requirements = BRANCH_CONTRACTS[path]
+    text = (REPO / path).read_text()
+    branch = text.split('## ' + heading + '\n', 1)[1].split('\n## ', 1)[0]
+    assert 'atlas-kanban' in branch
+    for requirement in requirements:
+        assert requirement in branch, (path, requirement)
+    if path == 'skills/handoff/SKILL.md':
+        assert '  - Bash\n' in text.split('---', 2)[1]
+
+
+def test_standalone_provider_gates_and_native_mode_are_conditional():
+    text = (REPO / 'SKILL.md').read_text()
+    generate = text.split('## Phase 3:', 1)[1].split('## Phase 4:', 1)[0]
+    assert 'atlas-kanban: approved/validated spec, hashed plan' in generate
+    assert 'taskmaster-file: PRD validated GOOD+' in generate
+    native = generate.split('### Native Mode', 1)[1]
+    assert 'taskmaster-file only' in native
+    handoff = text.split('## Phase 4:', 1)[1].split('## Feedback', 1)[0]
+    assert 'For atlas-kanban' in handoff and 'For taskmaster-file' in handoff
 
 
 @pytest.mark.parametrize('reason', ['materialization_conflict', 'revision_requires_mapping',
@@ -235,8 +388,8 @@ def test_row_preflight_projects_new_and_existing_parent_ids(project, monkeypatch
 
 
 @pytest.mark.parametrize('module,old,new,selection', [
-    ('prd_taskmaster/task_provider.py', 'rooted_path(root, ".taskmaster/tasks/tasks.json").is_file()',
-     'rooted_path(root, ".taskmaster").exists()', 'only_an_existing_taskmaster_file_selects_legacy'),
+    ('prd_taskmaster/task_provider.py', 'any(path.is_file() for path in taskmaster.rglob("*"))',
+     'taskmaster.exists()', 'only_an_existing_taskmaster_file_selects_legacy'),
     ('SKILL.md', '"$PYTHON" "$ATLAS_SCRIPT" provider-configure --project-root "$PROJECT_ROOT" --board "$ATLAS_BOARD"',
      '"$PYTHON" "$ATLAS_SCRIPT" init-project', 'shipped_skill_fresh_project'),
     ('prd_taskmaster/task_provider.py', 'extra = {"state": state, "reason": reason}',
@@ -255,6 +408,10 @@ def test_row_preflight_projects_new_and_existing_parent_ids(project, monkeypatch
      '**extra, "state": "conflict"', 'failure_after_check_is_partial'),
 ])
 def test_second_harvest_mutations(tmp_path, module, old, new, selection):
+    run_mutation(tmp_path, module, old, new, selection)
+
+
+def run_mutation(tmp_path, module, old, new, selection, test_file='test_task_provider_repairs.py'):
     export = tmp_path / 'export'
     export.mkdir()
     for directory in ['prd_taskmaster', 'phases', 'skills']:
@@ -270,12 +427,89 @@ def test_second_harvest_mutations(tmp_path, module, old, new, selection):
     assert original.count(old) == 1
     source.write_text(original.replace(old, new))
     response = subprocess.run([sys.executable, '-m', 'pytest',
-                               'tests/core/test_task_provider_repairs.py', '-q', '--tb=short',
+                               'tests/core/' + test_file, '-q', '--tb=short',
                                '--basetemp', str(export / 'nested-tmp'),
-                               '-k', f'({selection}) and not second_harvest_mutations'],
+                               '-k', f'({selection}) and not mutations and not removed_guard_turns_proof_red'],
                               cwd=export, env={'HOME': str(export), 'PATH': '',
                                               'PYTEST_DISABLE_PLUGIN_AUTOLOAD': '1'},
                               capture_output=True, text=True, timeout=60)
     assert response.returncode == 1, response.stdout + response.stderr
     assert 'failed' in response.stdout and 'ERROR' not in response.stdout, response.stdout
     print(f'MUTATION CAUGHT {selection}: {response.stdout.splitlines()[-1]}')
+
+
+def test_owner_run_scrubs_db_pin(project, monkeypatch):
+    from prd_taskmaster import task_provider as tp
+    monkeypatch.setenv('HERMES_KANBAN_DB', str(project / 'other-board.db'))
+    seen = []
+    def capture(args, **kwargs):
+        seen.append(kwargs['env'])
+        assert 'HERMES_KANBAN_DB' not in kwargs['env']
+        return subprocess.CompletedProcess(args, 0, '', '')
+    monkeypatch.setattr(tp.subprocess, 'run', capture)
+    config = tp.load_config(str(project))
+    for args in [['materialize-check'], ['materialize'], ['external', 'status'], ['materialize-check', '--help']]:
+        tp._owner_run(project, config, args)
+    assert len(seen) == 4
+
+
+THIRD_MUTANTS = [
+    ('partial-only-if-created', '**extra, "state": "partial",',
+     '**extra, "state": "partial" if created else "conflict",', 'first_row_write_failure'),
+    ('doctor-ignores-help', 'advertised = advertised and result.returncode == 0 and all(o in result.stdout.split() for o in options)',
+     'advertised = advertised and result.returncode == 0', 'doctor_rejects_each_missing_option'),
+    ('R:doctor-drop-pending-flag', '"--body-file", "--parent-proposed", "--pending-parent-proposed", "--maps-from"',
+     '"--body-file", "--parent-proposed", "--maps-from"', 'doctor_rejects_each_missing_option'),
+    ('wrong-host-allowed', 'if config["owner_host"] not in {socket.gethostname(), "localhost"}:',
+     'if False:', 'wrong_host_without_references'),
+    ('no-explicit-config-needed', 'if not _config_path(root).is_file():', 'if False:', 'explicit_config_required'),
+    ('R:check-ignores-null-rule', 'if check and payload.get("state") == "created" and payload.get("task_id", "missing") is None:',
+     'if check and payload.get("state") == "created":', 'check_created_reply_must_have_null_id'),
+    ('R:check-accepts-created-id', '({"existing", "mapped"} if check else {"created", "existing", "mapped"})',
+     '{"created", "existing", "mapped"}', 'check_created_reply_must_have_null_id'),
+    ('db-pin-scrub-removed', 'env={key: value for key, value in os.environ.items() if key != "HERMES_KANBAN_DB"}',
+     'env=dict(os.environ)', 'owner_run_scrubs_db_pin'),
+    ('title-body-readback-removed', 'if expected is not None and any(card.get(field) != expected[field] for field in ("title", "body")):',
+     'if False:', 'readback_compares_planned_intent'),
+    ('native-created-record-removed', 'if entry.pop("created"):', 'if entry.pop("created") and False:',
+     'file_partial_names_only_newly_created'),
+    ('file-mode-calls-check', '    if config["task_provider"] == "atlas-kanban":\n        _check_plan(root, config, plan)',
+     '    if True:\n        _check_plan(root, config, plan)', 'file_partial_names_only_newly_created'),
+    ('drop-readback-created', 'created.update(extra.get("created_task_ids", {}))', 'pass',
+     'successful_write_with_bad_readback_still_names'),
+    ('drop-created-record', 'if entry.pop("owner_state") == "created":', 'if entry.pop("owner_state") == "never":',
+     'failure_after_check_is_partial_and_names'),
+    ('R:null-parent-ids', 'checked[task["proposed_task_id"]] = payload["task_id"]',
+     'checked[task["proposed_task_id"]] = None', 'row_preflight_projects_new_and_existing_parent_ids'),
+    ('R:check-really-writes', '"materialize-check" if check else "materialize"', '"materialize"',
+     'side_effect_free_owner_check_includes'),
+]
+
+
+@pytest.mark.parametrize('name,old,new,selection', THIRD_MUTANTS, ids=[row[0] for row in THIRD_MUTANTS])
+def test_third_harvest_mutations(tmp_path, name, old, new, selection):
+    run_mutation(tmp_path, 'prd_taskmaster/task_provider.py', old, new, selection)
+
+
+@pytest.mark.parametrize('name,old,new,selection', [
+    ('skip-external-kind-readback', 'if card.get("execution_kind") != "external_session":', 'if False:',
+     'doctor_reachability_requires_successful_real_read and wrong-kind'),
+    ('drop-card-readback', '        _read_card(root, config, payload["task_id"], request)', '        pass',
+     'owner_write_is_read_back_before_recording_reference'),
+    ('local-cache-decides', 'prior_ids = _check_revisions(refs, plan, config["task_provider"] == "atlas-kanban")',
+     'prior_ids = _check_revisions(refs, plan, False)', 'mapping_reuses_card_and_replay_is_existing'),
+    ('legacy-never', 'legacy = any(path.is_file() for path in taskmaster.rglob("*"))', 'legacy = False',
+     'default_and_legacy_selection_are_read_only'),
+    ('drop-maps-from-write', 'args.extend(["--maps-from", plan["prior_plan_revision"] + ":" + prior_id])', 'pass',
+     'mapping_reuses_card_and_replay_is_existing'),
+])
+def test_retained_harvest_mutations(tmp_path, name, old, new, selection):
+    run_mutation(tmp_path, 'prd_taskmaster/task_provider.py', old, new, selection, 'test_task_provider.py')
+
+
+@pytest.mark.parametrize('path', BRANCH_CONTRACTS)
+def test_gutted_skill_branch_mutations(tmp_path, path):
+    heading, _ = BRANCH_CONTRACTS[path]
+    original = (REPO / path).read_text().split('## ' + heading + '\n', 1)[1].split('\n## ', 1)[0]
+    # Preserve the provider word and heading, remove the actionable branch.
+    run_mutation(tmp_path, path, original, '\natlas-kanban\n', 'provider_branch_has_actionable_route_not_just_name')

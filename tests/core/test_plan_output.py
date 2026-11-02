@@ -154,6 +154,24 @@ def test_boolean_schema_version_is_not_a_content_hash_match():
         validate_plan(plan)
 
 
+@pytest.mark.parametrize('prior,successor,new_id', [('k', 'z', 'a-orphan'), ('zk', 'ay', '0-new')])
+def test_mapping_cannot_keep_a_renamed_prior_id(prior, successor, new_id):
+    from prd_taskmaster.plan_output import build_plan, content_hash, validate_plan
+    from prd_taskmaster.lib import CommandError
+    old = build_plan('demo', [candidate(prior)])
+    rows = [candidate(new_id), candidate(prior), candidate(successor)]
+    with pytest.raises(CommandError, match='prior logical id remains'):
+        build_plan('demo', rows, previous_plan=old, prior_mapping={prior: successor})
+    # Revalidation must reject a correctly hashed hand-authored invalid mapping too.
+    body = build_plan('demo', rows)
+    body.pop('plan_revision')
+    body.update(prior_plan_revision=old['plan_revision'], prior_mapping={prior: successor})
+    with pytest.raises(CommandError, match='prior logical id remains'):
+        validate_plan({**body, 'plan_revision': content_hash(body)})
+    assert build_plan('demo', [candidate(prior)], previous_plan=old,
+                      prior_mapping={prior: prior})['prior_mapping'] == {prior: prior}
+
+
 def test_plan_core_matches_cli_exclusive_source_arguments(tmp_path):
     from prd_taskmaster.plan_output import run_plan
     (tmp_path / "candidate.json").write_text(json.dumps({"tasks": [candidate()]}))

@@ -45,9 +45,9 @@ check = a.operation == "materialize-check"
 if a.operation == "external":
     assert a.verb == "status"
     with sqlite3.connect(store.as_uri() + "?mode=ro", uri=True) as db:
-        row = db.execute("SELECT task_id FROM cards WHERE board=? AND task_id=?", (a.board, a.task)).fetchone()
+        row = db.execute("SELECT task_id,title,body FROM cards WHERE board=? AND task_id=?", (a.board, a.task)).fetchone()
         assert row is not None
-        print(json.dumps({{"task_id": row[0], "execution_kind": "external_session"}}))
+        print(json.dumps({{"task_id": row[0], "execution_kind": "external_session", "title": row[1], "body": row[2]}}))
     sys.exit(0)
 assert a.execution_kind == "external_session" and a.json
 # Both clients must reach the owner before either enters its transaction.
@@ -64,7 +64,7 @@ if check and store.exists():
         source.backup(connection)
 with connection as db:
     db.execute("BEGIN IMMEDIATE")
-    db.execute("CREATE TABLE IF NOT EXISTS cards (board, project, revision, proposed, fingerprint, task_id UNIQUE, body, parents)")
+    db.execute("CREATE TABLE IF NOT EXISTS cards (board, project, revision, proposed, fingerprint, task_id UNIQUE, title, body, parents)")
     db.execute("CREATE TABLE IF NOT EXISTS materializations (board, project, revision, proposed, fingerprint, task_id, UNIQUE(board, project, revision, proposed))")
     db.execute("CREATE TABLE IF NOT EXISTS events (task_id, maps_from)")
     key = (a.board, a.project, a.plan_revision, a.proposed_id)
@@ -91,7 +91,10 @@ with connection as db:
     else:
         state = "created"
         task_id = "t_" + str(db.execute("SELECT COUNT(*) FROM cards").fetchone()[0] + 1)
-        db.execute("INSERT INTO cards VALUES (?,?,?,?,?,?,?,?)", key + (a.fingerprint, task_id, Path(a.body_file).read_text(), json.dumps(a.parent_proposed)))
+        db.execute("INSERT INTO cards VALUES (?,?,?,?,?,?,?,?,?)", key + (a.fingerprint, task_id, a.title, Path(a.body_file).read_text(), json.dumps(a.parent_proposed)))
+    if state == "mapped":
+        db.execute("UPDATE cards SET title=?,body=?,parents=? WHERE task_id=?",
+                   (a.title, Path(a.body_file).read_text(), json.dumps(a.parent_proposed), task_id))
     if state != "conflict" and not row:
         db.execute("INSERT INTO materializations VALUES (?,?,?,?,?,?)", key + (a.fingerprint, task_id))
     print(json.dumps({{"state": state, "task_id": None if check and state == "created" else task_id, **({{"reason": reason}} if state == "conflict" else {{}})}}))
@@ -183,9 +186,18 @@ def test_two_threads_share_owner_uniqueness(project, monkeypatch):
     gate.mkdir()
     monkeypatch.setenv("OWNER_RACE_DIR", str(gate))
     monkeypatch.setattr(tp.fcntl, "flock", lambda *args: None)
+    replies = []
+    real = tp._owner_run
+    def record(root, config, args):
+        reply = real(root, config, args)
+        replies.append((args[0], reply.returncode, reply.stdout, reply.stderr))
+        return reply
+    monkeypatch.setattr(tp, '_owner_run', record)
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: tp.run_materialize(str(project), "plan.json"), range(2)))
-    assert all(r["ok"] for r in results)
+    if not all(r["ok"] for r in results):
+        print('THREAD OWNER REPLIES', json.dumps(replies), 'RESULTS', json.dumps(results))
+    assert all(r["ok"] for r in results), (results, replies)
     assert results[0]["task_ids"] == results[1]["task_ids"]
     assert len(cards(project)) == 1
 
@@ -497,7 +509,7 @@ def test_symlinked_storage_cannot_escape_root(tmp_path, target):
      "test_task_provider.py", "wrong_target_refuses_before_effect and board"),
     ("task_provider.py", '"--execution-kind", "external_session"', '"--execution-kind", "worker"',
      "test_task_provider.py", "materialize_is_idempotent_and_references_only"),
-    ("task_provider.py", '    _read_card(root, config, payload["task_id"])', '    pass  # removed read-back',
+    ("task_provider.py", '    _read_card(root, config, payload["task_id"], request)', '    pass  # removed read-back',
      "test_task_provider.py", "owner_write_is_read_back_before_recording_reference"),
     ("task_provider.py", "selected_tag = raw.get(tag)", 'selected_tag = raw.get("master")',
      "test_task_provider.py", "file_materialize_respects_current_tag"),

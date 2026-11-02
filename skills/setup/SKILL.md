@@ -28,7 +28,8 @@ Declarative phase skill. Invoked by the prd-taskmaster orchestrator when
 Before the entry gate or init-project below, follow SKILL.md Phase 1 task ownership:
 `provider-configure --project-root ROOT --board BOARD` persists the new-project
 `atlas-kanban` default; `doctor --project-root ROOT` reports read-only diagnostics.
-An existing `.taskmaster/tasks/tasks.json` with no config stays taskmaster-file.
+With no persisted provider choice, any file under `.taskmaster/` stays taskmaster-file;
+empty folders and a bare `docs/prd.md` stay new. Provider metadata is outside `.taskmaster/`.
 For atlas-kanban, complete that setup branch and return the actual config and
 doctor diagnostics to the orchestrator. It routes Discovery next, then the
 plan/materialize and canonical handoff branches. Do not initialise `.taskmaster`,

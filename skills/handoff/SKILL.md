@@ -14,6 +14,7 @@ description: >-
 user-invocable: false
 allowed-tools:
   - Read
+  - Bash
   - Skill
   - AskUserQuestion
   - ToolSearch

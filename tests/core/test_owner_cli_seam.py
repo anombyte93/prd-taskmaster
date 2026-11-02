@@ -5,18 +5,30 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+import tarfile
 
 import pytest
 
 from tests.core.test_plan_output import candidate
 from tests.core.test_task_provider import save_plan
 
+OWNER_COMMIT = 'cf75dce1b4197e9dc2fe046f6751091510c99e32'
 SOURCE = os.environ.get('ATLAS_TEST_HERMES_SOURCE')
-pytestmark = pytest.mark.skipif(not SOURCE, reason='requires an explicit disposable-source Hermes checkout')
 
 
-def test_real_hermes_cli_reasons_identity_and_dash_values(tmp_path, monkeypatch):
-    from prd_taskmaster import task_provider as tp
+@pytest.fixture
+def owner(tmp_path, monkeypatch):
+    if not SOURCE:
+        if os.environ.get('ATLAS_REQUIRE_OWNER_SEAM') == '1':
+            pytest.fail('real-owner seam is required; ATLAS_TEST_HERMES_SOURCE missing')
+        pytest.skip('requires an explicit Hermes source checkout for git archive')
+    export = tmp_path / 'owner-export'
+    export.mkdir()
+    archive = tmp_path / 'owner.tar'
+    subprocess.run(['git', '-C', SOURCE, 'archive', '--format=tar', OWNER_COMMIT,
+                    '-o', str(archive)], check=True, capture_output=True, text=True)
+    with tarfile.open(archive) as source:
+        source.extractall(export, filter='data')
     root = tmp_path / 'project'
     root.mkdir()
     home = tmp_path / 'home'
@@ -24,9 +36,10 @@ def test_real_hermes_cli_reasons_identity_and_dash_values(tmp_path, monkeypatch)
     python = os.environ.get('ATLAS_TEST_HERMES_PYTHON', sys.executable)
     entry = tmp_path / 'hermes'
     entry.write_text(f'''#!{python}
-import os, sys, types
+import faulthandler, os, sys, types
 from pathlib import Path
-sys.path.insert(0, {str(SOURCE)!r})
+faulthandler.dump_traceback_later(10, repeat=True)
+sys.path.insert(0, {str(export)!r})
 # Source-checkout dotenv fallback can read secrets despite a disposable HOME.
 # Replace ONLY that unrelated loader; the real CLI/parser/kernel/SQLite run.
 loader = types.ModuleType("hermes_cli.env_loader")
@@ -43,16 +56,26 @@ main()
            'XDG_CACHE_HOME': str(home / '.cache'), 'LANG': 'C.UTF-8'}
     # No inherited profile, board, task, DB, dotenv or authentication route.
     def cli(*args, code=0):
-        result = subprocess.run([str(entry), 'kanban', *args], cwd=root, env=env,
-                                capture_output=True, text=True, timeout=30)
+        try:
+            result = subprocess.run([str(entry), 'kanban', *args], cwd=root, env=env,
+                                    capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired as exc:
+            pytest.fail(f'owner startup timed out: {exc.stderr!r}')
         assert result.returncode == code, result.stdout + result.stderr
         return result
     assert cli('boards', 'create', 'fixture-board').returncode == 0
+    # Whitelist the plugin process too: _owner_run inherits only this disposable
+    # HOME/PATH/owner home, never the dispatcher's auth or live-board environment.
     for key in list(os.environ):
-        if key.startswith('HERMES_'):
-            monkeypatch.delenv(key)
+        monkeypatch.delenv(key)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
+    return root, home, env, cli
+
+
+def test_real_hermes_cli_reasons_identity_and_dash_values(owner):
+    from prd_taskmaster import task_provider as tp
+    root, home, env, cli = owner
     assert tp.run_configure(str(root), board='fixture-board')['ok']
     config = tp.load_config(str(root))
     # Exercise the existing per-row writer seam first, then the complete
@@ -135,3 +158,168 @@ main()
     assert existing_parent_run['ok'] and existing_parent_run['task_ids'] == mapped_run['task_ids'], existing_parent_run
     assert tp.run_doctor(str(root))['ok']
     print('REAL OWNER: ruling-6 identity, literal reasons/title, complete row preflight, no-orphan refusal, new/existing pending parents and mapped intent verified; temp homes only')
+
+
+def database(home, board='fixture-board'):
+    return home / '.hermes/kanban/boards' / board / 'kanban.db'
+
+
+def count_cards(home, board='fixture-board'):
+    path = database(home, board)
+    if not path.exists():
+        return 0
+    with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True) as db:
+        return db.execute('SELECT count(*) FROM tasks').fetchone()[0]
+
+
+@pytest.mark.parametrize('prior,successor,new_id', [('k', 'z', 'a-orphan'), ('zk', 'ay', '0-new')])
+def test_real_owner_keep_and_map_refuses_before_any_create(owner, prior, successor, new_id):
+    from prd_taskmaster import task_provider as tp
+    from prd_taskmaster.plan_output import build_plan, content_hash
+    root, home, env, cli = owner
+    assert tp.run_configure(str(root), board='fixture-board')['ok']
+    old = save_plan(root, [candidate(prior)])
+    assert tp.run_materialize(str(root), 'plan.json')['ok']
+    body = build_plan('demo', [candidate(new_id), candidate(prior), candidate(successor)])
+    body.pop('plan_revision')
+    body.update(prior_plan_revision=old['plan_revision'], prior_mapping={prior: successor})
+    (root / 'plan.json').write_text(json.dumps({**body, 'plan_revision': content_hash(body)}))
+    (root / '.atlas-ai/materializations.json').unlink()
+    before = count_cards(home)
+    result = tp.run_materialize(str(root), 'plan.json')
+    print('D2', prior, result, 'cards added', count_cards(home) - before)
+    assert not result['ok'] and 'prior logical id remains' in result['error']
+    assert count_cards(home) == before
+    assert not (root / '.atlas-ai/materializations.json').exists()
+
+
+def test_real_owner_scrubs_inherited_db_pin(owner, monkeypatch):
+    from prd_taskmaster import task_provider as tp
+    root, home, env, cli = owner
+    cli('boards', 'create', 'otherb')
+    monkeypatch.setenv('HERMES_KANBAN_DB', str(database(home, 'otherb')))
+    monkeypatch.setenv('HERMES_KANBAN_BOARD', 'otherb')
+    assert tp.run_configure(str(root), board='fixture-board')['ok']
+    save_plan(root)
+    result = tp.run_materialize(str(root), 'plan.json')
+    doctor = tp.run_doctor(str(root))
+    print('D3', result, 'named cards', count_cards(home), 'other cards', count_cards(home, 'otherb'))
+    assert result['ok'] and doctor['ok']
+    assert count_cards(home) == 1 and count_cards(home, 'otherb') == 0
+
+
+def test_real_owner_reverting_old_fingerprint_is_not_false_success(owner):
+    from prd_taskmaster import task_provider as tp
+    root, home, env, cli = owner
+    assert tp.run_configure(str(root), board='fixture-board')['ok']
+    a = save_plan(root, [{**candidate(), 'title': 'Version A', 'description': 'A body'}])
+    first = tp.run_materialize(str(root), 'plan.json')
+    assert first['ok'], first
+    b = save_plan(root, [{**candidate(), 'title': 'Version B', 'description': 'B body'}],
+                  previous_plan=a, prior_mapping={'build': 'build'})
+    assert tp.run_materialize(str(root), 'plan.json')['ok']
+    save_plan(root, a['tasks'], previous_plan=b, prior_mapping={'build': 'build'})
+    (root / '.atlas-ai/materializations.json').unlink()
+    result = tp.run_materialize(str(root), 'plan.json')
+    card = tp.run_status(str(root), first['task_ids']['build'])['task']
+    print('D4', result, 'actual title', card['title'])
+    # Pinned historical owner still returns existing and keeps B. Plugin must
+    # refuse its stale readback; fixing the owner is a separate lane.
+    assert not result['ok'] and result['state'] == 'partial'
+    assert 'planned title/body' in result['error']
+    assert card['title'] == 'Version B' and count_cards(home) == 1
+    assert result['created_task_ids'] == result['task_ids'] == {}
+
+
+def test_real_owner_dependency_reversal_literal_refusal_and_writer_disagreement(owner):
+    from prd_taskmaster import task_provider as tp
+    root, home, env, cli = owner
+    assert tp.run_configure(str(root), board='fixture-board')['ok']
+    old = save_plan(root, [candidate('m'), candidate('p', ['m'])])
+    assert tp.run_materialize(str(root), 'plan.json')['ok']
+    revised = save_plan(root, [candidate('m', ['p']), candidate('p')],
+                        previous_plan=old, prior_mapping={'m': 'm', 'p': 'p'})
+    (root / '.atlas-ai/materializations.json').unlink()
+    before = count_cards(home)
+    result = tp.run_materialize(str(root), 'plan.json')
+    print('D5 preflight', result, 'cards added', count_cards(home) - before)
+    assert result['state'] == 'refused' and result['reason'] == 'mapping_dependency_cycle'
+    assert count_cards(home) == before
+    assert not (root / '.atlas-ai/materializations.json').exists()
+    config = tp.load_config(str(root))
+    # Reproduce the owner disagreement, on the very same rows in writer order.
+    by_id = {t['proposed_task_id']: t for t in revised['tasks']}
+    writes = [tp._materialize_card(root, config, revised, by_id[key]) for key in ['p', 'm']]
+    assert [row['owner_state'] for row in writes] == ['mapped', 'mapped']
+    print('D5 writer', writes)
+
+
+def test_real_owner_shipped_skill_literal_commands(owner):
+    import shlex
+    from tests.core.test_task_provider import REPO
+    root, home, env, cli = owner
+    (root / '.atlas-ai').mkdir()
+    (root / '.atlas-ai/candidates.json').write_text(json.dumps({'tasks': [candidate()]}))
+    values = {'PYTHON': sys.executable, 'ATLAS_SCRIPT': str(REPO / 'script.py'),
+              'PROJECT_ROOT': str(root), 'ATLAS_BOARD': 'fixture-board', 'ATLAS_PROJECT': 'demo'}
+    for path, marker in [('SKILL.md', 'atlas-kanban-setup'),
+                         ('phases/GENERATE.md', 'atlas-kanban-materialize')]:
+        text = (REPO / path).read_text()
+        block = text.split(f'<!-- {marker} -->', 1)[1].split('```bash\n', 1)[1].split('```', 1)[0]
+        for line in block.strip().splitlines():
+            argv = shlex.split(line)
+            for key, value in values.items():
+                argv = [arg.replace('$' + key, value) for arg in argv]
+            result = subprocess.run(argv, cwd=root.parent, env=env, capture_output=True, text=True, timeout=30)
+            assert result.returncode == 0, result.stdout + result.stderr
+            print('SKILL COMMAND', argv, result.returncode)
+    from prd_taskmaster import task_provider as tp
+    task_id = json.loads((root / '.atlas-ai/materializations.json').read_text())['revisions']
+    task_id = next(iter(next(iter(task_id.values())).values()))['task_id']
+    for args in [('workflow-status', '--task', task_id), ('doctor',)]:
+        result = subprocess.run([sys.executable, str(REPO / 'script.py'), *args,
+                                 '--project-root', str(root)], cwd=root.parent, env=env,
+                                capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stdout + result.stderr
+        print('SKILL HANDOFF', args, json.loads(result.stdout)['ok'])
+    assert count_cards(home) == 1 and not (root / '.taskmaster').exists()
+
+
+def test_mcp_stdio_end_to_end_against_real_owner(owner):
+    import asyncio
+    from datetime import timedelta
+    pytest.importorskip('mcp')
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    from tests.core.test_task_provider import REPO
+    root, home, env, cli = owner
+    (root / 'candidates.json').write_text(json.dumps({'tasks': [candidate()]}))
+
+    async def walk():
+        server = StdioServerParameters(command=sys.executable,
+                                       args=[str(REPO / 'mcp-server/server.py')],
+                                       env=env, cwd=str(root))
+        async with stdio_client(server) as (read, write):
+            async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=30)) as client:
+                await client.initialize()
+                tools = {tool.name for tool in (await client.list_tools()).tools}
+                assert {'provider_configure', 'plan', 'materialize', 'doctor', 'workflow_status'} <= tools
+                async def call(name, **arguments):
+                    reply = await client.call_tool(name, arguments)
+                    assert not reply.isError, reply
+                    payload = json.loads(reply.content[0].text)
+                    print('MCP STDIO', name, payload.get('ok'), payload.get('task_ids'))
+                    return payload
+                assert (await call('provider_configure', project_root=str(root), board='fixture-board'))['ok']
+                before = await call('doctor', project_root=str(root))
+                assert before['provider']['reachable'] == 'UNKNOWN'
+                assert (await call('plan', project_root=str(root), project='demo', input_path='candidates.json'))['ok']
+                first = await call('materialize', project_root=str(root), plan_path='.atlas-ai/plan.json')
+                replay = await call('materialize', project_root=str(root), plan_path='.atlas-ai/plan.json')
+                assert first['ok'] and replay['task_ids'] == first['task_ids']
+                task_id = first['task_ids']['build']
+                status = await call('workflow_status', project_root=str(root), task_id=task_id)
+                assert status['ok'] and status['task']['execution_kind'] == 'external_session'
+                assert (await call('doctor', project_root=str(root)))['ok']
+    asyncio.run(walk())
+    assert count_cards(home) == 1 and not (root / '.taskmaster').exists()
