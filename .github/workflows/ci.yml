@@ -87,8 +87,8 @@ jobs:
       - name: Fetch public Hermes owner at the named commit
         run: |
           git init "$RUNNER_TEMP/hermes-source"
-          git -C "$RUNNER_TEMP/hermes-source" fetch --depth=1 https://github.com/anombyte93/hermes-agent.git eb7f03b7fb5ba389557defea0d89afd06672d5a0
-          test "$(git -C "$RUNNER_TEMP/hermes-source" rev-parse FETCH_HEAD)" = eb7f03b7fb5ba389557defea0d89afd06672d5a0
+          git -C "$RUNNER_TEMP/hermes-source" fetch --depth=1 https://github.com/anombyte93/hermes-agent.git b99e4bb49f75b1fc7b5ffd063461dbe34debfa9a
+          test "$(git -C "$RUNNER_TEMP/hermes-source" rev-parse FETCH_HEAD)" = b99e4bb49f75b1fc7b5ffd063461dbe34debfa9a
       - name: Install bounded seam dependencies
         run: pip install pytest==9.2.0 PyYAML==6.0.3 rich==15.0.0 mcp==1.30.0
       - name: Real owner through run_materialize, skill CLI and MCP
@@ -104,7 +104,7 @@ jobs:
           cases = ET.parse("owner-seam.xml").findall(".//testcase")
           assert cases, "real-owner seam ran no tests"
           assert not any(c.find(tag) is not None for c in cases for tag in ("skipped", "failure", "error")), "real-owner seam skipped or failed"
-          print(f"REAL OWNER CI: {len(cases)} passed, zero skips; owner eb7f03b7fb5ba389557defea0d89afd06672d5a0")
+          print(f"REAL OWNER CI: {len(cases)} passed, zero skips; owner b99e4bb49f75b1fc7b5ffd063461dbe34debfa9a")
           PY
 
   # The engine must resolve a backend and stay usable with NO TaskMaster binary

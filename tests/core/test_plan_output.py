@@ -183,8 +183,10 @@ def test_plan_core_matches_cli_exclusive_source_arguments(tmp_path):
 @pytest.mark.parametrize('field,value,canonical', [
     ('title', '  padded title  ', 'padded title'),
     ('title', 'one\r\ntwo', 'one\ntwo'),
+    ('title', 'one\rtwo', 'one\ntwo'),
     ('description', 'line one\r\nline two\rline three', 'line one\nline two\nline three'),
     ('acceptance', ['one\r\ntwo'], ['one\ntwo']),
+    ('acceptance', ['one\rtwo'], ['one\ntwo']),
 ])
 def test_plan_hashes_owner_canonical_text(field, value, canonical):
     from prd_taskmaster.plan_output import build_plan, validate_plan

@@ -12,7 +12,7 @@ import pytest
 from tests.core.test_plan_output import candidate
 from tests.core.test_task_provider import save_plan
 
-OWNER_COMMIT = 'eb7f03b7fb5ba389557defea0d89afd06672d5a0'
+OWNER_COMMIT = 'b99e4bb49f75b1fc7b5ffd063461dbe34debfa9a'
 SOURCE = os.environ.get('ATLAS_TEST_HERMES_SOURCE')
 
 
@@ -192,6 +192,24 @@ def test_real_owner_keep_and_map_refuses_before_any_create(owner, prior, success
     assert not result['ok'] and 'prior logical id remains' in result['error']
     assert count_cards(home) == before
     assert not (root / '.atlas-ai/materializations.json').exists()
+
+
+def test_real_owner_renamed_plan_replays_and_continues_chain(owner):
+    from prd_taskmaster import task_provider as tp
+    root, home, env, cli = owner
+    assert tp.run_configure(str(root), board='fixture-board')['ok']
+    previous = save_plan(root, [candidate('x')])
+    initial = tp.run_materialize(str(root), 'plan.json')
+    assert initial['ok'], initial
+    card_id = initial['task_ids']['x']
+    for prior, successor in [('x', 'y'), ('y', 'z')]:
+        previous = save_plan(root, [candidate(successor)], previous_plan=previous,
+                             prior_mapping={prior: successor})
+        first = tp.run_materialize(str(root), 'plan.json')
+        replay = tp.run_materialize(str(root), 'plan.json')
+        assert first['ok'] and replay['ok'], (prior, successor, first, replay)
+        assert first['task_ids'] == replay['task_ids'] == {successor: card_id}
+        assert count_cards(home) == 1
 
 
 def test_real_owner_scrubs_inherited_db_pin(owner, monkeypatch):

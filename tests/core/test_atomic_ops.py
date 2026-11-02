@@ -148,6 +148,53 @@ def test_atomic_write_stages_beside_target(tmp_path, monkeypatch):
     assert target.read_text() == 'value'
 
 
+def test_atomic_write_preserves_symlink_target_mode(tmp_path):
+    original = tmp_path / 'original.txt'
+    original.write_text('original')
+    original.chmod(0o640)
+    target = tmp_path / 'link.txt'
+    target.symlink_to(original)
+    assert target.is_symlink() and stat.S_IMODE(target.stat().st_mode) == 0o640
+    atomic_write(target, 'replacement')
+    assert target.read_text() == 'replacement'
+    assert stat.S_IMODE(target.stat().st_mode) == 0o640
+    assert original.read_text() == 'original'
+
+
+def test_atomic_write_sets_staging_mode_before_replace(tmp_path, monkeypatch):
+    from prd_taskmaster import lib
+    target = tmp_path / 'out.txt'
+    target.write_text('old')
+    target.chmod(0o640)
+    replace = lib.os.replace
+    seen = []
+    def capture(source, destination):
+        seen.append(stat.S_IMODE(Path(source).stat().st_mode))
+        assert Path(source).read_text() == 'new'
+        assert target.read_text() == 'old'
+        replace(source, destination)
+    monkeypatch.setattr(lib.os, 'replace', capture)
+    atomic_write(target, 'new')
+    assert seen == [0o640]
+    assert target.read_text() == 'new'
+
+
+def test_atomic_write_creates_mode_probe_beside_target(tmp_path, monkeypatch):
+    from prd_taskmaster import lib
+    target = tmp_path / 'nested' / 'out.txt'
+    temporary_directory = lib.tempfile.TemporaryDirectory
+    seen = []
+    def capture(*args, **kwargs):
+        directory = temporary_directory(*args, **kwargs)
+        seen.append(Path(directory.name))
+        return directory
+    monkeypatch.setattr(lib.tempfile, 'TemporaryDirectory', capture)
+    atomic_write(target, 'value')
+    assert len(seen) == 1 and seen[0].parent == target.parent
+    assert not seen[0].exists()
+    assert target.read_text() == 'value'
+
+
 def test_mcp_append_workflow_keeps_claude_mode(tmp_path, monkeypatch):
     import importlib.util
     import types

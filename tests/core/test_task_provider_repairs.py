@@ -350,12 +350,17 @@ def test_check_sends_prior_rows_in_writer_order(project, monkeypatch):
     from prd_taskmaster.plan_output import ordered_tasks
     plan = save_plan(project, [candidate('a', ['z']), candidate('m'), candidate('z')])
     ordered = ordered_tasks(plan['tasks'])
+    alternate_temp = project / 'default-temp'
+    alternate_temp.mkdir()
+    monkeypatch.setattr(tp.tempfile, 'tempdir', str(alternate_temp))
+    assert Path(tp.tempfile.gettempdir()) == alternate_temp
     seen = []
     real = tp._owner_run
     def capture(root, config, args):
         assert '--prior-rows-file' in args, args
         path = Path(args[args.index('--prior-rows-file') + 1])
-        assert path.is_relative_to('/tmp')
+        assert path.parent.parent == Path('/tmp')
+        assert Path(args[args.index('--body-file') + 1]).parent == path.parent
         seen.append((path, json.loads(path.read_text())))
         return real(root, config, args)
     monkeypatch.setattr(tp, '_owner_run', capture)
