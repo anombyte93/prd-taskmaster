@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 from pathlib import Path
 import re
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -94,10 +96,22 @@ def _owner_target(config: dict) -> None:
         raise CommandError("configure an explicit board before contacting the owner")
 
 
+def _owner_executable() -> str:
+    # Resolve in the caller, before subprocess cwd changes. Empty/dot PATH
+    # entries must never turn a project's own `hermes` file into the owner.
+    directories = [str(Path(entry).resolve()) for entry in os.get_exec_path()
+                   if entry and Path(entry) != Path(".")]
+    executable = shutil.which("hermes", path=os.pathsep.join(directories)) if directories else None
+    if executable is None:
+        raise CommandError("owner CLI is unavailable; install Hermes on owner_host")
+    return str(Path(executable).resolve())
+
+
 def _owner_run(root: Path, config: dict, args: list[str]):
     _owner_target(config)
+    executable = _owner_executable()
     try:
-        return subprocess.run(["hermes", "kanban", "--board", config["board"], *args],
+        return subprocess.run([executable, "kanban", "--board", config["board"], *args],
                               cwd=root, capture_output=True, text=True, timeout=30)
     except FileNotFoundError as exc:
         raise CommandError("owner CLI is unavailable; install Hermes on owner_host") from exc
@@ -117,6 +131,9 @@ def _materialize_card(root: Path, config: dict, plan: dict, task: dict) -> dict:
                 "--title", task["title"], "--body-file", str(body_path)]
         for parent in task["dependencies"]:
             args.extend(["--parent-proposed", parent])
+        for prior_id, successor in plan.get("prior_mapping", {}).items():
+            if successor == task["proposed_task_id"]:
+                args.extend(["--maps-from", plan["prior_plan_revision"] + ":" + prior_id])
         args.extend(["--execution-kind", "external_session", "--json"])
         result = _owner_run(root, config, args)
     try:
@@ -128,7 +145,7 @@ def _materialize_card(root: Path, config: dict, plan: dict, task: dict) -> dict:
     if result.returncode == 3 and payload.get("state") == "conflict":
         raise CommandError("materialization_conflict: owner refused changed intent",
                            {"state": "conflict", "task_id": payload["task_id"]})
-    if result.returncode != 0 or payload.get("state") not in {"created", "existing"}:
+    if result.returncode != 0 or payload.get("state") not in {"created", "existing", "mapped"}:
         raise CommandError("owner returned an incompatible materialization response")
     _read_card(root, config, payload["task_id"])
     return {"task_id": payload["task_id"], "intent_fingerprint": task["intent_fingerprint"]}
@@ -195,9 +212,14 @@ def _native_card(root: Path, plan: dict, task: dict) -> dict:
     return selected
 
 
-def _check_revisions(refs: dict, plan: dict) -> dict:
+def _check_revisions(refs: dict, plan: dict, owner_authoritative: bool = False) -> dict:
     revisions = refs["revisions"]
     prior = plan.get("prior_plan_revision")
+    if owner_authoritative:
+        # Cached lineage is optional. Only the owner may decide intent conflicts
+        # and cross-revision identity, even when every local reference is lost.
+        entries = revisions.get(prior, {})
+        return {old: entries[old]["task_id"] for old in plan.get("prior_mapping", {}) if old in entries}
     if prior is not None:
         if prior not in revisions:
             raise CommandError("prior plan has no local canonical references; reconcile it first")
@@ -230,14 +252,14 @@ def run_materialize(project_root: str, plan_path: str) -> dict:
     if path.exists():
         initial = read_object(path)
         _check_reference_target(initial, identity)
-        _check_revisions(initial, plan)
+        _check_revisions(initial, plan, config["task_provider"] == "atlas-kanban")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_suffix(".json.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         # Re-read under lock: concurrent clients cannot lose reference entries.
         refs = read_object(path) if path.exists() else {**identity, "revisions": {}}
         _check_reference_target(refs, identity)
-        prior_ids = _check_revisions(refs, plan)
+        prior_ids = _check_revisions(refs, plan, config["task_provider"] == "atlas-kanban")
         entries = refs["revisions"].setdefault(plan["plan_revision"], {})
         for task in ordered_tasks(plan["tasks"]):
             if config["task_provider"] == "atlas-kanban":
@@ -269,28 +291,79 @@ def run_status(project_root: str, task_id: str) -> dict:
 
 @safe_operation
 def run_doctor(project_root: str) -> dict:
-    root = project_path(project_root)
-    config = load_config(str(root))
-    package = {"name": "prd-taskmaster", "version": prd_taskmaster.__version__}
+    # Keep independent observations even when a later diagnostic cannot run.
+    provider = {"reachable": "UNKNOWN", "contract": "UNKNOWN",
+                "advertised_contract": "UNKNOWN", "optional_runtime_required": False}
+    report = {"ok": False, "package": {"name": "prd-taskmaster", "version": prd_taskmaster.__version__},
+              "config": "UNKNOWN", "provider": provider, "read_only": True, "diagnostics": []}
+    errors = (CommandError, OSError, ValueError, TypeError, KeyError)
+    try:
+        root = project_path(project_root)
+        config = load_config(str(root))
+    except errors:
+        report["diagnostics"].append("config unread; check the explicit project root and provider config")
+        return report
+    report.update(config=config, notice=config.get("notice"))
     if config["task_provider"] == "taskmaster-file":
-        store = rooted_path(root, ".taskmaster/tasks/tasks.json")
-        reachable = store.is_file() and bool(read_object(store))
-        provider = {"reachable": reachable, "contract": "taskmaster-file", "optional_runtime_required": False}
+        provider.update(contract="taskmaster-file", advertised_contract=True)
+        try:
+            provider["reachable"] = bool(read_object(rooted_path(root, ".taskmaster/tasks/tasks.json")))
+        except errors:
+            report["diagnostics"].append("native task store unread")
     else:
-        # Help is the advertised contract, not a write/read of a made-up live task.
-        checks = [( ["materialize", "--help"],
-                    ["--project", "--plan-revision", "--proposed-id", "--fingerprint", "--title",
-                     "--body-file", "--parent-proposed", "--execution-kind", "--json"]),
+        try:
+            _owner_target(config)
+            _owner_executable()
+        except errors:
+            report["diagnostics"].append("owner target or CLI unavailable; reachability and contract unread")
+            return report
+        # Help advertises syntax only. It never proves board/card reachability.
+        checks = [(["materialize", "--help"],
+                   ["--project", "--plan-revision", "--proposed-id", "--fingerprint", "--title",
+                    "--body-file", "--parent-proposed", "--maps-from", "--execution-kind", "--json"]),
                   (["external", "status", "--help"], ["--task", "--json"])]
-        advertised = True
-        for args, options in checks:
-            result = _owner_run(root, config, args)
-            advertised = advertised and result.returncode == 0 and all(o in result.stdout.split() for o in options)
-        provider = {"reachable": True, "contract": "P02" if advertised else None,
-                    "advertised_contract": advertised, "optional_runtime_required": False}
-    return {"ok": bool(provider["reachable"]) and bool(provider["contract"]),
-            "package": package, "config": config, "provider": provider,
-            "notice": config.get("notice"), "read_only": True}
+        try:
+            advertised = True
+            for args, options in checks:
+                result = _owner_run(root, config, args)
+                advertised = advertised and result.returncode == 0 and all(o in result.stdout.split() for o in options)
+            provider.update(advertised_contract=advertised, contract="P02" if advertised else "UNKNOWN")
+        except errors:
+            report["diagnostics"].append("advertised owner contract unread")
+        # The contracted read requires a real task ID. Never invent a probe card,
+        # create a task, or equate help output with a healthy configured board.
+        task_id = None
+        try:
+            path = rooted_path(root, REFERENCES_FILE)
+            if path.exists():
+                refs = read_object(path)
+                project = refs.get("project")
+                if not isinstance(project, str):
+                    raise CommandError("invalid reference project")
+                _check_reference_target(refs, _identity(config, project))
+                revisions = list(refs["revisions"].values())
+                if any(not isinstance(revision, dict) for revision in revisions):
+                    raise CommandError("invalid revision references")
+                entries = [entry for revision in revisions for entry in revision.values()]
+                if any(not isinstance(entry, dict) for entry in entries):
+                    raise CommandError("invalid card references")
+                task_id = next((entry["task_id"] for entry in entries), None)
+                if task_id is not None and (not isinstance(task_id, str) or not _CARD.fullmatch(task_id)):
+                    raise CommandError("invalid reference task_id")
+        except errors:
+            report["diagnostics"].append("canonical references unread")
+            task_id = None
+        if task_id is None:
+            report["diagnostics"].append("reachability UNKNOWN: no readable canonical task reference for external status")
+        else:
+            try:
+                _read_card(root, config, task_id)
+                provider["reachable"] = True
+            except errors:
+                provider["reachable"] = False
+                report["diagnostics"].append("owner external status did not confirm the referenced card and kind")
+    report["ok"] = provider["reachable"] is True and provider["advertised_contract"] is True
+    return report
 
 
 def _legacy_tasks(root: Path) -> tuple[str, list[dict]]:
