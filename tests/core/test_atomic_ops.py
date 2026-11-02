@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 import os
 import threading
 from pathlib import Path
@@ -27,6 +28,27 @@ def test_atomic_write_survives_mid_write_crash_simulation(tmp_path):
     # a fresh atomic_write should still produce clean result
     atomic_write(target, "final")
     assert target.read_text() == "final"
+
+
+def test_atomic_write_threads_have_distinct_staging_files(tmp_path, monkeypatch):
+    """Owner uniqueness tests bypass flock; reference writes must still be atomic."""
+    from prd_taskmaster import lib
+    target = tmp_path / "materializations.json"
+    before_replace = threading.Barrier(2)
+    replace = lib.os.replace
+    staging_paths = []
+
+    def overlap(source, destination):
+        staging_paths.append(Path(source))
+        before_replace.wait(timeout=5)
+        replace(source, destination)
+
+    monkeypatch.setattr(lib.os, "replace", overlap)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(lambda content: atomic_write(target, content), ("first", "second")))
+    assert len(set(staging_paths)) == 2
+    assert target.read_text() in {"first", "second"}
+    assert list(tmp_path.iterdir()) == [target]
 
 
 def test_locked_update_serializes_concurrent_writes(tmp_path):

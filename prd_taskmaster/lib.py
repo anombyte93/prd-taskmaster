@@ -12,6 +12,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -70,9 +71,15 @@ def atomic_write(path: Path, content: str) -> None:
     """Write content to path atomically via tmp + os.replace (atomic on POSIX)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
-    tmp.write_text(content)
-    os.replace(tmp, path)
+    # A PID-only name collides between threads when callers deliberately bypass
+    # flock to test owner uniqueness. Stage each invocation beside the target.
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".tmp.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(content)
+        os.replace(tmp, path)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
 
 
 def locked_update(path: Path, transform: Callable[[str], str]) -> str:
