@@ -31,6 +31,15 @@ Declarative phase skill. Invoked by the prd-taskmaster orchestrator when
 The one rule: **detect what the user has, recommend ONE mode, give the user a
 structured choice, dispatch the chosen mode. Mode D executes only on tier=premium; otherwise it is a locked teaser.**
 
+## Task provider routing comes first
+
+For `atlas-kanban`, follow phases/HANDOFF.md's default branch before the entry gate
+below: read the canonical references with `workflow-status`, report `doctor`, then
+hand IDs/acceptance to the parent for its external-session reservation protocol.
+Do not use Taskmaster lifecycle commands, append a file-mode CLAUDE.md workflow,
+invoke execute-task/fleet, or forge legacy pipeline gate evidence for canonical
+cards. All remaining modes, steps and file-mode gates apply only to taskmaster-file.
+
 ## Entry gate
 
 1. Call `mcp__plugin_prd_go__check_gate(phase="HANDOFF", evidence={})` for diagnostics.

@@ -30,16 +30,49 @@ import time
 p = argparse.ArgumentParser()
 p.add_argument("kanban")
 p.add_argument("--board", required=True)
-p.add_argument("operation", choices=["materialize", "external"])
+p.add_argument("operation", choices=["materialize", "materialize-check", "external"])
 p.add_argument("verb", nargs="?")
 for flag in ["project", "plan-revision", "proposed-id", "fingerprint", "title", "body-file", "execution-kind", "task", "maps-from"]:
     p.add_argument("--" + flag)
+p.add_argument("--plan-file")
 p.add_argument("--parent-proposed", action="append", default=[])
 p.add_argument("--json", action="store_true")
 a = p.parse_args()
 assert a.board == "fixture-board"
 assert Path.cwd() == Path(__file__).parent
 store = Path(__file__).with_name("owner.sqlite")
+if a.operation == "materialize-check":
+    # A disposable simulation of the owner's batch check. Run the SAME ruling-6
+    # rules on a private copy, so no owner card, reference or event is changed.
+    import shutil
+    import subprocess
+    import tempfile
+    request = json.loads(Path(a.plan_file).read_text())
+    with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
+        root = Path(temporary)
+        script = root / "hermes"
+        shutil.copy2(__file__, script)
+        if store.exists():
+            shutil.copy2(store, root / "owner.sqlite")
+        for task in request["tasks"]:
+            body = root / "body.md"
+            body.write_text(task["body"])
+            argv = [sys.executable, str(script), "kanban", "--board", a.board, "materialize",
+                    "--project", request["project"], "--plan-revision", request["plan_revision"],
+                    "--proposed-id", task["proposed_task_id"], "--fingerprint", task["intent_fingerprint"],
+                    "--title=" + task["title"], "--body-file", str(body),
+                    "--execution-kind", task["execution_kind"], "--json"]
+            for parent in task["parent_proposed"]:
+                argv.extend(["--parent-proposed", parent])
+            if task["maps_from"]:
+                argv.extend(["--maps-from", task["maps_from"]])
+            reply = subprocess.run(argv, cwd=root, capture_output=True, text=True,
+                                   env={{"HOME": str(root), "PATH": ""}}, timeout=10)
+            if reply.returncode:
+                print(reply.stdout, end="")
+                sys.exit(reply.returncode)
+    print(json.dumps({{"state": "checked"}}))
+    sys.exit(0)
 if a.operation == "external":
     assert a.verb == "status"
     with sqlite3.connect(store.as_uri() + "?mode=ro", uri=True) as db:
@@ -128,7 +161,9 @@ def test_default_and_legacy_selection_are_read_only(tmp_path):
     from prd_taskmaster import task_provider as tp
     assert tp.load_config(str(tmp_path))["task_provider"] == "atlas-kanban"
     assert list(tmp_path.iterdir()) == []
-    (tmp_path / ".taskmaster").mkdir()
+    store = tmp_path / ".taskmaster/tasks/tasks.json"
+    store.parent.mkdir(parents=True)
+    store.write_text('{"tasks": []}')
     result = tp.load_config(str(tmp_path))
     assert result["task_provider"] == "taskmaster-file"
     assert "legacy" in result["notice"].lower()
@@ -285,7 +320,7 @@ def test_changed_plan_with_local_references_is_still_refused_by_owner(project, m
     monkeypatch.setattr(tp.subprocess, "run", spy)
     result = tp.run_materialize(str(project), "plan.json")
     assert not result["ok"] and result["state"] == "conflict"
-    assert len(effects) == 1 and "materialize" in effects[0]
+    assert len(effects) == 1 and "materialize-check" in effects[0]
     assert len(cards(project)) == 1
 
 
@@ -526,7 +561,8 @@ def test_removed_guard_turns_proof_red(tmp_path, module, old, new, test_file, se
     assert mutable.count(old) == 1
     source.write_text(mutable.replace(old, new) + separator + rest)
     result = subprocess.run([sys.executable, "-m", "pytest", str(test_dir / test_file),
-                             "-q", "-k", f"({selection}) and not removed_guard_turns_proof_red", "--tb=short"],
+                             "-q", "--basetemp", str(export / "nested-tmp"),
+                             "-k", f"({selection}) and not removed_guard_turns_proof_red", "--tb=short"],
                             cwd=export, env={"HOME": str(export), "PATH": "",
                             "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
                             capture_output=True, text=True, timeout=60)

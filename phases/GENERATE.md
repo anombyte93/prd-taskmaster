@@ -12,6 +12,52 @@ for an MCP-covered op is a compliance failure.** The script.py commands below ar
 CLI-mode path (zero-dependency installs, codex/gemini harnesses).
 
 
+## atlas-kanban: the default generation and materialisation path
+
+Read the persisted provider selection first. For `atlas-kanban`, use THIS branch
+and return to Handoff when finished. The legacy parse/enrich/expand checklist below
+is for taskmaster-file ONLY, not a gate for canonical cards.
+
+1. Keep the Discovery constraints and approved acceptance in `.atlas-ai/prd.md`.
+   Load a template and validate the spec with `validate-prd --input` (or the resolved
+   MCP equivalents); fix bare placeholders and obtain grade GOOD+. Spec generation
+   and validation are not execution or fresh verification.
+2. Run `plan --project-root "$PROJECT_ROOT" --project "$ATLAS_PROJECT" --prd
+   .atlas-ai/prd.md` (MCP: `plan(project_root=..., project=..., prd_path=...)`).
+   `agent_action_required` is the expected keyless driver-generation request, not
+   a missing optional runtime. Write `.atlas-ai/candidates.json` from the approved
+   spec, with `tasks` containing stable `proposed_task_id`, `title`, `description`,
+   non-empty `acceptance` strings and `dependencies` (logical IDs). Decompose into
+   bounded verifiable tasks here, not by writing a mutable Taskmaster task store.
+3. Hash/validate the candidates, then explicitly materialise through the owner:
+
+<!-- atlas-kanban-materialize -->
+```bash
+"$PYTHON" "$ATLAS_SCRIPT" plan --project-root "$PROJECT_ROOT" --project "$ATLAS_PROJECT" --input .atlas-ai/candidates.json --output .atlas-ai/plan.json
+"$PYTHON" "$ATLAS_SCRIPT" materialize --project-root "$PROJECT_ROOT" --plan .atlas-ai/plan.json
+```
+
+In MCP-mode use `plan(input_path=..., output_path=...)`, then
+`materialize(project_root=..., plan_path=...)` instead. Every root is absolute;
+relative artifact paths are rooted there, not at the caller's cwd. `plan` creates
+no cards. `materialize` checks the entire plan with the owner before the first write,
+then reads each canonical card back; `.atlas-ai/materializations.json` holds only
+references. A missing/incompatible check command refuses, never falls back to creates.
+
+For a revision, supply `--previous-plan PATH --prior-mapping PATH` to `plan` with a
+JSON mapping of every prior logical ID to its successor (or null). Unchanged intent
+reuses the canonical card, even with the local reference deleted. Report literal
+owner refusal reasons: `revision_requires_mapping`, `mapping_not_found`,
+`mapping_card_started`, `logical_id_retired`, or `materialization_conflict`.
+A post-check failure is `partial`, with created IDs, verified IDs and the failed
+logical ID; reconcile before retrying the same keys, never invent a replacement.
+
+Gate: approved/validated spec, hashed plan, successful materialisation and canonical
+IDs read back. A conflict creates no cards. A partial run is NOT completion. Continue
+with the atlas-kanban branch in phases/HANDOFF.md, not the legacy path below.
+
+## Legacy taskmaster-file only
+
 ## The One Rule
 
 **Generate the spec, validate it catches placeholders, parse it into tasks. Quality over speed.**

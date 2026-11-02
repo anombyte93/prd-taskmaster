@@ -1,0 +1,256 @@
+"""Second-harvest regressions, isolated owner protocol and shipped skill walk."""
+import json
+from pathlib import Path
+import shlex
+import shutil
+import subprocess
+import sys
+
+import pytest
+
+from tests.core.test_plan_output import candidate
+from tests.core.test_task_provider import project, save_plan, cards, tree_hash, REPO
+
+
+def test_only_an_existing_taskmaster_file_selects_legacy(tmp_path):
+    from prd_taskmaster import task_provider as tp
+    (tmp_path / '.taskmaster/docs').mkdir(parents=True)
+    (tmp_path / '.taskmaster/docs/prd.md').write_text('Spec, not a task store')
+    assert tp.load_config(str(tmp_path))['task_provider'] == 'atlas-kanban'
+    store = tmp_path / '.taskmaster/tasks/tasks.json'
+    store.parent.mkdir()
+    store.write_text('{"tasks": []}')
+    assert tp.load_config(str(tmp_path))['task_provider'] == 'taskmaster-file'
+
+
+def test_shipped_skill_fresh_project_reaches_owner_without_optional_engine(project):
+    # Execute the literal documented CLI commands, not a parallel hand-written flow.
+    skill = (REPO / 'SKILL.md').read_text()
+    generate = (REPO / 'phases/GENERATE.md').read_text()
+    values = {'PYTHON': sys.executable, 'ATLAS_SCRIPT': str(REPO / 'script.py'),
+              'PROJECT_ROOT': str(project), 'ATLAS_BOARD': 'fixture-board', 'ATLAS_PROJECT': 'demo'}
+    (project / '.atlas-workflow.json').unlink()  # genuinely unconfigured project
+    (project / '.atlas-ai').mkdir(exist_ok=True)
+    (project / '.atlas-ai/candidates.json').write_text(json.dumps({'tasks': [candidate()]}))
+    for text, marker in [(skill, 'atlas-kanban-setup'), (generate, 'atlas-kanban-materialize')]:
+        if marker == 'atlas-kanban-materialize':
+            doctor = subprocess.run([sys.executable, str(REPO / 'script.py'), 'doctor',
+                                     '--project-root', str(project)], cwd=project.parent,
+                                    env={'HOME': str(project), 'PATH': str(project)},
+                                    capture_output=True, text=True, timeout=30)
+            diagnostic = json.loads(doctor.stdout)
+            assert doctor.returncode == 1
+            assert diagnostic['config']['task_provider'] == 'atlas-kanban'
+            assert diagnostic['provider']['reachable'] == 'UNKNOWN'
+            assert not (project / 'owner.sqlite').exists()
+        assert f'<!-- {marker} -->' in text
+        block = text.split(f'<!-- {marker} -->', 1)[1].split('```bash\n', 1)[1].split('```', 1)[0]
+        for line in block.strip().splitlines():
+            argv = shlex.split(line)
+            for key, value in values.items():
+                argv = [arg.replace('$' + key, value) for arg in argv]
+            response = subprocess.run(argv, cwd=project.parent,
+                                      env={'HOME': str(project), 'PATH': str(project)},
+                                      capture_output=True, text=True, timeout=30)
+            assert response.returncode == 0, response.stdout + response.stderr
+    from prd_taskmaster import task_provider as tp
+    assert tp.run_doctor(str(project))['ok']
+    assert len(cards(project)) == 1
+    assert not (project / '.taskmaster').exists()
+    for path in ['phases/HANDOFF.md', 'skills/go/SKILL.md', 'skills/setup/SKILL.md',
+                 'skills/discover/SKILL.md', 'skills/generate/SKILL.md', 'skills/handoff/SKILL.md']:
+        assert 'atlas-kanban' in (REPO / path).read_text(), path
+
+
+@pytest.mark.parametrize('reason', ['materialization_conflict', 'revision_requires_mapping',
+                                   'mapping_card_started', 'logical_id_retired'])
+def test_owner_conflict_reason_is_literal(project, monkeypatch, reason):
+    from prd_taskmaster import task_provider as tp
+    plan = save_plan(project)
+    monkeypatch.setattr(tp, '_owner_run', lambda *a: subprocess.CompletedProcess(
+        [], 3, json.dumps({'state': 'conflict', 'reason': reason, 'task_id': 't_1'}), ''))
+    result = tp.run_materialize(str(project), 'plan.json')
+    assert not result['ok'] and result['state'] == 'conflict'
+    assert result['reason'] == reason and reason in result['error']
+
+
+def test_missing_mapping_reports_owner_refusal_not_bad_id(project, monkeypatch):
+    from prd_taskmaster import task_provider as tp
+    save_plan(project)
+    monkeypatch.setattr(tp, '_owner_run', lambda *a: subprocess.CompletedProcess(
+        [], 1, '{"state":"refused","reason":"mapping_not_found"}', ''))
+    result = tp.run_materialize(str(project), 'plan.json')
+    assert result['state'] == 'refused' and result['reason'] == 'mapping_not_found'
+    assert result['error'] == 'mapping_not_found'
+    assert 'task_id' not in result
+
+
+def test_nonexistent_board_is_definitive_refusal(project, monkeypatch):
+    from prd_taskmaster import task_provider as tp
+    save_plan(project)
+    message = "kanban: board 'fixture-board' does not exist. Create it with `hermes kanban boards create fixture-board`."
+    monkeypatch.setattr(tp, '_owner_run', lambda *a: subprocess.CompletedProcess([], 1, '', message + '\n'))
+    result = tp.run_materialize(str(project), 'plan.json')
+    assert result['state'] == 'refused' and result['reason'] == 'board_not_found'
+    assert result['error'] == message
+    assert 'uncertain' not in result['error']
+
+
+def test_leading_dash_title_is_a_value(project):
+    from prd_taskmaster import task_provider as tp
+    save_plan(project, [{**candidate(), 'title': '-urgent'}])
+    result = tp.run_materialize(str(project), 'plan.json')
+    assert result['ok'], result
+    assert len(cards(project)) == 1
+
+
+def test_plan_check_refuses_every_row_before_first_create(project, monkeypatch):
+    from prd_taskmaster import task_provider as tp
+    save_plan(project, [candidate('m')])
+    assert tp.run_materialize(str(project), 'plan.json')['ok']
+    save_plan(project, [candidate('a-new'), {**candidate('m'), 'title': 'Changed intent'}])
+    (project / '.atlas-ai/materializations.json').unlink()
+    before = tree_hash(project)
+    result = tp.run_materialize(str(project), 'plan.json')
+    assert len(cards(project)) == 1  # no orphan a-new and no owner reference/event writes
+    assert not result['ok'] and result['reason'] == 'revision_requires_mapping'
+    assert result['state'] == 'conflict'
+    assert tree_hash(project) == before
+
+
+def test_side_effect_free_owner_check_includes_dependencies_and_mapping(project, monkeypatch):
+    from prd_taskmaster import task_provider as tp
+    old = save_plan(project)
+    assert tp.run_materialize(str(project), 'plan.json')['ok']
+    plan = save_plan(project, [candidate('a'), {**candidate(), 'dependencies': ['a']}],
+                     previous_plan=old, prior_mapping={'build': 'build'})
+    before = tree_hash(project)
+    requests = []
+    real = tp._owner_run
+    def capture(root, config, args):
+        assert args[0] == 'materialize-check'
+        requests.append(json.loads(Path(args[args.index('--plan-file') + 1]).read_text()))
+        return real(root, config, args)
+    monkeypatch.setattr(tp, '_owner_run', capture)
+    tp._check_plan(project, tp.load_config(str(project)), plan)
+    assert requests[0]['project'] == 'demo'
+    assert requests[0]['plan_revision'] == plan['plan_revision']
+    tasks = requests[0]['tasks']
+    assert [task['proposed_task_id'] for task in tasks] == ['a', 'build']
+    assert tasks[1]['parent_proposed'] == ['a']
+    assert tasks[1]['maps_from'] == old['plan_revision'] + ':build'
+    assert tasks[1]['title'] == plan['tasks'][1]['title']
+    assert tasks[1]['intent_fingerprint'] == plan['tasks'][1]['intent_fingerprint']
+    assert tasks[1]['execution_kind'] == 'external_session'
+    assert 'Focused tests pass' in tasks[1]['body']
+    assert tree_hash(project) == before
+    assert len(cards(project)) == 1
+
+
+def test_failure_after_check_is_partial_and_names_created_cards(project, monkeypatch):
+    from prd_taskmaster import task_provider as tp
+    save_plan(project, [candidate('a'), candidate('b')])
+    real = tp._owner_run
+    def fail_second(root, config, args):
+        if args[0] == 'materialize' and '--proposed-id' in args and args[args.index('--proposed-id') + 1] == 'b':
+            return subprocess.CompletedProcess([], 3, '{"state":"conflict","reason":"mapping_card_started","task_id":"t_changed"}', '')
+        return real(root, config, args)
+    monkeypatch.setattr(tp, '_owner_run', fail_second)
+    result = tp.run_materialize(str(project), 'plan.json')
+    assert not result['ok'] and result['state'] == 'partial'
+    assert result['reason'] == 'mapping_card_started'
+    assert result['created_task_ids'] == {'a': 't_1'}
+    assert result['task_ids'] == {'a': 't_1'}
+    assert result['failed_proposed_task_id'] == 'b'
+    assert len(cards(project)) == 1
+
+
+def test_successful_write_with_bad_readback_still_names_possible_orphan(project, monkeypatch):
+    from prd_taskmaster import task_provider as tp
+    save_plan(project)
+    real = tp._owner_run
+    def wrong_read(root, config, args):
+        if args[0] == 'external':
+            return subprocess.CompletedProcess([], 0, '{"task_id":"t_wrong","execution_kind":"worker"}', '')
+        return real(root, config, args)
+    monkeypatch.setattr(tp, '_owner_run', wrong_read)
+    result = tp.run_materialize(str(project), 'plan.json')
+    assert result['state'] == 'partial'
+    assert result['created_task_ids'] == {'build': 't_1'}
+    assert result['task_ids'] == {}
+    assert not (project / '.atlas-ai/materializations.json').exists()
+    assert len(cards(project)) == 1
+
+
+@pytest.mark.parametrize('reason,code,state', [
+    ('revision_requires_mapping', 3, 'conflict'), ('mapping_card_started', 3, 'conflict'),
+    ('logical_id_retired', 3, 'conflict'), ('mapping_not_found', 1, 'refused')])
+def test_per_card_seam_also_preserves_literal_refusals(project, monkeypatch, reason, code, state):
+    from prd_taskmaster import task_provider as tp
+    plan = save_plan(project)
+    monkeypatch.setattr(tp, '_owner_run', lambda *a: subprocess.CompletedProcess(
+        [], code, json.dumps({'state': state, 'reason': reason}), ''))
+    with pytest.raises(tp.CommandError) as refusal:
+        tp._materialize_card(project, tp.load_config(str(project)), plan, plan['tasks'][0])
+    assert refusal.value.extra == {'state': state, 'reason': reason}
+    assert str(refusal.value) == reason
+
+
+def test_check_unavailable_never_falls_through_to_create(project, monkeypatch):
+    from prd_taskmaster import task_provider as tp
+    save_plan(project)
+    calls = []
+    def unavailable(root, config, args):
+        calls.append(args)
+        return subprocess.CompletedProcess([], 2, '', 'unsupported command')
+    monkeypatch.setattr(tp, '_owner_run', unavailable)
+    result = tp.run_materialize(str(project), 'plan.json')
+    assert not result['ok']
+    assert [args[0] for args in calls] == ['materialize-check']
+    assert not (project / 'owner.sqlite').exists()
+    assert not (project / '.atlas-ai/materializations.json').exists()
+
+
+@pytest.mark.parametrize('module,old,new,selection', [
+    ('prd_taskmaster/task_provider.py', 'rooted_path(root, ".taskmaster/tasks/tasks.json").is_file()',
+     'rooted_path(root, ".taskmaster").exists()', 'only_an_existing_taskmaster_file_selects_legacy'),
+    ('SKILL.md', '"$PYTHON" "$ATLAS_SCRIPT" provider-configure --project-root "$PROJECT_ROOT" --board "$ATLAS_BOARD"',
+     '"$PYTHON" "$ATLAS_SCRIPT" init-project', 'shipped_skill_fresh_project'),
+    ('prd_taskmaster/task_provider.py', 'extra = {"state": state, "reason": reason}',
+     'extra = {"state": state}', 'owner_conflict_reason_is_literal'),
+    ('prd_taskmaster/task_provider.py', '(result.returncode != 0 and state == "refused")',
+     'False', 'missing_mapping_reports_owner_refusal'),
+    ('prd_taskmaster/task_provider.py', 'result.returncode == 1 and result.stderr.strip() == missing_board',
+     'False', 'nonexistent_board_is_definitive_refusal'),
+    ('prd_taskmaster/task_provider.py', '"--title=" + task["title"]',
+     '"--title", task["title"]', 'leading_dash_title_is_a_value'),
+    ('prd_taskmaster/task_provider.py', '        _check_plan(root, config, plan)',
+     '        pass  # removed owner plan check', 'plan_check_refuses_every_row_before_first_create'),
+    ('prd_taskmaster/task_provider.py', '**extra, "state": "partial"',
+     '**extra, "state": "conflict"', 'failure_after_check_is_partial'),
+])
+def test_second_harvest_mutations(tmp_path, module, old, new, selection):
+    export = tmp_path / 'export'
+    export.mkdir()
+    for directory in ['prd_taskmaster', 'phases', 'skills']:
+        shutil.copytree(REPO / directory, export / directory,
+                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    (export / 'tests/core').mkdir(parents=True)
+    for file in ['script.py', 'SKILL.md', 'tests/__init__.py', 'tests/core/__init__.py',
+                 'tests/core/test_plan_output.py', 'tests/core/test_task_provider.py',
+                 'tests/core/test_task_provider_repairs.py']:
+        shutil.copy2(REPO / file, export / file)
+    source = export / module
+    original = source.read_text()
+    assert original.count(old) == 1
+    source.write_text(original.replace(old, new))
+    response = subprocess.run([sys.executable, '-m', 'pytest',
+                               'tests/core/test_task_provider_repairs.py', '-q', '--tb=short',
+                               '--basetemp', str(export / 'nested-tmp'),
+                               '-k', f'({selection}) and not second_harvest_mutations'],
+                              cwd=export, env={'HOME': str(export), 'PATH': '',
+                                              'PYTEST_DISABLE_PLUGIN_AUTOLOAD': '1'},
+                              capture_output=True, text=True, timeout=60)
+    assert response.returncode == 1, response.stdout + response.stderr
+    assert 'failed' in response.stdout and 'ERROR' not in response.stdout, response.stdout
+    print(f'MUTATION CAUGHT {selection}: {response.stdout.splitlines()[-1]}')

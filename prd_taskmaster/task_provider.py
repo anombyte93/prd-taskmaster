@@ -53,7 +53,7 @@ def load_config(project_root: str) -> dict:
     path = _config_path(root)
     if path.exists():
         return _validate_config(root, read_object(path))
-    legacy = rooted_path(root, ".taskmaster").exists()
+    legacy = rooted_path(root, ".taskmaster/tasks/tasks.json").is_file()
     return {"task_provider": "taskmaster-file" if legacy else "atlas-kanban",
             "owner_host": socket.gethostname(), "board": None, "project_root": str(root),
             "notice": "Legacy .taskmaster project: staying taskmaster-file; no silent migration."
@@ -119,36 +119,99 @@ def _owner_run(root: Path, config: dict, args: list[str]):
         raise CommandError("owner CLI timed out; outcome uncertain, retry the same materialization key") from exc
 
 
+def _owner_payload(result, config: dict) -> dict:
+    # Refusals need not identify a card. Decode them before validating success IDs.
+    try:
+        payload = json.loads(result.stdout)
+    except ValueError as exc:
+        board = config["board"]
+        missing_board = (f"kanban: board {board!r} does not exist. "
+                         f"Create it with `hermes kanban boards create {board}`.")
+        if result.returncode == 1 and result.stderr.strip() == missing_board:
+            raise CommandError(missing_board, {"state": "refused", "reason": "board_not_found"}) from exc
+        if result.returncode == 2:
+            raise CommandError("owner CLI rejected the arguments", {"state": "refused", "reason": "owner_cli_usage_error"}) from exc
+        # Arbitrary stderr can contain secrets. Only the exact safe board refusal
+        # above is surfaced; malformed/unknown write responses still need reconciliation.
+        raise CommandError("owner returned invalid JSON; outcome uncertain") from exc
+    if not isinstance(payload, dict):
+        raise CommandError("owner response must be an object")
+    state = payload.get("state")
+    if ((result.returncode == 3 and state == "conflict") or
+            (result.returncode != 0 and state == "refused")):
+        reason = payload.get("reason")
+        if not isinstance(reason, str) or not reason:
+            raise CommandError("owner refusal has no reason")
+        extra = {"state": state, "reason": reason}
+        task_id = payload.get("task_id")
+        if isinstance(task_id, str) and _CARD.fullmatch(task_id):
+            extra["task_id"] = task_id
+        raise CommandError(reason, extra)
+    if result.returncode != 0:
+        raise CommandError("owner returned an incompatible materialization response")
+    return payload
+
+
+def _task_request(plan: dict, task: dict) -> dict:
+    return {"proposed_task_id": task["proposed_task_id"],
+            "intent_fingerprint": task["intent_fingerprint"], "title": task["title"],
+            "body": task["description"] + "\n\nAcceptance:\n" +
+                    "\n".join("- " + a for a in task["acceptance"]) +
+                    "\n\nPlanning is not fresh execution or verification evidence.\n",
+            "parent_proposed": task["dependencies"], "execution_kind": "external_session",
+            "maps_from": next((plan["prior_plan_revision"] + ":" + prior_id
+                               for prior_id, successor in plan.get("prior_mapping", {}).items()
+                               if successor == task["proposed_task_id"]), None)}
+
+
+def _check_plan(root: Path, config: dict, plan: dict) -> None:
+    """Ruling 13 owner seam. No fallback to creates if this check is unavailable.
+
+    Assumed owner command: materialize-check --plan-file PATH --json. The batch
+    contains the exact requests we will send, in dependency order. The owner must
+    evaluate the whole projected revision, including not-yet-created parents,
+    without persisting cards, materializations, mapping events or retirements.
+    """
+    request = {"project": plan["project"], "plan_revision": plan["plan_revision"],
+               "tasks": [_task_request(plan, task) for task in ordered_tasks(plan["tasks"])]}
+    with tempfile.TemporaryDirectory(prefix="atlas-plan-check-") as tmp:
+        path = Path(tmp) / "plan.json"
+        path.write_text(json.dumps(request), encoding="utf-8")
+        result = _owner_run(root, config, ["materialize-check", "--plan-file", str(path), "--json"])
+    payload = _owner_payload(result, config)
+    if payload.get("state") != "checked":
+        raise CommandError("owner did not confirm a side-effect-free plan check")
+
+
 def _materialize_card(root: Path, config: dict, plan: dict, task: dict) -> dict:
+    request = _task_request(plan, task)
     # Body is an ephemeral request, not a second task store.
     with tempfile.TemporaryDirectory(prefix="atlas-plan-body-") as tmp:
         body_path = Path(tmp) / "body.md"
-        body_path.write_text(task["description"] + "\n\nAcceptance:\n" +
-                             "\n".join("- " + a for a in task["acceptance"]) +
-                             "\n\nPlanning is not fresh execution or verification evidence.\n")
+        body_path.write_text(request["body"], encoding="utf-8")
         args = ["materialize", "--project", plan["project"], "--plan-revision", plan["plan_revision"],
                 "--proposed-id", task["proposed_task_id"], "--fingerprint", task["intent_fingerprint"],
-                "--title", task["title"], "--body-file", str(body_path)]
-        for parent in task["dependencies"]:
+                "--title=" + task["title"], "--body-file", str(body_path)]
+        for parent in request["parent_proposed"]:
             args.extend(["--parent-proposed", parent])
         for prior_id, successor in plan.get("prior_mapping", {}).items():
             if successor == task["proposed_task_id"]:
                 args.extend(["--maps-from", plan["prior_plan_revision"] + ":" + prior_id])
         args.extend(["--execution-kind", "external_session", "--json"])
         result = _owner_run(root, config, args)
-    try:
-        payload = json.loads(result.stdout)
-    except ValueError as exc:
-        raise CommandError("owner returned invalid JSON; outcome uncertain") from exc
-    if not isinstance(payload, dict) or not isinstance(payload.get("task_id"), str) or not _CARD.fullmatch(payload["task_id"]):
+    payload = _owner_payload(result, config)
+    if not isinstance(payload.get("task_id"), str) or not _CARD.fullmatch(payload["task_id"]):
         raise CommandError("owner returned an invalid canonical task_id")
-    if result.returncode == 3 and payload.get("state") == "conflict":
-        raise CommandError("materialization_conflict: owner refused changed intent",
-                           {"state": "conflict", "task_id": payload["task_id"]})
-    if result.returncode != 0 or payload.get("state") not in {"created", "existing", "mapped"}:
+    if payload.get("state") not in {"created", "existing", "mapped"}:
         raise CommandError("owner returned an incompatible materialization response")
-    _read_card(root, config, payload["task_id"])
-    return {"task_id": payload["task_id"], "intent_fingerprint": task["intent_fingerprint"]}
+    try:
+        _read_card(root, config, payload["task_id"])
+    except (CommandError, OSError, ValueError, TypeError, KeyError) as exc:
+        raise CommandError(str(exc), {"created_task_ids":
+            {task["proposed_task_id"]: payload["task_id"]} if payload["state"] == "created" else {},
+            "owner_task_id": payload["task_id"]}) from exc
+    return {"task_id": payload["task_id"], "intent_fingerprint": task["intent_fingerprint"],
+            "owner_state": payload["state"]}
 
 
 def _read_card(root: Path, config: dict, task_id: str) -> dict:
@@ -253,6 +316,8 @@ def run_materialize(project_root: str, plan_path: str) -> dict:
         initial = read_object(path)
         _check_reference_target(initial, identity)
         _check_revisions(initial, plan, config["task_provider"] == "atlas-kanban")
+    if config["task_provider"] == "atlas-kanban":
+        _check_plan(root, config, plan)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_suffix(".json.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -261,17 +326,29 @@ def run_materialize(project_root: str, plan_path: str) -> dict:
         _check_reference_target(refs, identity)
         prior_ids = _check_revisions(refs, plan, config["task_provider"] == "atlas-kanban")
         entries = refs["revisions"].setdefault(plan["plan_revision"], {})
+        created = {}
+        verified = {}
         for task in ordered_tasks(plan["tasks"]):
-            if config["task_provider"] == "atlas-kanban":
-                entry = _materialize_card(root, config, plan, task)
-            else:
-                entry = _native_card(root, plan, task)
-            old = entries.get(task["proposed_task_id"])
-            if old is not None and old["task_id"] != entry["task_id"]:
-                raise CommandError("owner canonical task_id changed for an existing materialization key")
-            entries[task["proposed_task_id"]] = entry
-            # Persist each success, including partial runs. Retrying still asks the owner.
-            atomic_write(path, json.dumps(refs, indent=2) + "\n")
+            try:
+                if config["task_provider"] == "atlas-kanban":
+                    entry = _materialize_card(root, config, plan, task)
+                    if entry.pop("owner_state") == "created":
+                        created[task["proposed_task_id"]] = entry["task_id"]
+                else:
+                    entry = _native_card(root, plan, task)
+                verified[task["proposed_task_id"]] = entry["task_id"]
+                old = entries.get(task["proposed_task_id"])
+                if old is not None and old["task_id"] != entry["task_id"]:
+                    raise CommandError("owner canonical task_id changed for an existing materialization key")
+                entries[task["proposed_task_id"]] = entry
+                # Persist each verified success. Retrying still asks the owner.
+                atomic_write(path, json.dumps(refs, indent=2) + "\n")
+            except (CommandError, OSError, ValueError, TypeError, KeyError) as exc:
+                extra = exc.extra if isinstance(exc, CommandError) else {}
+                created.update(extra.get("created_task_ids", {}))
+                raise CommandError(str(exc), {**extra, "state": "partial",
+                    "created_task_ids": created, "task_ids": verified,
+                    "failed_proposed_task_id": task["proposed_task_id"]}) from exc
         return {"ok": True, "task_provider": config["task_provider"], "notice": config.get("notice"),
                 "plan_revision": plan["plan_revision"], "reference_path": str(path),
                 "task_ids": {key: value["task_id"] for key, value in entries.items()},
@@ -318,7 +395,8 @@ def run_doctor(project_root: str) -> dict:
             report["diagnostics"].append("owner target or CLI unavailable; reachability and contract unread")
             return report
         # Help advertises syntax only. It never proves board/card reachability.
-        checks = [(["materialize", "--help"],
+        checks = [(["materialize-check", "--help"], ["--plan-file", "--json"]),
+                  (["materialize", "--help"],
                    ["--project", "--plan-revision", "--proposed-id", "--fingerprint", "--title",
                     "--body-file", "--parent-proposed", "--maps-from", "--execution-kind", "--json"]),
                   (["external", "status", "--help"], ["--task", "--json"])]

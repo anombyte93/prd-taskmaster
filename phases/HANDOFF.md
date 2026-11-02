@@ -1,5 +1,30 @@
 # Phase: Handoff — Smart Mode Selection
 
+## atlas-kanban handoff (default)
+
+If the persisted task_provider is `atlas-kanban`, use this branch and STOP before
+the taskmaster-file modes/checklists below. Read `.atlas-ai/plan.json` and
+`.atlas-ai/materializations.json`; report the plan revision, owner host, board and
+canonical IDs. Read each with `workflow-status --project-root "$PROJECT_ROOT"
+--task t_ID` (MCP: `workflow_status(project_root=..., task_id=...)`), then run
+`doctor --project-root "$PROJECT_ROOT"`. Reachability must now be established by
+a real canonical-card read, not help output. Never use file-mode next-task,
+set-status, ship-check or per-task dry-run as canonical workflow verification.
+
+Hand the canonical IDs and acceptance to the accountable parent. The parent's
+separate reservation/external-session binding protocol authorises execution;
+materialisation never starts a worker or proves execution complete. Do not invent
+a session binding, mutate local lifecycle state, or append a Taskmaster workflow
+to CLAUDE.md. Propose provider-aware instruction wording for approval instead.
+Imported history and planning are not fresh verification. A partial materialisation
+must be reconciled with the named created IDs before handoff can be complete.
+
+Gate: canonical IDs/status read back, doctor diagnostics reported, explicit parent
+handoff with no claim that planning executed the task. The legacy file-count and
+subtask pipeline gates are not evidence for this branch and must not be forged.
+
+## Legacy taskmaster-file only
+
 ## The One Rule
 
 **Detect what the user has. Recommend ONE mode. Present alternatives only if asked.**

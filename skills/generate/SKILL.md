@@ -29,6 +29,15 @@ Declarative phase skill. Invoked by the prd-taskmaster orchestrator when
 The one rule: **generate the spec, validate it catches placeholders, parse it
 into tasks, expand every task into subtasks. Quality over speed.**
 
+## Task provider routing comes first
+
+Read the persisted task_provider before the entry gate below. For `atlas-kanban`,
+follow phases/GENERATE.md's default branch: validated spec, driver-authored
+candidates, explicit-root `plan`, then `materialize` and canonical readback.
+Return the actual plan revision and canonical IDs to the orchestrator, not a
+fabricated file-task count or subtask gate. The following Taskmaster parse/rate/
+expand procedure and file-mode pipeline gates apply only to taskmaster-file.
+
 ## Entry gate
 
 1. Call `mcp__plugin_prd_go__check_gate(phase="GENERATE", evidence={})` for diagnostics.

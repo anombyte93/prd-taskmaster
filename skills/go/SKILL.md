@@ -28,6 +28,19 @@ callable until loaded. If a tool below is not directly callable, first run
 `ToolSearch(query="+atlas engine preflight", max_results=10)`) and use whichever prefix
 matches (`mcp__plugin_prd_go__` or `mcp__atlas-engine__`).
 
+## Provider-aware routing before file-mode pipeline state
+
+Resolve SKILL.md Phase 0, then `doctor --project-root ROOT` (MCP `doctor`) before
+the legacy Flow below. Read its config even if the result is not ok: on a fresh
+project, missing board/reference gives UNKNOWN reachability, not file-mode selection.
+For `atlas-kanban`, route `/prd:setup`, `/prd:discover`, `/prd:generate`, then
+`/prd:handoff` through their provider-aware entry branches. Preserve the approved
+spec, plan and canonical reference outputs between phases. Do not enter the
+file-task pipeline's current_phase/advance_phase loop or route `/prd:execute-task`:
+canonical execution belongs to the parent's reservation/external-session protocol.
+Report actual artifacts/canonical IDs, never manufacture file-mode gate evidence.
+The Flow below applies only to taskmaster-file, including existing legacy stores.
+
 ## Flow
 
 1. Call `mcp__plugin_prd_go__preflight()` — get environment state

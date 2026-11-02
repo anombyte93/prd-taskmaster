@@ -3,7 +3,8 @@ name: prd-taskmaster
 description: >-
   Zero-config goal-to-tasks engine (the Atlas engine). Takes any goal (software, pentest,
   business, learning), runs adaptive discovery via brainstorming, generates a validated spec,
-  parses into TaskMaster tasks, and hands off to execution. Use when user says "PRD", "product
+  produces a content-addressed plan and materialises canonical Atlas Kanban cards by default
+  (explicit taskmaster-file compatibility remains available). Use when user says "PRD", "product
   requirements", "I want to build", invokes /atlas, or wants task-driven development.
 allowed-tools:
   - Read
@@ -34,10 +35,10 @@ pipeline inline.
 **Script:** `~/.claude/skills/prd-taskmaster/script.py` (all commands output JSON). It is a thin
 shim over the bundled `prd_taskmaster/` package — the single source of truth shared with the plugin.
 
-**Manual flag:** If the user says `--manual`, `manual=true`, or "do it manually", perform the
-TaskMaster mechanics yourself: write `.taskmaster/docs/prd.md`, write `.taskmaster/tasks/tasks.json`
-with tasks and subtasks, run `validate-tasks`, then run `enrich-tasks`. Do not block on TaskMaster
-CLI/MCP parsing.
+**Manual flag:** Driver-authored generation still honours the selected task provider.
+For atlas-kanban, write candidates and run `plan`, then `materialize`, as described
+below. Only in taskmaster-file mode perform the legacy TaskMaster mechanics yourself:
+write `.taskmaster/docs/prd.md` and `.taskmaster/tasks/tasks.json`, validate and enrich.
 
 ## When to Use
 
@@ -83,8 +84,44 @@ Hard rules for the rest of the run:
 - If an MCP call errors mid-run (server died/disconnected), say so explicitly, flip to
   CLI-mode, and continue.
 
-## Phase 1: Zero-Config Preflight
+## Phase 1: Task ownership, before legacy initialisation
 
+Task storage is independent of the optional generation backend. Resolve it BEFORE
+`init-project`, engine-preflight, or any legacy task-state command:
+
+- Existing `.atlas-workflow.json`: honour `task_provider` exactly.
+- No config, but `.taskmaster/tasks/tasks.json` already exists: `taskmaster-file`,
+  with a Legacy notice. Never silently migrate it. `import-preview --project-root
+  "$PROJECT_ROOT" --project "$ATLAS_PROJECT"` is read-only and marks history as not
+  fresh verification. Changing provider is an explicit owner decision.
+- Otherwise: `atlas-kanban`, the default in-house path, with no Taskmaster runtime,
+  API key, `.taskmaster` initialisation or second task store required.
+
+Use explicit absolute `PROJECT_ROOT` and `ATLAS_SCRIPT` paths, `PYTHON` (normally
+`python3`), a stable `ATLAS_PROJECT` name and an authorised `ATLAS_BOARD` on this host.
+Do not invent a board or fall back to file mode if the owner is unavailable. A remote
+owner_host is refused; run on that owner host instead.
+
+For the new-project default (or an existing atlas-kanban config), persist the
+selection. The omitted --task-provider honours existing configs rather than switching them:
+
+<!-- atlas-kanban-setup -->
+```bash
+"$PYTHON" "$ATLAS_SCRIPT" provider-configure --project-root "$PROJECT_ROOT" --board "$ATLAS_BOARD"
+```
+
+Read the returned config. For `atlas-kanban`, run `doctor --project-root
+"$PROJECT_ROOT"` (MCP: `doctor(project_root=...)`) and report the diagnostics.
+Before the first materialisation, reachability is UNKNOWN and exit 1 is expected
+because there is no canonical task reference yet; help advertises syntax only.
+Continue Discovery, then the atlas-kanban branch of phases/GENERATE.md, then the
+atlas-kanban branch of phases/HANDOFF.md. Do NOT run the legacy initialisation,
+parse/expand, enrichment, task-state or per-task dry-run verification paths below.
+The manual flag selects driver-authored planning, not a different task provider.
+
+### Legacy taskmaster-file preflight only
+
+The remainder of this phase and Native Mode below apply ONLY to taskmaster-file.
 Run preflight and auto-detect everything. Ask zero setup questions.
 
 **MCP-mode (from Phase 0 — ONE batched call, no script spam):** call
@@ -221,6 +258,12 @@ the MCP tool (substitute the Phase-0 prefix); in CLI-mode use the script.py comm
 
 | Operation | MCP tool (MCP-mode) | script.py (CLI-mode / fallback) |
 |-----------|---------------------|---------------------------------|
+| `provider-configure` | `provider_configure` | `provider-configure --project-root ROOT [--task-provider atlas-kanban\|taskmaster-file] [--owner-host HOST] [--board BOARD]` |
+| `plan` | `plan` | `plan --project-root ROOT --project PROJECT [--prd PATH\|--input PATH] [--output PATH] [--previous-plan PATH --prior-mapping PATH]` |
+| `materialize` | `materialize` | `materialize --project-root ROOT --plan PATH` |
+| `doctor` | `doctor` | `doctor --project-root ROOT` |
+| `import-preview` | `import_preview` | `import-preview --project-root ROOT --project PROJECT` |
+| `workflow-status` | `workflow_status` | `workflow-status --project-root ROOT --task t_ID` |
 | `engine-preflight` | `engine_preflight` | `engine-preflight` |
 | `preflight` | `preflight` | `preflight` |
 | `detect-taskmaster` | `detect_taskmaster` | `detect-taskmaster` |
