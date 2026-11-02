@@ -165,31 +165,28 @@ def _task_request(plan: dict, task: dict) -> dict:
 
 
 def _check_plan(root: Path, config: dict, plan: dict) -> None:
-    """Ruling 13 owner seam. No fallback to creates if this check is unavailable.
+    """Check every row before any create, using the owner's check-only projection.
 
-    Assumed owner command: materialize-check --plan-file PATH --json. The batch
-    contains the exact requests we will send, in dependency order. The owner must
-    evaluate the whole projected revision, including not-yet-created parents,
-    without persisting cards, materializations, mapping events or retirements.
+    materialize-check accepts the writer's row flags. New rows return a null ID;
+    existing/mapped parents return their canonical ID. Pending parent declarations
+    let later checks validate dependencies without creating revision references.
     """
-    request = {"project": plan["project"], "plan_revision": plan["plan_revision"],
-               "tasks": [_task_request(plan, task) for task in ordered_tasks(plan["tasks"])]}
-    with tempfile.TemporaryDirectory(prefix="atlas-plan-check-") as tmp:
-        path = Path(tmp) / "plan.json"
-        path.write_text(json.dumps(request), encoding="utf-8")
-        result = _owner_run(root, config, ["materialize-check", "--plan-file", str(path), "--json"])
-    payload = _owner_payload(result, config)
-    if payload.get("state") != "checked":
-        raise CommandError("owner did not confirm a side-effect-free plan check")
+    checked = {}
+    for task in ordered_tasks(plan["tasks"]):
+        payload = _materialize_card(root, config, plan, task, check=True,
+                                    pending_parents={dep: checked[dep] for dep in task["dependencies"]})
+        checked[task["proposed_task_id"]] = payload["task_id"]
 
 
-def _materialize_card(root: Path, config: dict, plan: dict, task: dict) -> dict:
+def _materialize_card(root: Path, config: dict, plan: dict, task: dict, *,
+                      check: bool = False, pending_parents: dict | None = None) -> dict:
     request = _task_request(plan, task)
     # Body is an ephemeral request, not a second task store.
     with tempfile.TemporaryDirectory(prefix="atlas-plan-body-") as tmp:
         body_path = Path(tmp) / "body.md"
         body_path.write_text(request["body"], encoding="utf-8")
-        args = ["materialize", "--project", plan["project"], "--plan-revision", plan["plan_revision"],
+        args = ["materialize-check" if check else "materialize",
+                "--project", plan["project"], "--plan-revision", plan["plan_revision"],
                 "--proposed-id", task["proposed_task_id"], "--fingerprint", task["intent_fingerprint"],
                 "--title=" + task["title"], "--body-file", str(body_path)]
         for parent in request["parent_proposed"]:
@@ -197,13 +194,21 @@ def _materialize_card(root: Path, config: dict, plan: dict, task: dict) -> dict:
         for prior_id, successor in plan.get("prior_mapping", {}).items():
             if successor == task["proposed_task_id"]:
                 args.extend(["--maps-from", plan["prior_plan_revision"] + ":" + prior_id])
+        if check:
+            for proposed, task_id in (pending_parents or {}).items():
+                args.append("--pending-parent-proposed=" + proposed +
+                            ("=" + task_id if task_id is not None else ""))
         args.extend(["--execution-kind", "external_session", "--json"])
         result = _owner_run(root, config, args)
     payload = _owner_payload(result, config)
+    if check and payload.get("state") == "created" and payload.get("task_id", "missing") is None:
+        return payload
     if not isinstance(payload.get("task_id"), str) or not _CARD.fullmatch(payload["task_id"]):
         raise CommandError("owner returned an invalid canonical task_id")
-    if payload.get("state") not in {"created", "existing", "mapped"}:
+    if payload.get("state") not in ({"existing", "mapped"} if check else {"created", "existing", "mapped"}):
         raise CommandError("owner returned an incompatible materialization response")
+    if check:
+        return payload
     try:
         _read_card(root, config, payload["task_id"])
     except (CommandError, OSError, ValueError, TypeError, KeyError) as exc:
@@ -395,7 +400,9 @@ def run_doctor(project_root: str) -> dict:
             report["diagnostics"].append("owner target or CLI unavailable; reachability and contract unread")
             return report
         # Help advertises syntax only. It never proves board/card reachability.
-        checks = [(["materialize-check", "--help"], ["--plan-file", "--json"]),
+        checks = [(["materialize-check", "--help"],
+                   ["--project", "--plan-revision", "--proposed-id", "--fingerprint", "--title",
+                    "--body-file", "--parent-proposed", "--pending-parent-proposed", "--maps-from", "--execution-kind", "--json"]),
                   (["materialize", "--help"],
                    ["--project", "--plan-revision", "--proposed-id", "--fingerprint", "--title",
                     "--body-file", "--parent-proposed", "--maps-from", "--execution-kind", "--json"]),

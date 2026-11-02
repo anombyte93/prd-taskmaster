@@ -129,20 +129,22 @@ def test_side_effect_free_owner_check_includes_dependencies_and_mapping(project,
     real = tp._owner_run
     def capture(root, config, args):
         assert args[0] == 'materialize-check'
-        requests.append(json.loads(Path(args[args.index('--plan-file') + 1]).read_text()))
+        requests.append((args, Path(args[args.index('--body-file') + 1]).read_text()))
         return real(root, config, args)
     monkeypatch.setattr(tp, '_owner_run', capture)
     tp._check_plan(project, tp.load_config(str(project)), plan)
-    assert requests[0]['project'] == 'demo'
-    assert requests[0]['plan_revision'] == plan['plan_revision']
-    tasks = requests[0]['tasks']
-    assert [task['proposed_task_id'] for task in tasks] == ['a', 'build']
-    assert tasks[1]['parent_proposed'] == ['a']
-    assert tasks[1]['maps_from'] == old['plan_revision'] + ':build'
-    assert tasks[1]['title'] == plan['tasks'][1]['title']
-    assert tasks[1]['intent_fingerprint'] == plan['tasks'][1]['intent_fingerprint']
-    assert tasks[1]['execution_kind'] == 'external_session'
-    assert 'Focused tests pass' in tasks[1]['body']
+    assert len(requests) == 2
+    args, body = requests[1]
+    assert args[args.index('--project') + 1] == 'demo'
+    assert args[args.index('--plan-revision') + 1] == plan['plan_revision']
+    assert args[args.index('--proposed-id') + 1] == 'build'
+    assert args[args.index('--parent-proposed') + 1] == 'a'
+    assert '--pending-parent-proposed=a' in args
+    assert args[args.index('--maps-from') + 1] == old['plan_revision'] + ':build'
+    assert '--title=' + plan['tasks'][1]['title'] in args
+    assert args[args.index('--fingerprint') + 1] == plan['tasks'][1]['intent_fingerprint']
+    assert args[args.index('--execution-kind') + 1] == 'external_session'
+    assert 'Focused tests pass' in body
     assert tree_hash(project) == before
     assert len(cards(project)) == 1
 
@@ -211,6 +213,27 @@ def test_check_unavailable_never_falls_through_to_create(project, monkeypatch):
     assert not (project / '.atlas-ai/materializations.json').exists()
 
 
+@pytest.mark.parametrize('parent_id', [None, 't_parent'])
+def test_row_preflight_projects_new_and_existing_parent_ids(project, monkeypatch, parent_id):
+    from prd_taskmaster import task_provider as tp
+    plan = save_plan(project, [candidate('a'), candidate('b', ['a'])])
+    calls = []
+    def check(root, config, args):
+        calls.append(args)
+        payload = {'state': 'created', 'task_id': None}
+        if len(calls) == 1 and parent_id:
+            payload = {'state': 'existing', 'task_id': parent_id}
+        return subprocess.CompletedProcess([], 0, json.dumps(payload), '')
+    monkeypatch.setattr(tp, '_owner_run', check)
+    before = tree_hash(project)
+    tp._check_plan(project, tp.load_config(str(project)), plan)
+    assert len(calls) == 2
+    assert all(args[0] == 'materialize-check' for args in calls)
+    expected = '--pending-parent-proposed=a' + ('=' + parent_id if parent_id else '')
+    assert expected in calls[1]
+    assert tree_hash(project) == before
+
+
 @pytest.mark.parametrize('module,old,new,selection', [
     ('prd_taskmaster/task_provider.py', 'rooted_path(root, ".taskmaster/tasks/tasks.json").is_file()',
      'rooted_path(root, ".taskmaster").exists()', 'only_an_existing_taskmaster_file_selects_legacy'),
@@ -226,6 +249,8 @@ def test_check_unavailable_never_falls_through_to_create(project, monkeypatch):
      '"--title", task["title"]', 'leading_dash_title_is_a_value'),
     ('prd_taskmaster/task_provider.py', '        _check_plan(root, config, plan)',
      '        pass  # removed owner plan check', 'plan_check_refuses_every_row_before_first_create'),
+    ('prd_taskmaster/task_provider.py', 'for proposed, task_id in (pending_parents or {}).items():',
+     'for proposed, task_id in {}.items():', 'row_preflight_projects_new_and_existing_parent_ids'),
     ('prd_taskmaster/task_provider.py', '**extra, "state": "partial"',
      '**extra, "state": "conflict"', 'failure_after_check_is_partial'),
 ])

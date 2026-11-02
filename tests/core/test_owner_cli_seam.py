@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 
@@ -54,8 +55,8 @@ main()
         monkeypatch.setenv(key, value)
     assert tp.run_configure(str(root), board='fixture-board')['ok']
     config = tp.load_config(str(root))
-    # Owner a057781 predates ruling 13. Exercise the existing per-row seam,
-    # not a fake fallback that would claim plan-check conformance.
+    # Exercise the existing per-row writer seam first, then the complete
+    # preflight/materialize integration below. No installed/live owner is used.
     old = save_plan(root, [{**candidate(), 'title': '-urgent'}])
     def materialize(plan):
         return tp._materialize_card(root, config, plan, plan['tasks'][0])
@@ -97,4 +98,40 @@ main()
                    '--plan-revision', 'r', '--proposed-id', 'dash', '--fingerprint', 'f',
                    '--title', '-urgent', '--execution-kind', 'external_session', '--json', code=2)
     assert 'expected one argument' in original.stderr
-    print('REAL OWNER: five ruling-6 cases, renamed mapping/replay, mapping_not_found, missing board, leading-dash title verified; temp homes only')
+
+    def owner_counts():
+        counts = {}
+        for database in home.rglob('kanban.db'):
+            with sqlite3.connect(database.as_uri() + '?mode=ro', uri=True) as conn:
+                counts[str(database)] = [conn.execute('SELECT count(*) FROM ' + table).fetchone()[0]
+                                         for table in ['tasks', 'task_materializations', 'task_events']]
+        assert counts
+        return counts
+
+    first_plan = save_plan(root, [candidate('m')])
+    first_run = tp.run_materialize(str(root), 'plan.json')
+    assert first_run['ok'], first_run
+    m_id = first_run['task_ids']['m']
+    (root / '.atlas-ai/materializations.json').unlink()
+    save_plan(root, [candidate('a-new'), {**candidate('m'), 'title': 'Changed'}])
+    before = owner_counts()
+    refused = tp.run_materialize(str(root), 'plan.json')
+    assert refused['state'] == 'conflict' and refused['reason'] == 'revision_requires_mapping'
+    assert owner_counts() == before  # real owner: no a-new card, reference or event
+    assert not (root / '.atlas-ai/materializations.json').exists()
+
+    # New parent (null preview ID), then existing parent (canonical preview ID).
+    new_parent_plan = save_plan(root, [candidate('p'), {**candidate('m', ['p']), 'title': 'Mapped'}],
+                                previous_plan=first_plan, prior_mapping={'m': 'm'})
+    before = owner_counts()
+    tp._check_plan(root, config, new_parent_plan)
+    assert owner_counts() == before
+    mapped_run = tp.run_materialize(str(root), 'plan.json')
+    assert mapped_run['ok'] and mapped_run['task_ids']['m'] == m_id, mapped_run
+    assert tp.run_status(str(root), m_id)['task']['title'] == 'Mapped'
+    save_plan(root, [candidate('p'), {**candidate('m', ['p']), 'title': 'Mapped again'}],
+              previous_plan=new_parent_plan, prior_mapping={'p': 'p', 'm': 'm'})
+    existing_parent_run = tp.run_materialize(str(root), 'plan.json')
+    assert existing_parent_run['ok'] and existing_parent_run['task_ids'] == mapped_run['task_ids'], existing_parent_run
+    assert tp.run_doctor(str(root))['ok']
+    print('REAL OWNER: ruling-6 identity, literal reasons/title, complete row preflight, no-orphan refusal, new/existing pending parents and mapped intent verified; temp homes only')

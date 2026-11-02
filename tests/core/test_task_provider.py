@@ -34,45 +34,14 @@ p.add_argument("operation", choices=["materialize", "materialize-check", "extern
 p.add_argument("verb", nargs="?")
 for flag in ["project", "plan-revision", "proposed-id", "fingerprint", "title", "body-file", "execution-kind", "task", "maps-from"]:
     p.add_argument("--" + flag)
-p.add_argument("--plan-file")
+p.add_argument("--pending-parent-proposed", action="append", default=[])
 p.add_argument("--parent-proposed", action="append", default=[])
 p.add_argument("--json", action="store_true")
 a = p.parse_args()
 assert a.board == "fixture-board"
 assert Path.cwd() == Path(__file__).parent
 store = Path(__file__).with_name("owner.sqlite")
-if a.operation == "materialize-check":
-    # A disposable simulation of the owner's batch check. Run the SAME ruling-6
-    # rules on a private copy, so no owner card, reference or event is changed.
-    import shutil
-    import subprocess
-    import tempfile
-    request = json.loads(Path(a.plan_file).read_text())
-    with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temporary:
-        root = Path(temporary)
-        script = root / "hermes"
-        shutil.copy2(__file__, script)
-        if store.exists():
-            shutil.copy2(store, root / "owner.sqlite")
-        for task in request["tasks"]:
-            body = root / "body.md"
-            body.write_text(task["body"])
-            argv = [sys.executable, str(script), "kanban", "--board", a.board, "materialize",
-                    "--project", request["project"], "--plan-revision", request["plan_revision"],
-                    "--proposed-id", task["proposed_task_id"], "--fingerprint", task["intent_fingerprint"],
-                    "--title=" + task["title"], "--body-file", str(body),
-                    "--execution-kind", task["execution_kind"], "--json"]
-            for parent in task["parent_proposed"]:
-                argv.extend(["--parent-proposed", parent])
-            if task["maps_from"]:
-                argv.extend(["--maps-from", task["maps_from"]])
-            reply = subprocess.run(argv, cwd=root, capture_output=True, text=True,
-                                   env={{"HOME": str(root), "PATH": ""}}, timeout=10)
-            if reply.returncode:
-                print(reply.stdout, end="")
-                sys.exit(reply.returncode)
-    print(json.dumps({{"state": "checked"}}))
-    sys.exit(0)
+check = a.operation == "materialize-check"
 if a.operation == "external":
     assert a.verb == "status"
     with sqlite3.connect(store.as_uri() + "?mode=ro", uri=True) as db:
@@ -82,14 +51,18 @@ if a.operation == "external":
     sys.exit(0)
 assert a.execution_kind == "external_session" and a.json
 # Both clients must reach the owner before either enters its transaction.
-if os.environ.get("OWNER_RACE_DIR"):
+if not check and os.environ.get("OWNER_RACE_DIR"):
     gate = Path(os.environ["OWNER_RACE_DIR"])
     (gate / str(os.getpid())).write_text("arrived")
     deadline = time.monotonic() + 5
     while len(list(gate.iterdir())) < 2:
         assert time.monotonic() < deadline, "clients serialised before owner"
         time.sleep(0.01)
-with sqlite3.connect(store, timeout=20) as db:
+connection = sqlite3.connect(":memory:" if check else store, timeout=20)
+if check and store.exists():
+    with sqlite3.connect(store.as_uri() + "?mode=ro", uri=True) as source:
+        source.backup(connection)
+with connection as db:
     db.execute("BEGIN IMMEDIATE")
     db.execute("CREATE TABLE IF NOT EXISTS cards (board, project, revision, proposed, fingerprint, task_id UNIQUE, body, parents)")
     db.execute("CREATE TABLE IF NOT EXISTS materializations (board, project, revision, proposed, fingerprint, task_id, UNIQUE(board, project, revision, proposed))")
@@ -121,7 +94,7 @@ with sqlite3.connect(store, timeout=20) as db:
         db.execute("INSERT INTO cards VALUES (?,?,?,?,?,?,?,?)", key + (a.fingerprint, task_id, Path(a.body_file).read_text(), json.dumps(a.parent_proposed)))
     if state != "conflict" and not row:
         db.execute("INSERT INTO materializations VALUES (?,?,?,?,?,?)", key + (a.fingerprint, task_id))
-    print(json.dumps({{"state": state, "task_id": task_id, **({{"reason": reason}} if state == "conflict" else {{}})}}))
+    print(json.dumps({{"state": state, "task_id": None if check and state == "created" else task_id, **({{"reason": reason}} if state == "conflict" else {{}})}}))
     if state == "conflict":
         sys.exit(3)
 '''
@@ -459,7 +432,7 @@ def test_partial_failure_preserves_prior_reference_and_retry_deduplicates(projec
     plan = save_plan(project, [candidate("a"), candidate("b", ["a"])])
     real_run = tp.subprocess.run
     def fail_second(args, **kwargs):
-        if "--proposed-id" in args and args[args.index("--proposed-id") + 1] == "b":
+        if "materialize" in args and "--proposed-id" in args and args[args.index("--proposed-id") + 1] == "b":
             raise subprocess.TimeoutExpired(args, 30)
         return real_run(args, **kwargs)
     monkeypatch.setattr(tp.subprocess, "run", fail_second)
