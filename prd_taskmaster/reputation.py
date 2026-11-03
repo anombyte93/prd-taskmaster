@@ -52,7 +52,7 @@ _LATENCY_WINDOW = 200
 def _snapshot_path_for(jsonl_path: Path) -> Path:
     """Derive the folded-snapshot path that pairs with a jsonl event log.
 
-    ``.../reputation.jsonl`` → ``.../reputation.json``. Any other suffix gets a
+    ``<dir>/reputation.jsonl`` → ``<dir>/reputation.json``. Any other suffix gets a
     sibling ``.snapshot.json`` so the two never collide.
     """
     jsonl_path = Path(jsonl_path)

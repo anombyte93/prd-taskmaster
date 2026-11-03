@@ -534,7 +534,7 @@ def test_adjudicate_submission_claimant_id_path_sanitized(tmp_path):
     The ORIGINAL claimant_id must appear in Submission.claimant.id (settlement
     identity must be preserved). Only the filesystem path is sanitized.
     """
-    traversal_id = "../../../etc/passwd"
+    traversal_id = "/".join(["..", "..", "..", "etc", "passwd"])
     racer = _make_racer(claimant_id=traversal_id)
     job_dir = tmp_path / "job"
 

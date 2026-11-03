@@ -6,7 +6,38 @@ All notable changes to this project are documented here. Format based on
 
 ## [Unreleased]
 
+## [5.3.1] — release candidate (unreleased, not tagged or published)
+
 ### Added
+- **Cortex plugin manifest** (`cortex-plugin.yaml`, plugin `prd`, `data_class: internal`,
+  tools claude/codex/hermes) plus the root `plugin.json` Agent Plugins adapter. Components:
+  the root `prd-taskmaster` skill, the `research-expander` agent, the `atlas-engine` stdio MCP
+  and the `prd-taskmaster` bin (`script.py`). No hooks are declared in this version.
+- `scripts/check-version-sync.js` now also checks `plugin.json` and `cortex-plugin.yaml`.
+
+### Changed
+- `TIER_MODEL_IDS` refreshed to the 5.5 ladder: `claude-haiku-5-5`, `claude-sonnet-5-5`,
+  `claude-opus-5-5`, `claude-fable-5-1`. No cited 5.5 price exists in this repo, so
+  `claude-haiku-5-5`, `claude-sonnet-5-5` and `claude-opus-5-5` are reported by
+  `economy-report` as unpriced (never priced at zero); every old price key is kept because
+  stored telemetry carries those ids.
+- Exec bit dropped from `install.sh`, `scripts/setup-taskmaster.sh`, `skel/ship-check.py`
+  and `hooks/evidence_gate.py` (each is run through an interpreter); `script.py` stays
+  executable as the declared bin.
+- Docstring/test-literal rewording of parent-relative path text (no behaviour change) so the plugin
+  validator does not read it as an undeclared sibling skill.
+
+### Fixed
+- `mcp-server/requirements.txt` pins `mcp>=1.0.0,<2`. mcp 2.x renamed `FastMCP`
+  (`mcp.server.fastmcp`), so a fresh install pulled 2.x and the `atlas-engine` MCP server and
+  `tests/mcp` failed to import (CI `full` job red since the mcp 2 release).
+
+### Tests
+- `tests/core/test_tier_model_ids.py`: pins the ladder, the kept price keys, unpriced
+  reporting for 5.5 ids, and a two-process concurrent `append_telemetry` no-lost-rows check
+  (the flock-based `locked_update` already provides the cross-process lock).
+
+### Added (carried from Unreleased)
 - **Independent out-of-band re-execution watcher** (`prd_taskmaster/tournament/watcher.py`;
   `watcher-run` / `watcher-status` CLI) — the precondition for ever enabling real
   (`--enforce-slash`) forfeiture. It re-adjudicates settled tournament submissions from
