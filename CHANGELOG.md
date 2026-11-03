@@ -27,6 +27,11 @@ All notable changes to this project are documented here. Format based on
 - Docstring/test-literal rewording of parent-relative path text (no behaviour change) so the plugin
   validator does not read it as an undeclared sibling skill.
 
+### Fixed
+- `mcp-server/requirements.txt` pins `mcp>=1.0.0,<2`. mcp 2.x renamed `FastMCP`
+  (`mcp.server.fastmcp`), so a fresh install pulled 2.x and the `atlas-engine` MCP server and
+  `tests/mcp` failed to import (CI `full` job red since the mcp 2 release).
+
 ### Tests
 - `tests/core/test_tier_model_ids.py`: pins the ladder, the kept price keys, unpriced
   reporting for 5.5 ids, and a two-process concurrent `append_telemetry` no-lost-rows check
