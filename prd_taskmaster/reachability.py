@@ -489,7 +489,7 @@ def _ts_import_patterns(module: Path) -> list[str]:
 
     Examples (stem='bar'):
       from './bar'          ✓   '/' immediately before stem
-      from '../pkg/bar'     ✓   '/' immediately before stem
+      from '<up>/pkg/bar'   ✓   '/' immediately before stem
       from './foobar'       ✗   no '/' immediately before 'bar' (preceded by 'o')
       require('./bar')      ✓
       require('./foobar')   ✗
