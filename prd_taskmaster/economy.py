@@ -10,10 +10,10 @@ TIER_ORDER = ["fast", "standard", "capable", "frontier"]
 # These vendor IDs rot. Refresh this map when telemetry or MODEL-ECONOMY.md
 # shows the model ladder has changed.
 TIER_MODEL_IDS = {
-    "haiku": "claude-haiku-4-5-20251001",
-    "sonnet": "claude-sonnet-4-6",
-    "opus": "claude-opus-4-8",
-    "fable": "claude-fable-5",
+    "haiku": "claude-haiku-5-5",
+    "sonnet": "claude-sonnet-5-5",
+    "opus": "claude-opus-5-5",
+    "fable": "claude-fable-5-1",
 }
 
 # These price priors rot. Refresh them from docs/product/MODEL-ECONOMY.md

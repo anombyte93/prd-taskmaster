@@ -1,0 +1,48 @@
+schema: cortex-plugin/1
+name: prd
+version: 5.3.1
+description: Zero-config goal-to-tasks engine (the Atlas engine). Graded PRD validation, dependency-ordered task graph and CDD-verified execution.
+source:
+  repo: anombyte93/prd-taskmaster
+  path: .
+data_class: internal
+tools: [claude, codex, hermes]
+requires:
+  skills: []
+components:
+  skills:
+    - name: prd-taskmaster
+      path: .
+      depends_on: []
+      effects: [local-files, public-web]
+      verify: {probe: skill-listed, target: prd-taskmaster, expect: {exit: 0}}
+      control: {probe: skill-listed, target: prd-taskmaster-missing, expect: {exit: nonzero}}
+  agents:
+    - name: research-expander
+      path: agents/research-expander.md
+      effects: [local-files, public-web]
+      verify: {probe: file-exists, target: '${PLUGIN_ROOT}/agents/research-expander.md', expect: {exit: 0}}
+      control: {probe: file-exists, target: '${PLUGIN_ROOT}/agents/missing.md', expect: {exit: nonzero}}
+  mcps:
+    - id: atlas-engine
+      name: Atlas engine (prd-taskmaster)
+      transport: stdio
+      command: python3
+      args: ['${PLUGIN_ROOT}/mcp-server/server.py']
+      secrets: []
+      effects: [local-files, network-local, public-web]
+      verify: {probe: listed-tool, target: engine_preflight, expect: {exit: 0}}
+      control: {probe: listed-tool, target: no_such_engine_tool, expect: {exit: nonzero}}
+  bins:
+    - name: prd-taskmaster
+      path: script.py
+      effects: [local-files, network-local, public-web]
+      verify: {probe: command, command: 'python3 ${PLUGIN_ROOT}/script.py --help', expect: {exit: 0, stdout_contains: prd-taskmaster}}
+      control: {probe: command, command: 'python3 ${PLUGIN_ROOT}/script.py no-such-subcommand', expect: {exit: nonzero}}
+adapters:
+  claude: .claude-plugin/plugin.json
+  agent_plugin: plugin.json
+rollback:
+  strategy: previous-release
+  preserve: ['${STATE_DIR}/receipts']
+  verify: {probe: command, command: 'python3 ${PLUGIN_ROOT}/script.py --help', expect: {exit: 0, stdout_contains: prd-taskmaster}}

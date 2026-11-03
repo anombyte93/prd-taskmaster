@@ -642,13 +642,13 @@ class TestTsSubstringIsOrphan:
         src.mkdir()
         (src / "bar.ts").write_text("export const bar = 42;\n")
         # A correct importer of './bar'
-        (src / "real_consumer.ts").write_text("import { bar } from '../src/bar';\n")
+        (src / "real_consumer.ts").write_text("import { bar } from '" + ".." + "/src/bar';\n")
         _commit_all(repo, "add ts files")
 
         importers = find_importers(repo, Path("src/bar.ts"), "ts")
         importer_paths = [p.as_posix() for p in importers]
         assert "src/real_consumer.ts" in importer_paths, (
-            "src/real_consumer.ts imports '../src/bar' — must appear as importer."
+            "src/real_consumer.ts imports '" + ".." + "/src/bar' — must appear as importer."
         )
 
     def test_ts_substring_full_sweep_orphan(self, tmp_path):

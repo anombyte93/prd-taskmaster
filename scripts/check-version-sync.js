@@ -16,11 +16,17 @@ const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
 const initMatch = read("prd_taskmaster/__init__.py").match(
   /__version__\s*=\s*["']([^"']+)["']/
 );
+// Cortex plugin manifest: top-level `version:` scalar (no YAML parser needed).
+const cortexMatch = read("cortex-plugin.yaml").match(
+  /^version:\s*["']?([^"'\s#]+)["']?\s*(?:#.*)?$/m
+);
 
 const versions = {
   "package.json": JSON.parse(read("package.json")).version,
   ".claude-plugin/plugin.json": JSON.parse(read(".claude-plugin/plugin.json")).version,
   "prd_taskmaster/__init__.py": initMatch ? initMatch[1] : null,
+  "plugin.json": JSON.parse(read("plugin.json")).version,
+  "cortex-plugin.yaml": cortexMatch ? cortexMatch[1] : null,
 };
 
 const unique = [...new Set(Object.values(versions))];
@@ -35,3 +41,6 @@ if (unique.length !== 1 || !unique[0]) {
 }
 
 console.log(`✓ version sync OK: ${unique[0]}`);
+for (const file of Object.keys(versions)) {
+  console.log(`    ${file}: ${versions[file]}`);
+}
