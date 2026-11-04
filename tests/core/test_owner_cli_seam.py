@@ -12,7 +12,7 @@ import pytest
 from tests.core.test_plan_output import candidate
 from tests.core.test_task_provider import save_plan
 
-OWNER_COMMIT = 'b99e4bb49f75b1fc7b5ffd063461dbe34debfa9a'
+OWNER_COMMIT = '1612064424681e49cf121e20d4b68e0def852d26'
 SOURCE = os.environ.get('ATLAS_TEST_HERMES_SOURCE')
 
 
