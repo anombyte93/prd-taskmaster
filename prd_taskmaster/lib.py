@@ -10,8 +10,10 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -66,13 +68,32 @@ def now_iso() -> str:
 # Ported byte-faithful from the plugin mcp-server/lib.py. All return values are
 # dicts/strings — NEVER call sys.exit (per spec §13.3).
 
+def _atomic_write_mode(path: Path) -> int:
+    try:
+        return stat.S_IMODE(path.stat().st_mode)
+    except FileNotFoundError:
+        # Let the kernel apply 0666 & ~umask to an empty probe. Reading umask
+        # by temporarily changing it is process-global and races other threads.
+        # A private directory protects the probe without changing its file mode.
+        with tempfile.TemporaryDirectory(prefix=path.name + ".mode.", dir=path.parent) as directory:
+            with (Path(directory) / "mode").open("x") as probe:
+                return stat.S_IMODE(os.fstat(probe.fileno()).st_mode)
+
+
 def atomic_write(path: Path, content: str) -> None:
     """Write content to path atomically via tmp + os.replace (atomic on POSIX)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
-    tmp.write_text(content)
-    os.replace(tmp, path)
+    # A PID-only name collides between threads when callers deliberately bypass
+    # flock to test owner uniqueness. Stage each invocation beside the target.
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".tmp.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(content)
+        os.chmod(tmp, _atomic_write_mode(path))
+        os.replace(tmp, path)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
 
 
 def locked_update(path: Path, transform: Callable[[str], str]) -> str:

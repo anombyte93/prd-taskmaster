@@ -29,6 +29,15 @@ The one rule: **invoke `superpowers:brainstorming` for discovery, intercept
 before it chains to `writing-plans` — we control the exit, not the brainstorm
 skill.**
 
+## Task provider routing comes first
+
+For `atlas-kanban`, perform the discovery, approval, constraint extraction and
+scope calibration below, but do not call the file-mode check_gate/advance_phase
+operations. Return the approved summary and constraints to the provider-aware
+orchestrator for phases/GENERATE.md; no task store is created during discovery.
+Keep the Interactive versus explicitly authorised Autonomous distinction. The
+file-mode pipeline transitions below apply only to taskmaster-file.
+
 ## Entry gate
 
 1. Call `mcp__plugin_prd_go__check_gate(phase="DISCOVER", evidence={})` for diagnostics.

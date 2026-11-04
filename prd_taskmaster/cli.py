@@ -23,7 +23,7 @@ from prd_taskmaster.batch import cmd_engine_preflight
 from prd_taskmaster.economy import cmd_economy_report
 from prd_taskmaster.feedback import HARNESS_CHOICES, cmd_feedback_add, cmd_feedback_report
 from prd_taskmaster.context_pack import build_context_pack
-from prd_taskmaster import fleet, parallel, task_state
+from prd_taskmaster import fleet, parallel, task_state, task_provider, plan_output
 from prd_taskmaster.lib import _detect_taskmaster_method
 from prd_taskmaster.reachability_cmd import cmd_reachability_sweep
 from prd_taskmaster.tournament.cmd import (
@@ -164,12 +164,61 @@ def cmd_context_pack(args) -> None:
     print(json.dumps(build_context_pack(args.files, include_private=args.include_private), indent=2))
 
 
+def cmd_workflow(args) -> None:
+    """Explicit-root workflow commands, independent of legacy cwd-based state."""
+    root = args.project_root
+    if args.command == "plan":
+        _cmd_backend_call(plan_output.run_plan, root, args.project, input_path=args.input,
+                          output_path=args.output, previous_plan=args.previous_plan,
+                          prior_mapping=args.prior_mapping, prd_path=args.prd)
+    elif args.command == "provider-configure":
+        _cmd_backend_call(task_provider.run_configure, root, task_provider=args.task_provider,
+                          owner_host=args.owner_host, board=args.board)
+    elif args.command == "materialize":
+        _cmd_backend_call(task_provider.run_materialize, root, args.plan)
+    elif args.command == "doctor":
+        _cmd_backend_call(task_provider.run_doctor, root)
+    elif args.command == "import-preview":
+        _cmd_backend_call(task_provider.run_import_preview, root, args.project)
+    elif args.command == "workflow-status":
+        _cmd_backend_call(task_provider.run_status, root, args.task)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="prd-taskmaster",
         description="prd-taskmaster: deterministic operations for the Atlas engine (skill + plugin).",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    # Storage-independent workflow. Legacy commands below keep their native semantics.
+    for command, help_text in (
+        ("provider-configure", "Persist explicit per-project task storage selection"),
+        ("plan", "Generate a plan artifact without creating tasks"),
+        ("materialize", "Commit a plan through the selected task provider"),
+        ("doctor", "Read-only package/config/provider contract check"),
+        ("import-preview", "Read-only preview of a legacy .taskmaster store"),
+        ("workflow-status", "Read a canonical external-session card from its owner"),
+    ):
+        p = sub.add_parser(command, help=help_text)
+        p.add_argument("--project-root", required=True, help="Explicit absolute project root")
+        if command in {"plan", "import-preview"}:
+            p.add_argument("--project", required=True)
+        if command == "provider-configure":
+            p.add_argument("--task-provider", choices=task_provider.PROVIDERS)
+            p.add_argument("--owner-host")
+            p.add_argument("--board")
+        elif command == "plan":
+            source = p.add_mutually_exclusive_group()
+            source.add_argument("--input", help="Driver-generated tasks candidate JSON")
+            source.add_argument("--prd", help="PRD for a storage-independent driver generation request")
+            p.add_argument("--output", default=".atlas-ai/plan.json")
+            p.add_argument("--previous-plan")
+            p.add_argument("--prior-mapping", help="JSON object mapping every prior ID to its successor or null")
+        elif command == "materialize":
+            p.add_argument("--plan", required=True)
+        elif command == "workflow-status":
+            p.add_argument("--task", required=True)
 
     # preflight
     sub.add_parser("preflight", help="Detect environment state")
@@ -476,6 +525,12 @@ def cmd_status(args) -> None:
 
 
 DISPATCH = {
+    "provider-configure": cmd_workflow,
+    "plan": cmd_workflow,
+    "materialize": cmd_workflow,
+    "doctor": cmd_workflow,
+    "import-preview": cmd_workflow,
+    "workflow-status": cmd_workflow,
     "preflight": cmd_preflight,
     "engine-preflight": cmd_engine_preflight,
     "detect-taskmaster": cmd_detect_taskmaster,

@@ -207,9 +207,11 @@ def test_handoff_skill_has_valid_frontmatter():
     fm = _parse_frontmatter("skills/handoff/SKILL.md")
     assert fm["name"] == "handoff"
     assert fm["user-invocable"] is False
-    for t in ("Read", "Skill", "AskUserQuestion"):
+    # Handoff's provider branch deliberately supports workflow-status/doctor CLI
+    # fallback as well as MCP. Keep Write/Edit forbidden; no other grant widens.
+    for t in ("Read", "Bash", "Skill", "AskUserQuestion"):
         assert t in fm["allowed-tools"], f"missing {t}"
-    for t in ("Bash", "Write", "Edit"):
+    for t in ("Write", "Edit"):
         assert t not in fm["allowed-tools"], f"forbidden tool present: {t}"
 
 

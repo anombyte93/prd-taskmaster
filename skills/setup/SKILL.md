@@ -23,6 +23,19 @@ allowed-tools:
 Declarative phase skill. Invoked by the prd-taskmaster orchestrator when
 `current_phase` is null or `SETUP`. Never called directly by a user.
 
+## Task provider routing comes first
+
+Before the entry gate or init-project below, follow SKILL.md Phase 1 task ownership:
+`provider-configure --project-root ROOT --board BOARD` persists the new-project
+`atlas-kanban` default; `doctor --project-root ROOT` reports read-only diagnostics.
+With no persisted provider choice, any file under `.taskmaster/` stays taskmaster-file;
+empty folders and a bare `docs/prd.md` stay new. Provider metadata is outside `.taskmaster/`.
+For atlas-kanban, complete that setup branch and return the actual config and
+doctor diagnostics to the orchestrator. It routes Discovery next, then the
+plan/materialize and canonical handoff branches. Do not initialise `.taskmaster`,
+run the legacy pipeline gates below, or fabricate validate_setup evidence for
+canonical cards. All remaining steps on this page apply only to taskmaster-file.
+
 ## Entry gate
 
 1. Call `mcp__plugin_prd_go__check_gate(phase="SETUP", evidence={})` for diagnostics.
