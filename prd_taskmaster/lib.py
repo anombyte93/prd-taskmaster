@@ -4,7 +4,6 @@ emit()/fail() live here (CLI layer). Pure cores raise CommandError instead of
 calling fail(), and return dicts instead of calling emit().
 """
 
-import fcntl
 import json
 import os
 import re
@@ -17,6 +16,12 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+
+try:
+    import fcntl
+except ImportError:  # Windows — fall back to msvcrt byte-range locking
+    fcntl = None
+    import msvcrt
 
 # ─── Path constants ───────────────────────────────────────────────────────────
 # Templates live at the REPO ROOT (one level above this package dir).
@@ -96,6 +101,28 @@ def atomic_write(path: Path, content: str) -> None:
         Path(tmp).unlink(missing_ok=True)
 
 
+def _lock_file(lock_f) -> None:
+    """Exclusive-lock an already-open lock file (flock on POSIX, msvcrt on Windows)."""
+    if fcntl is not None:
+        fcntl.flock(lock_f, fcntl.LOCK_EX)
+        return
+    # msvcrt byte-range locking requires the file to hold at least 1 byte.
+    lock_f.seek(0, os.SEEK_END)
+    if lock_f.tell() == 0:
+        lock_f.write("\0")
+        lock_f.flush()
+    lock_f.seek(0)
+    msvcrt.locking(lock_f.fileno(), msvcrt.LK_LOCK, 1)
+
+
+def _unlock_file(lock_f) -> None:
+    if fcntl is not None:
+        fcntl.flock(lock_f, fcntl.LOCK_UN)
+        return
+    lock_f.seek(0)
+    msvcrt.locking(lock_f.fileno(), msvcrt.LK_UNLCK, 1)
+
+
 def locked_update(path: Path, transform: Callable[[str], str]) -> str:
     """Read-modify-write under flock. transform takes current content, returns new content.
     Returns the new content for convenience.
@@ -108,8 +135,10 @@ def locked_update(path: Path, transform: Callable[[str], str]) -> str:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.with_suffix(path.suffix + ".lock")
-    with open(lock_path, "w") as lock_f:
-        fcntl.flock(lock_f, fcntl.LOCK_EX)
+    # "a+": never truncate. Truncate-on-open ("w") conflicts with a live
+    # msvcrt byte lock held by another handle and raises PermissionError.
+    with open(lock_path, "a+") as lock_f:
+        _lock_file(lock_f)
         try:
             current = path.read_text() if path.exists() else ""
             new = transform(current)
@@ -117,7 +146,7 @@ def locked_update(path: Path, transform: Callable[[str], str]) -> str:
                 atomic_write(path, new)
             return new
         finally:
-            fcntl.flock(lock_f, fcntl.LOCK_UN)
+            _unlock_file(lock_f)
 
 
 def emit_json_error(message: str, **extra: Any) -> dict:

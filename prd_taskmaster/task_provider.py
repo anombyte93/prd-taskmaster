@@ -7,7 +7,6 @@ uniqueness, not the local reference cache, makes materialisation retry-safe.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -17,8 +16,13 @@ import socket
 import subprocess
 import tempfile
 
+try:
+    import fcntl  # noqa: F401 — kept as a module attribute (tests monkeypatch tp.fcntl)
+except ImportError:  # Windows — locking lives in prd_taskmaster.lib._lock_file
+    fcntl = None
+
 import prd_taskmaster
-from prd_taskmaster.lib import CommandError, atomic_write, locked_update
+from prd_taskmaster.lib import CommandError, _lock_file, atomic_write, locked_update
 from prd_taskmaster.plan_output import (
     build_plan, content_hash, ordered_tasks, project_path, read_object,
     rooted_path, safe_operation, validate_mapping, validate_plan,
@@ -192,7 +196,7 @@ def _materialize_card(root: Path, config: dict, plan: dict, task: dict, *,
                       prior_rows: list[dict] | None = None) -> dict:
     request = _task_request(plan, task)
     # Body is an ephemeral request, not a second task store.
-    with tempfile.TemporaryDirectory(prefix="atlas-plan-body-", dir="/tmp") as tmp:
+    with tempfile.TemporaryDirectory(prefix="atlas-plan-body-") as tmp:
         body_path = Path(tmp) / "body.md"
         body_path.write_text(request["body"], encoding="utf-8")
         args = ["materialize-check" if check else "materialize",
@@ -340,7 +344,7 @@ def run_materialize(project_root: str, plan_path: str) -> dict:
         _check_plan(root, config, plan)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_suffix(".json.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        _lock_file(lock)
         # Re-read under lock: concurrent clients cannot lose reference entries.
         refs = read_object(path) if path.exists() else {**identity, "revisions": {}}
         _check_reference_target(refs, identity)
@@ -446,7 +450,7 @@ def run_doctor(project_root: str) -> dict:
                 revisions = list(refs["revisions"].values())
                 if any(not isinstance(revision, dict) for revision in revisions):
                     raise CommandError("invalid revision references")
-                entries = [entry for revision in revisions for entry in revision.values()]
+                entries = [entry for revision in revision.values() for entry in revision.values()]
                 if any(not isinstance(entry, dict) for entry in entries):
                     raise CommandError("invalid card references")
                 task_id = next((entry["task_id"] for entry in entries), None)
@@ -487,7 +491,7 @@ def run_import_preview(project_root: str, project: str) -> dict:
                 "history_notice": "Historical completion is not fresh verification."}
     identities = {}
     for task in tasks:
-        if not isinstance(task, dict) or not isinstance(task.get("id"), (str, int)) or isinstance(task["id"], bool):
+        if not isinstance(task.get("id"), (str, int)) or isinstance(task.get("id"), bool):
             raise CommandError("legacy task has an invalid foreign id")
         foreign = str(task["id"])
         if foreign in identities:
